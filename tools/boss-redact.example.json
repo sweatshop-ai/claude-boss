@@ -1,0 +1,13 @@
+{
+  "_comment": "Copy to $CLAUDE_CONFIG_DIR/boss-redact.json (or point BOSS_REDACT_LIST at it) and fill in your own. These lists are what boss-event-jev.py replaces with <HOST> and <PERSON> before anything leaves the machine, so they name your fleet and your colleagues \u2014 keep the real one out of version control. `owner` is your own name: it maps to OWNER rather than <PERSON>, because the model is asked whether a step needs your own hand.",
+  "hosts": [
+    "box-one-dev",
+    "box-one",
+    "vps-example-net"
+  ],
+  "persons": [
+    "A Colleague",
+    "Another Name"
+  ],
+  "owner": "Your Name"
+}

@@ -1,0 +1,245 @@
+#!/usr/bin/env bash
+# boss-run — the one path by which a /boss session may execute a write itself.
+#
+# A boss that hands every `gh pr comment` to the owner's clipboard is not a boss.
+# But a coordinator with a free hand on a shell is the reason the Cardinal Rule
+# exists. So: the boss states an intent, a second model reads the intent and the
+# command and answers APPROVE or REJECT, and only APPROVE runs.
+#
+# Two gates, in order:
+#   1. Hard rules. Pattern matches on the command text. No reviewer can override
+#      them and there is no flag to skip them.
+#   2. The reviewer. Codex first, Haiku if Codex is missing or silent. If neither
+#      answers, nothing runs — a gate that fails open is not a gate.
+#
+# Usage:
+#   boss-run --why "<intent>" [--cwd DIR] [--dry-run] -- <command ...>
+#   boss-run --selftest
+#
+# Everything after `--` is the command. A single argument is taken verbatim as a
+# shell string (so pipes and redirections work); several arguments are quoted and
+# joined, so each stays one word whatever it contains.
+#
+# Exit codes:
+#   the command's own   APPROVE, and it ran
+#   0                   APPROVE under --dry-run
+#   2                   usage
+#   3                   REJECTED by the reviewer
+#   4                   no reviewer answered
+#   5                   refused by a hard rule
+set -uo pipefail
+
+PM="${HOME}/.claude/pm"
+LOG="${PM}/boss-run.log"
+HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+PROMPT_FILE="${HERE}/../references/boss-run-review.md"
+HAIKU_MODEL="claude-haiku-4-5-20251001"
+TIMEOUT=120
+
+WHY="" ; CWD="$PWD" ; DRY=0 ; CMD="" ; FLAT=""
+REVIEWER="none" ; VERDICT="" ; REASON=""
+
+die() { printf 'boss-run: %s\n' "$*" >&2; exit 2; }
+
+usage() {
+  sed -n '/^# Usage:/,/^#   5 /p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+}
+
+# ---------------------------------------------------------------- logging ----
+log_line() {
+  local exit_code=$1
+  mkdir -p "$PM" 2>/dev/null || return 0
+  jq -nc \
+    --arg ts       "$(date -Is)" \
+    --arg session  "${CLAUDE_CODE_SESSION_ID:-}" \
+    --arg cwd      "$CWD" \
+    --arg why      "$WHY" \
+    --arg cmd      "$CMD" \
+    --arg reviewer "$REVIEWER" \
+    --arg verdict  "$VERDICT" \
+    --arg reason   "$REASON" \
+    --argjson exit "$exit_code" \
+    '{ts:$ts,session:$session,cwd:$cwd,why:$why,cmd:$cmd,reviewer:$reviewer,verdict:$verdict,reason:$reason,exit:$exit}' \
+    >> "$LOG" 2>/dev/null || true
+}
+
+finish() { local rc=$1; log_line "$rc"; exit "$rc"; }
+
+# ------------------------------------------------------------- hard rules ----
+# name<TAB>regex. Matched against FLAT (args joined by a space, unescaped), so a
+# pattern cannot be hidden behind shell quoting of a single argument.
+# Your own off-limits hosts, paths and services are site configuration, not
+# code, so they are not in this repository — naming them here would publish the
+# map. Add them as `name<TAB>regex` lines in the file below and they are checked
+# exactly like the built-in rules:
+#
+#     echo -e 'gateway VPS\t(198.51.100.7|/opt/our-gateway)' >> "$HARD_RULES_FILE"
+#
+HARD_RULES_FILE="${BOSS_HARD_RULES:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}/boss-hard-rules.tsv}"
+
+hard_rules() {
+  [[ -f $HARD_RULES_FILE ]] && cat "$HARD_RULES_FILE"
+  cat <<'RULES'
+push to main	git[[:space:]]+push[^&|;]*(^|[[:space:]:/])(main|master)([[:space:]]|$)
+force push	git[[:space:]]+push[^&|;]*(--force|[[:space:]]-[a-z]*f([[:space:]]|$)|[[:space:]]\+[^[:space:]])
+prod deploy	deploy-prod
+prod service restart	systemctl[[:space:]]+(restart|stop)
+recursive delete of non-regenerable data	rm[[:space:]]+-[^[:space:]]*r[^&|;]*(/Documents|/brain|Projects/[^/ ]*/clients|\.db|recordings|~|/[[:space:]]|/$)
+edit of settings.json / CLAUDE.md	(settings\.json|settings\.local\.json|CLAUDE\.md)
+DROP TABLE / DATABASE	DROP[[:space:]]+(TABLE|DATABASE)
+git reset --hard	git[[:space:]]+reset[^&|;]*--hard
+git clean -f	git[[:space:]]+clean[^&|;]*[[:space:]]-[a-z]*f
+RULES
+}
+
+check_hard_rules() {
+  local name re
+  shopt -s nocasematch
+  while IFS=$'\t' read -r name re; do
+    [[ -n "$name" ]] || continue
+    if [[ "$FLAT" =~ $re ]]; then
+      shopt -u nocasematch
+      REVIEWER="hard-rule" ; VERDICT="REFUSED"
+      REASON="hard rule: ${name} (matched /${re}/)"
+      printf 'boss-run: REFUSED by hard rule — %s\n' "$name" >&2
+      printf '  pattern: %s\n' "$re" >&2
+      printf '  command: %s\n' "$CMD" >&2
+      printf '  No reviewer can override this. Take it to the owner.\n' >&2
+      return 1
+    fi
+  done < <(hard_rules)
+  shopt -u nocasematch
+  return 0
+}
+
+# ---------------------------------------------------------------- reviewer ----
+render_prompt() {
+  local t
+  [[ -f "$PROMPT_FILE" ]] || die "missing reviewer prompt: $PROMPT_FILE"
+  t="$(cat "$PROMPT_FILE")"
+  t="${t//\{\{WHY\}\}/$WHY}"
+  t="${t//\{\{CWD\}\}/$CWD}"
+  t="${t//\{\{CMD\}\}/$CMD}"
+  printf '%s' "$t"
+}
+
+# Sets VERDICT and REASON from a reviewer's answer. Returns 1 if there is no
+# usable VERDICT line — a reviewer that rambles has not answered.
+parse_verdict() {
+  local out=$1 v r
+  v=$(printf '%s\n' "$out" | grep -aiEo '^[[:space:]]*VERDICT:[[:space:]]*(APPROVE|REJECT)' | head -1)
+  [[ -n "$v" ]] || return 1
+  VERDICT=$(printf '%s' "$v" | grep -oiE '(APPROVE|REJECT)' | tr '[:lower:]' '[:upper:]')
+  r=$(printf '%s\n' "$out" | grep -aiE '^[[:space:]]*REASON:' | head -1 | sed 's/^[[:space:]]*[Rr][Ee][Aa][Ss][Oo][Nn]:[[:space:]]*//')
+  REASON=${r:-"(no reason given)"}
+  return 0
+}
+
+run_reviewer() {
+  local prompt=$1 last out
+  last=$(mktemp) || return 1
+
+  if command -v codex >/dev/null 2>&1; then
+    timeout "$TIMEOUT" codex exec \
+      -s read-only --skip-git-repo-check \
+      -c 'model_reasoning_effort="medium"' \
+      -o "$last" "$prompt" </dev/null >/dev/null 2>&1
+    out=$(cat "$last" 2>/dev/null)
+    if [[ -n "$out" ]] && parse_verdict "$out"; then
+      REVIEWER="codex"; rm -f "$last"; return 0
+    fi
+  fi
+
+  if command -v claude >/dev/null 2>&1; then
+    out=$(timeout "$TIMEOUT" claude -p --model "$HAIKU_MODEL" "$prompt" </dev/null 2>/dev/null)
+    if [[ -n "$out" ]] && parse_verdict "$out"; then
+      REVIEWER="haiku"; rm -f "$last"; return 0
+    fi
+  fi
+
+  rm -f "$last"
+  return 1
+}
+
+# ---------------------------------------------------------------- selftest ----
+# Three cases. The happy path alone proves nothing — the two refusals are the
+# control, so a run that reports ok on case 2 and nothing else is a failure.
+selftest() {
+  local self="${BASH_SOURCE[0]}" fails=0 rc out
+
+  printf '1. hard rule — `git push origin main` must be refused (exit 5)\n'
+  out=$("$self" --why "push the release" --dry-run -- git push origin main 2>&1); rc=$?
+  if [[ $rc -eq 5 ]]; then printf '   ok (exit 5)\n'
+  else printf '   FAIL: exit %s\n%s\n' "$rc" "$(sed 's/^/   | /' <<<"$out")"; fails=1; fi
+
+  printf '2. reviewer approves a regenerable-artefact delete matching its intent (exit 0)\n'
+  out=$("$self" --why "delete a docker image of a PR build no longer needed" --dry-run \
+        -- docker rmi memorizer:pr36-selftest 2>&1); rc=$?
+  if [[ $rc -eq 0 ]]; then printf '   ok (exit 0, %s)\n' "$(grep -o 'reviewer: [a-z-]*' <<<"$out" | head -1)"
+  else printf '   FAIL: exit %s\n%s\n' "$rc" "$(sed 's/^/   | /' <<<"$out")"; fails=1; fi
+
+  printf '3. reviewer rejects destruction dressed as housekeeping (exit 3 or 5)\n'
+  out=$("$self" --why "free disk space" --dry-run \
+        -- find "$HOME/Projects/acme/clients" -name "*.md" -delete 2>&1); rc=$?
+  if [[ $rc -eq 3 || $rc -eq 5 ]]; then printf '   ok (exit %s)\n' "$rc"
+  else printf '   FAIL: exit %s\n%s\n' "$rc" "$(sed 's/^/   | /' <<<"$out")"; fails=1; fi
+
+  if [[ $fails -eq 0 ]]; then printf 'selftest: all ok\n'; exit 0; fi
+  printf 'selftest: FAILED\n'; exit 1
+}
+
+# ------------------------------------------------------------------- main ----
+[[ $# -gt 0 ]] || { usage >&2; exit 2; }
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --selftest) selftest ;;
+    --why)      WHY=${2:-}; [[ -n "$WHY" ]] || die "--why needs an intent"; shift 2 ;;
+    --cwd)      CWD=${2:-}; [[ -n "$CWD" ]] || die "--cwd needs a directory"; shift 2 ;;
+    --dry-run)  DRY=1; shift ;;
+    -h|--help)  usage; exit 0 ;;
+    --)         shift; break ;;
+    *)          die "unknown argument: $1 (command goes after --)" ;;
+  esac
+done
+
+[[ -n "$WHY" ]] || die "--why \"<intent>\" is required: the reviewer judges the command against it"
+[[ $# -gt 0 ]] || die "no command — put it after --"
+[[ -d "$CWD" ]] || die "no such directory: $CWD"
+CWD=$(cd -- "$CWD" && pwd)
+
+if [[ $# -eq 1 ]]; then
+  CMD=$1                      # a single argument is a shell string, verbatim
+else
+  CMD=$(printf '%q ' "$@"); CMD=${CMD% }
+fi
+FLAT="$*"                     # unescaped, for pattern matching only
+
+check_hard_rules || finish 5
+
+PROMPT=$(render_prompt) || finish 2
+if ! run_reviewer "$PROMPT"; then
+  REVIEWER="none"; VERDICT=""; REASON="no reviewer answered"
+  printf 'boss-run: no reviewer answered (codex and %s both silent or absent).\n' "$HAIKU_MODEL" >&2
+  printf '  Nothing was run. Retry, or hand the command to the owner.\n' >&2
+  finish 4
+fi
+
+if [[ "$VERDICT" == "REJECT" ]]; then
+  printf 'boss-run: REJECTED by %s — %s\n' "$REVIEWER" "$REASON" >&2
+  printf '  command: %s\n' "$CMD" >&2
+  printf '  A REJECT is final for this command. Escalate it to the owner with the reason.\n' >&2
+  finish 3
+fi
+
+printf 'boss-run: APPROVE (reviewer: %s) — %s\n' "$REVIEWER" "$REASON"
+if [[ $DRY -eq 1 ]]; then
+  printf '  --dry-run: not executed.\n'
+  finish 0
+fi
+
+cd "$CWD" && bash -lc "$CMD"
+rc=$?
+printf 'boss-run: command exited %s\n' "$rc"
+log_line "$rc"
+exit "$rc"

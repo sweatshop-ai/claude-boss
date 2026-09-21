@@ -1,0 +1,12 @@
+[Unit]
+Description=Post due boss escalation rungs from tracker marker lines
+Documentation=file://@ROOT@/routines/boss-ladder.md
+
+[Service]
+Type=oneshot
+ExecStart=@ROOT@/routines/boss-ladder.sh
+StandardOutput=append:@CFG@/routines/logs/boss-ladder.log
+StandardError=append:@CFG@/routines/logs/boss-ladder.log
+# Local file reads plus at most one Slack post per marker. The body caps the
+# core at 120 s itself; this is the backstop for a wedged interpreter.
+TimeoutStartSec=180

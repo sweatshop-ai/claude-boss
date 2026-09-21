@@ -1,0 +1,295 @@
+#!/usr/bin/env bash
+# boss-goal — the standing objective of a track, as a file the boss cannot lose.
+#
+# The tracker answers "what is happening". This answers "what am I for, and how
+# will I know I am finished". They are different questions and they were being
+# kept in the same place: until now the mission was free text jammed into the
+# `<boss-name>` argument of `boss-tracker init`, so it had no fields, no
+# definition of done, and nothing could read it.
+#
+#   ~/.claude/pm/<track>.goal.md
+#
+# Two things read this file besides the boss:
+#   boss-pulse.py    after every turn: objective still OPEN + a worker idle
+#                    => the turn continues instead of ending
+#   boss-compact.py  after an autocompact: injected verbatim into the fresh
+#                    context, so the objective survives a summary that drops it
+#
+# It is capped hard (4 KB) because it is re-read constantly. History belongs in
+# the tracker; deliberation belongs in the tracker; this file holds only the
+# outcome, the test for it, and what comes next.
+#
+# Usage:
+#   boss-goal init <track>                 write the template (refuses to clobber)
+#   boss-goal set <track>                  replace the body from stdin
+#   boss-goal next <track>                 replace just the priority list, stdin
+#   boss-goal show <track>
+#   boss-goal check <track>                is it actually usable by the pulse?
+#   boss-goal verify <track> [--tick]      run the checkable criteria against GitHub
+#   boss-goal review <track>               a second model reads it for what is missing
+#   boss-goal status <track> open|paused|met [note]
+#   boss-goal list
+set -euo pipefail
+PM="${HOME}/.claude/pm"
+CAP=4096
+mkdir -p "$PM"
+
+die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
+goal() { printf '%s/%s.goal.md' "$PM" "$1"; }
+
+need() {
+  local t=${1:-}; [[ -n "$t" ]] || die "which track? (boss-goal list)"
+  local f; f=$(goal "$t")
+  [[ -f "$f" ]] || die "no objective for '$t' — boss-goal init $t"
+  printf '%s' "$f"
+}
+
+case "${1:-}" in
+init)
+  t=${2:-}; [[ -n "$t" ]] || die "usage: init <track>"
+  f=$(goal "$t")
+  [[ -e "$f" ]] && die "$f exists — read it, do not overwrite it (boss-goal show $t)"
+  cat > "$f" <<'TPL'
+# Objective — TRACK
+_Status: OPEN_
+
+## Outcome
+<REPLACE: one sentence. The single thing that must be true for this track to be
+over. Not a list of activities — the state of the world afterwards.>
+
+## Done when
+Each line is a check somebody else could run. A criterion nobody can test is a
+wish, and the pulse cannot tell you have met it.
+- [ ] <REPLACE: e.g. `gh pr view 36 --json state` says MERGED>
+- [ ] <REPLACE: e.g. the packaging job is green on main>
+
+## Deliverables
+- <REPLACE: artifact, and where it lands>
+
+## Constraints
+- <REPLACE: what this track must not do, beyond the standing non-delegable list>
+
+## Pause when
+- <REPLACE: what genuinely needs the owner and cannot be decided here>
+
+## Next, in priority order
+1. <REPLACE: what to dispatch when a worker frees up>
+2. <REPLACE: and then this>
+TPL
+  sed -i "s/^# Objective — TRACK/# Objective — $t/" "$f"
+  printf 'created %s — fill it in, then: boss-goal check %s\n' "$f" "$t" ;;
+
+set)
+  t=${2:-}; f=$(need "${2:-}")
+  body=$(cat)
+  [[ -n "$body" ]] || die "nothing on stdin"
+  hdr=$(sed -n '1,2p' "$f")
+  printf '%s\n%s\n' "$hdr" "$body" > "$f"
+  sz=$(stat -c%s "$f")
+  (( sz > CAP )) && printf 'WARN: %s B, over the %s B cap — this file is read on every turn.\n' "$sz" "$CAP" >&2
+  printf 'wrote %s (%s B)\n' "$f" "$sz" ;;
+
+next)
+  t=${2:-}; f=$(need "${2:-}")
+  body=$(cat)
+  [[ -n "$body" ]] || die "nothing on stdin"
+  tmp=$(mktemp)
+  awk '/^## Next, in priority order/{exit} {print}' "$f" > "$tmp"
+  printf '## Next, in priority order\n%s\n' "$body" >> "$tmp"
+  mv "$tmp" "$f"
+  printf 'priority list replaced in %s\n' "$f" ;;
+
+show)
+  f=$(need "${2:-}"); cat "$f" ;;
+
+status)
+  t=${2:-}; f=$(need "${2:-}")
+  st=${3:-}; shift 3 2>/dev/null || true
+  note=${*:-}
+  case "$st" in
+    open)   line="_Status: OPEN_" ;;
+    paused) [[ -n "$note" ]] || die "paused needs a reason: boss-goal status $t paused \"<why>\""
+            line="_Status: PAUSED — $note (since $(date +%F\ %H:%M))_" ;;
+    met)    [[ -n "$note" ]] || die "met needs the evidence: boss-goal status $t met \"<what proves it>\""
+            line="_Status: MET $(date +%F) — ${note}_" ;;
+    *) die "usage: status <track> open|paused|met [note]" ;;
+  esac
+  sed -i "2s@.*@$line@" "$f"
+  printf '%s\n' "$line"
+  [[ "$st" == open ]] || printf '(the pulse is now off for %s)\n' "$t" ;;
+
+check)
+  t=${2:-}; f=$(need "${2:-}")
+  rc=0
+  sz=$(stat -c%s "$f")
+  if grep -q '<REPLACE' "$f"; then
+    printf 'UNUSABLE: still holds template placeholders — the pulse will inject them verbatim.\n'; rc=1
+  fi
+  crit=$(grep -c '^- \[[ x]\]' "$f" || true)
+  if (( crit < 1 )); then
+    printf 'UNUSABLE: no "Done when" criteria. An objective with no test never completes.\n'; rc=1
+  fi
+  # A criterion nobody can run is the failure mode the /goal literature names
+  # first: the judge has nothing to judge against. Warn, do not block.
+  while IFS= read -r c; do
+    grep -qE '`|https?://|#[0-9]+|\.(py|sh|md|ts|js|yml)' <<<"$c" && continue
+    printf 'WEAK: not obviously checkable — %s\n' "${c:0:90}"
+  done < <(grep '^- \[ \]' "$f" || true)
+  nxt=$(awk '/^## Next, in priority order/{f=1;next} f&&/^[0-9]+\./{n++} END{print n+0}' "$f")
+  (( nxt < 1 )) && printf 'WARN: nothing under "Next, in priority order" — an idle worker has nowhere to go.\n'
+  (( sz > CAP )) && { printf 'OVER CAP: %s B > %s B. Move the reasoning to the tracker.\n' "$sz" "$CAP"; rc=1; }
+  st=$(sed -n '2s/_Status: \(.*\)_/\1/p' "$f")
+  # An objective nothing reads is a note to self. Say plainly whether the pulse
+  # that reads it is armed, rather than letting the skill assume it.
+  pulse="NOT ARMED — add boss-pulse.py as a Stop hook in ~/.claude/settings.json"
+  if [[ -f "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)/boss-pulse.py" ]] \
+     && grep -q 'boss-pulse.py' "${HOME}/.claude/settings.json" 2>/dev/null; then
+    pulse="armed"
+  fi
+  printf 'status: %s | %s B | %s criteria | %s queued | pulse: %s\n' \
+    "${st:-?}" "$sz" "$crit" "$nxt" "$pulse"
+  exit $rc ;;
+
+verify)
+  # Turn the checklist from self-assessment into measurement. A criterion that
+  # carries a GitHub anchor is a query, not an opinion; everything else is left
+  # to a human and says so. Nothing here executes text out of the file — the
+  # objective is a file a worker can write to, so a backticked command in it is
+  # documentation, never something this runs.
+  #
+  #   - [ ] gh:owner/repo#39 merged
+  #   - [ ] gh:owner/repo#35 closed
+  #   - [ ] checks:owner/repo@main green
+  t=${2:-}; f=$(need "${2:-}")
+  tick=0; [[ "${3:-}" == "--tick" ]] && tick=1
+  command -v gh >/dev/null || die "gh is not installed — verify needs it"
+  met=0; unmet=0; human=0; unknown=0; regressed=0
+
+  resolve() {   # prints "VERDICT<TAB>detail"
+    local line=$1 repo num want ref state merged js n bad
+    if [[ $line =~ gh:([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)#([0-9]+)[[:space:]]+(merged|closed|open) ]]; then
+      repo=${BASH_REMATCH[1]}; num=${BASH_REMATCH[2]}; want=${BASH_REMATCH[3]}
+      if [[ $want == merged ]]; then
+        if ! merged=$(gh api "repos/$repo/pulls/$num" -q '.merged' 2>/dev/null); then
+          printf 'UNKNOWN\tno such PR, or gh failed: %s#%s\n' "$repo" "$num"; return 0
+        fi
+        if [[ $merged == true ]]; then printf 'MET\tmerged\n'; else printf 'NOT MET\tstill open\n'; fi
+        return 0
+      fi
+      if ! state=$(gh api "repos/$repo/issues/$num" -q '.state' 2>/dev/null); then
+        printf 'UNKNOWN\tno such issue, or gh failed: %s#%s\n' "$repo" "$num"; return 0
+      fi
+      if [[ $state == "$want" ]]; then printf 'MET\t%s\n' "$state"; else printf 'NOT MET\tstate=%s\n' "$state"; fi
+      return 0
+    fi
+    if [[ $line =~ checks:([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)@([A-Za-z0-9_./-]+)[[:space:]]+green ]]; then
+      repo=${BASH_REMATCH[1]}; ref=${BASH_REMATCH[2]}
+      if ! js=$(gh api "repos/$repo/commits/$ref/check-runs" 2>/dev/null); then
+        printf 'UNKNOWN\tgh failed on %s@%s\n' "$repo" "$ref"; return 0
+      fi
+      n=$(jq -r '.total_count // 0' <<<"$js")
+      # Zero checks is not success, it means nothing ran. That has bitten before.
+      if (( n == 0 )); then printf 'UNKNOWN\t0 checks ran — that is not green\n'; return 0; fi
+      bad=$(jq -r '[.check_runs[] | select(.conclusion != "success" and .conclusion != "skipped" and .conclusion != "neutral")] | length' <<<"$js")
+      if (( bad == 0 )); then printf 'MET\t%s checks, all green\n' "$n"
+      else printf 'NOT MET\t%s of %s not green\n' "$bad" "$n"; fi
+      return 0
+    fi
+    printf 'HUMAN\tno machine anchor — someone has to look\n'
+  }
+
+  ticked=()
+  while IFS= read -r line; do
+    was_ticked=0; [[ $line == "- [x]"* ]] && was_ticked=1
+    body=${line:6}
+    r=$(resolve "$line")
+    verdict=${r%%$'\t'*}; detail=${r#*$'\t'}
+    case "$verdict" in
+      MET)
+        printf 'MET       %s  (%s)\n' "${body:0:80}" "$detail"; met=$((met+1))
+        (( was_ticked )) || ticked+=("$body") ;;
+      "NOT MET")
+        if (( was_ticked )); then
+          printf 'REGRESSED %s  (%s) — it was ticked and no longer holds\n' "${body:0:80}" "$detail"
+          regressed=$((regressed+1))
+        else
+          printf 'NOT MET   %s  (%s)\n' "${body:0:80}" "$detail"; unmet=$((unmet+1))
+        fi ;;
+      UNKNOWN) printf 'UNKNOWN   %s  (%s)\n' "${body:0:80}" "$detail"; unknown=$((unknown+1)) ;;
+      *)       printf 'HUMAN     %s\n' "${body:0:80}"; human=$((human+1)) ;;
+    esac
+  done < <(grep -E '^- \[[ x]\]' "$f" || true)
+
+  # Ticking is a literal-string edit, done in python so no part of the criterion
+  # is ever read as a pattern.
+  if (( tick )) && (( ${#ticked[@]} )); then
+    printf '%s\n' "${ticked[@]}" | python3 -c '
+import sys, pathlib
+f = pathlib.Path(sys.argv[1])
+s = f.read_text(encoding="utf-8")
+n = 0
+for b in sys.stdin.read().splitlines():
+    old = "- [ ] " + b
+    if old in s:
+        s = s.replace(old, "- [x] " + b, 1); n += 1
+f.write_text(s, encoding="utf-8")
+print("ticked %d" % n)' "$f"
+  fi
+
+  printf -- '---\n%s met by query, %s not met, %s unknown, %s need a human' \
+    "$met" "$unmet" "$unknown" "$human"
+  (( regressed )) && printf ', %s REGRESSED' "$regressed"
+  printf '\n'
+  if (( unmet == 0 && unknown == 0 && regressed == 0 && human == 0 && met > 0 )); then
+    printf 'Every criterion is met by query. Close it: boss-goal status %s met "<evidence>"\n' "$t"
+  fi
+  (( regressed )) && exit 1
+  exit 0 ;;
+
+review)
+  # `check` asks whether the objective is well formed. This asks whether it is
+  # the right objective — what a reader who has never seen the track would find
+  # missing. Same two-model path as boss-run: Codex first, Haiku if Codex is
+  # absent or silent. A reviewer that does not answer is not a pass; it says so.
+  t=${2:-}; f=$(need "${2:-}")
+  HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+  tpl="${HERE}/../references/boss-goal-review.md"
+  [[ -f "$tpl" ]] || die "reviewer prompt missing: $tpl"
+  prompt=$(python3 -c '
+import pathlib, sys
+tpl, goal, track = (pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"),
+                    pathlib.Path(sys.argv[2]).read_text(encoding="utf-8"),
+                    sys.argv[3])
+sys.stdout.write(tpl.replace("{{TRACK}}", track).replace("{{GOAL}}", goal))
+' "$tpl" "$f" "$t")
+
+  out=""; who="none"
+  if command -v codex >/dev/null 2>&1; then
+    last=$(mktemp)
+    timeout 120 codex exec -s read-only --skip-git-repo-check \
+      -c 'model_reasoning_effort="medium"' -o "$last" "$prompt" </dev/null >/dev/null 2>&1 || true
+    out=$(cat "$last" 2>/dev/null); rm -f "$last"
+    grep -qiE '^[[:space:]]*VERDICT:[[:space:]]*(COMPLETE|INCOMPLETE)' <<<"$out" && who="codex" || out=""
+  fi
+  if [[ -z "$out" ]] && command -v claude >/dev/null 2>&1; then
+    out=$(timeout 120 claude -p --model claude-haiku-4-5-20251001 "$prompt" </dev/null 2>/dev/null) || true
+    grep -qiE '^[[:space:]]*VERDICT:[[:space:]]*(COMPLETE|INCOMPLETE)' <<<"$out" && who="haiku" || out=""
+  fi
+  if [[ -z "$out" ]]; then
+    printf 'no reviewer answered (codex and haiku both silent or absent).\n'
+    printf 'That is not a pass — read the objective yourself against references/boss-goal-review.md.\n'
+    exit 4
+  fi
+  printf '%s\n' "$out" | grep -iE '^[[:space:]]*(VERDICT|REASON|MISSING):' || printf '%s\n' "$out"
+  printf -- '--- reviewer: %s\n' "$who"
+  grep -qiE '^[[:space:]]*VERDICT:[[:space:]]*INCOMPLETE' <<<"$out" && exit 3
+  exit 0 ;;
+
+list)
+  shopt -s nullglob
+  for f in "$PM"/*.goal.md; do
+    printf '%-28s %s\n' "$(basename "${f%.goal.md}")" "$(sed -n '2s/_Status: \(.*\)_/\1/p' "$f")"
+  done ;;
+
+*) die "usage: boss-goal {init|set|next|show|check|verify|review|status|list} <track>" ;;
+esac
