@@ -15,7 +15,15 @@
 # becomes wallpaper, so `clear` is part of the protocol, not an afterthought.
 set -euo pipefail
 ENVF="${BOSS_SLACK_ENV:-${HOME}/.config/tiroir/slack.env}"
-[[ -f "$ENVF" ]] || { printf 'ERROR: no %s\n' "$ENVF" >&2; exit 1; }
+if [[ ! -f "$ENVF" ]]; then
+  printf 'boss-alert: no credentials file at %s\n' "$ENVF" >&2
+  printf '  It needs SLACK_BOT_TOKEN and SLACK_CHANNEL_ID, one per line:\n' >&2
+  printf '      SLACK_BOT_TOKEN=xoxb-...\n      SLACK_CHANNEL_ID=C0123456789\n' >&2
+  printf '  Put it there, or set BOSS_SLACK_ENV to wherever you keep it.\n' >&2
+  printf '  Without it the boss escalates in text only, which nobody sees if\n' >&2
+  printf '  they have walked away.\n' >&2
+  exit 1
+fi
 set -a; . "$ENVF"; set +a
 : "${SLACK_BOT_TOKEN:?missing in slack.env}" "${SLACK_CHANNEL_ID:?missing in slack.env}"
 
