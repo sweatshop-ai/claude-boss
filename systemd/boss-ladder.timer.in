@@ -1,0 +1,15 @@
+[Unit]
+Description=Run the boss escalation ladder every 5 minutes
+
+[Timer]
+# The first rung is T+5, so a 5-minute tick is the coarsest grid that can still
+# hit it. Off the round minute to stay clear of the other user timers.
+OnCalendar=*-*-* *:00/5:20
+# Persistent only takes effect with OnCalendar. A laptop that slept through a
+# slot runs once on wake — and the core posts one rung per run, so a long sleep
+# catches up a rung at a time instead of firing a burst.
+Persistent=true
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target

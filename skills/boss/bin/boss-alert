@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# boss-alert — escalate a blocker to the owner on Slack #claude-ops.
+#
+# Replaces the raw `set -a; . slack.env; curl -d "$(jq -n ...)"` that the skill
+# used to spell out inline. One named command instead of credential handling in
+# the boss's own context, and the allowlist can permit this without permitting
+# curl in general.
+#
+# Usage:
+#   boss-alert <rung> <text>      rung: 0 | 5 | 15 | 30  (minutes blocked)
+#   boss-alert clear <text>       the blocker cleared — say so and stop
+#
+# A blocker that has held two hours is more urgent than one that has held five
+# minutes, not less. But an alert channel that keeps firing after the fact
+# becomes wallpaper, so `clear` is part of the protocol, not an afterthought.
+set -euo pipefail
+ENVF="${BOSS_SLACK_ENV:-${HOME}/.config/tiroir/slack.env}"
+[[ -f "$ENVF" ]] || { printf 'ERROR: no %s\n' "$ENVF" >&2; exit 1; }
+set -a; . "$ENVF"; set +a
+: "${SLACK_BOT_TOKEN:?missing in slack.env}" "${SLACK_CHANNEL_ID:?missing in slack.env}"
+
+rung=${1:-}; shift || true
+text=${*:-}
+[[ -n "$text" ]] || { printf 'usage: boss-alert {0|5|15|30|clear} <text>\n' >&2; exit 1; }
+
+case "$rung" in
+  0)     icon="🔴" ; pre="blocked" ;;
+  5)     icon="🔴" ; pre="blocked 5 min" ;;
+  15)    icon="🔴" ; pre="blocked 15 min" ;;
+  30|*[0-9]*) icon="🔴" ; pre="blocked ${rung} min" ;;
+  clear) icon="✅" ; pre="cleared" ;;
+  *) printf 'ERROR: rung must be 0|5|15|30|clear\n' >&2; exit 1 ;;
+esac
+
+msg="$icon *$pre* — $text"
+resp=$(curl -sS -X POST https://slack.com/api/chat.postMessage \
+  -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+  -H 'Content-type: application/json' \
+  -d "$(jq -n --arg c "$SLACK_CHANNEL_ID" --arg t "$msg" '{channel:$c,text:$t}')")
+if [[ "$(jq -r '.ok' <<<"$resp")" != "true" ]]; then
+  printf 'ERROR: slack rejected it: %s\n' "$(jq -r '.error // .' <<<"$resp")" >&2
+  exit 1
+fi
+printf 'posted to #claude-ops: %s\n' "$msg"

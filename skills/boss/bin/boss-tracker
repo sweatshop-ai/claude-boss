@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+# boss-tracker — the boss's per-track state, split so the live file stays small.
+#
+# Two files per track:
+#   ~/.claude/pm/<track>.md          live state. Roster, current assignments,
+#                                    open blockers, decisions still in force.
+#                                    Read in full at session start, so it is
+#                                    CAPPED — 139 KB of history was costing
+#                                    ~35k tokens on every turn of the session.
+#   ~/.claude/pm/<track>.archive.md  append-only history. Never read at start.
+#                                    Consulted only when something specific is
+#                                    being looked up.
+#
+# Usage:
+#   boss-tracker init <track> <boss-name>   create the live file with its header
+#   boss-tracker show <track>               print live state (what to read at start)
+#   boss-tracker append <track>             append stdin to live state
+#   boss-tracker archive <track>            move stdin (or --below <marker>) to archive
+#   boss-tracker check <track>              size report + whether a trim is due
+#   boss-tracker list                       every track on this machine
+set -euo pipefail
+PM="${HOME}/.claude/pm"
+CAP=15360          # 15 KB. Past this the live file is carrying history.
+mkdir -p "$PM"
+
+die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
+live() { printf '%s/%s.md' "$PM" "$1"; }
+arch() { printf '%s/%s.archive.md' "$PM" "$1"; }
+
+case "${1:-}" in
+init)
+  t=${2:-}; boss=${3:-unknown}; [[ -n "$t" ]] || die "usage: init <track> <boss-name>"
+  f=$(live "$t")
+  [[ -e "$f" ]] && die "$f exists — read it, do not overwrite it"
+  cat > "$f" <<HDR
+# PM Tracker — $t
+_Boss: $boss, started $(date +%F). If this header names a track that is not
+yours, STOP and ask the owner — do not rewrite this file._
+_Live state only. History lives in $t.archive.md and is not read at session start._
+
+## Roster
+| Name | Pane | Project | Branch | Current task |
+|---|---|---|---|---|
+
+## Open blockers
+
+## Pending / next up
+
+## Decisions in force
+HDR
+  printf 'created %s\n' "$f" ;;
+
+show)
+  t=${2:-}; [[ -n "$t" ]] || die "usage: show <track>"
+  f=$(live "$t"); [[ -f "$f" ]] || die "no such track: $t (boss-tracker list)"
+  cat "$f"
+  sz=$(stat -c%s "$f")
+  if (( sz > CAP )); then
+    printf '\n<!-- %s is %s B, over the %s B cap. Archive resolved items: boss-tracker archive %s -->\n' \
+      "$(basename "$f")" "$sz" "$CAP" "$t" >&2
+  fi ;;
+
+append)
+  t=${2:-}; [[ -n "$t" ]] || die "usage: append <track>  (body on stdin)"
+  f=$(live "$t"); [[ -f "$f" ]] || die "no such track: $t"
+  cat >> "$f"
+  printf 'appended to %s (%s B)\n' "$f" "$(stat -c%s "$f")" ;;
+
+archive)
+  t=${2:-}; [[ -n "$t" ]] || die "usage: archive <track>  (body on stdin)"
+  a=$(arch "$t")
+  { printf '\n<!-- archived %s -->\n' "$(date -Is)"; cat; } >> "$a"
+  printf 'archived into %s (%s B)\n' "$a" "$(stat -c%s "$a")" ;;
+
+check)
+  t=${2:-}; [[ -n "$t" ]] || die "usage: check <track>"
+  f=$(live "$t"); a=$(arch "$t")
+  ls=$( [[ -f "$f" ]] && stat -c%s "$f" || echo 0 )
+  as=$( [[ -f "$a" ]] && stat -c%s "$a" || echo 0 )
+  printf 'live    %8s B  %s\n' "$ls" "$f"
+  printf 'archive %8s B  %s\n' "$as" "$a"
+  if (( ls > CAP )); then
+    printf 'OVER CAP by %s B — roughly %sk tokens read on every turn.\n' \
+      "$((ls - CAP))" "$(( (ls - CAP) / 4000 ))"
+    exit 1
+  fi
+  printf 'within cap (%s B)\n' "$CAP" ;;
+
+list)
+  for f in "$PM"/*.md; do
+    [[ -f "$f" ]] || continue
+    case "$f" in *.archive.md) continue ;; esac
+    printf '%-28s %8s B  %s\n' "$(basename "${f%.md}")" "$(stat -c%s "$f")" \
+      "$(sed -n '2s/_Boss: //p' "$f" | cut -c1-50)"
+  done ;;
+
+*) die "usage: boss-tracker {init|show|append|archive|check|list} <track>" ;;
+esac

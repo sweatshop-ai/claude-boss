@@ -1,0 +1,25 @@
+{
+  "name": "claude-boss",
+  "displayName": "Claude Boss",
+  "version": "0.1.0",
+  "description": "Turns one Claude Code session into a coordinator for the others: it dispatches work to worker sessions, keeps a tracker on disk, escalates a blocker on a timed ladder, and asks you exactly one question when it needs you. Hooks keep it honest — it is nudged when a worker goes idle, pushed to ask rather than go quiet when something is blocked, and reminded when it starts implementing instead of delegating.",
+  "author": {
+    "name": "Thierry De Marre",
+    "url": "https://github.com/sweatshop-ai"
+  },
+  "homepage": "https://github.com/sweatshop-ai/claude-boss",
+  "repository": "https://github.com/sweatshop-ai/claude-boss",
+  "license": "MIT",
+  "keywords": [
+    "multi-agent",
+    "orchestration",
+    "coordination",
+    "tmux",
+    "sessions",
+    "escalation"
+  ],
+  "skills": [
+    "./skills/boss",
+    "./skills/team"
+  ]
+}

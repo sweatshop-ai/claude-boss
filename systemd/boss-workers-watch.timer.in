@@ -1,0 +1,12 @@
+[Unit]
+Description=Run the Claude boss/worker session watchdog every minute
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+# Tight accuracy: the alert thresholds are counted in consecutive runs, so the
+# runs must actually be ~1 minute apart.
+AccuracySec=15s
+
+[Install]
+WantedBy=timers.target

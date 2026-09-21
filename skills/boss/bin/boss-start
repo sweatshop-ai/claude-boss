@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# boss-start — launch a /boss session with the settings a boss needs.
+#
+# Two things a boss cannot set for itself once it is running:
+#
+#   --model fable          The boss's job is judgment: reading a worker's report
+#                          for the defect it does not mention, reviewing a plan,
+#                          deciding who gets what. That is the "full model" column
+#                          in references/models.md. Workers stay on Opus; see
+#                          boss-lifecycle.sh spawn.
+#
+#   --autocompact 450k     A boss compacts, it does not clear. Its durable state
+#                          is on disk by construction (the tracker), so a
+#                          compaction costs it little, while a worker holds
+#                          probe scripts and half-formed diagnoses in its head
+#                          and gets a handoff + restart instead. 450k sits inside
+#                          the 400–500k band the skill uses for workers and
+#                          below the 500k CTX-RESTART line, so a boss never
+#                          shows up on its own list as overdue. A session cannot
+#                          compact itself on demand (there is no programmatic
+#                          /compact) — the threshold is the whole lever, and it
+#                          is set here or nowhere.
+#
+# Global settings would do it too (autoCompactWindow, model), but they would
+# apply to every worker as well, and for workers both are wrong.
+#
+# Usage:
+#   boss-start [track] [extra claude args...]
+#
+# Must run inside tmux: a boss started outside tmux cannot spawn workers.
+set -euo pipefail
+
+MODEL="${BOSS_MODEL:-fable}"
+AUTOCOMPACT="${BOSS_AUTOCOMPACT:-450k}"
+# xhigh: the boss's output is a judgement and its input is 97% cache reads, so
+# deeper thinking is the one place extra tokens buy quality at almost no cost.
+EFFORT="${BOSS_EFFORT:-xhigh}"
+# Overload or outage on the primary must not silence the boss (P12: silence
+# after a blocker is a bug). Opus is the same tier; the switch lasts one turn
+# and Claude Code prints a notice when it happens.
+FALLBACK="${BOSS_FALLBACK:-opus}"
+
+if [[ -z "${TMUX:-}" ]]; then
+  printf 'boss-start: not inside tmux. A boss outside tmux can only adopt, never spawn.\n' >&2
+  printf '  Open a tmux pane first, then run boss-start again.\n' >&2
+  exit 1
+fi
+
+track=""
+if [[ $# -gt 0 && "$1" != -* ]]; then track=$1; shift; fi
+
+printf 'boss-start: model=%s effort=%s autocompact=%s fallback=%s%s\n' \
+  "$MODEL" "$EFFORT" "$AUTOCOMPACT" "$FALLBACK" "${track:+ track=$track}" >&2
+printf '  after it opens, type: /boss%s\n' "${track:+ monitor}" >&2
+
+exec claude --model "$MODEL" --effort "$EFFORT" --autocompact "$AUTOCOMPACT" \
+  --fallback-model "$FALLBACK" "$@"

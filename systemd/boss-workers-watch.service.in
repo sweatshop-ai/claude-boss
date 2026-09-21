@@ -1,0 +1,10 @@
+[Unit]
+Description=Watchdog for Claude boss/worker tmux sessions (API errors, frozen panes, unanswered prompts)
+Documentation=file://@ROOT@/routines/boss-workers-watch.md
+
+[Service]
+Type=oneshot
+ExecStart=@ROOT@/routines/boss-workers-watch.sh
+# The check is a handful of tmux commands and at most one curl; anything
+# longer is itself stuck, and a watchdog that piles up runs is its own incident.
+TimeoutStartSec=60
