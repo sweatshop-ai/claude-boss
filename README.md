@@ -58,7 +58,10 @@ Everything else is optional and degrades quietly:
 
 cc-agent-names is **not** a dependency. Claude Code writes the session registry
 and names sessions itself; the plugin swaps a machine name for a human one. A
-roster of eight just reads better.
+roster of eight just reads better. With it installed, a name the boss gives a
+worker (`spawn <dir> <name>`, `claim <pane> <name>`) goes through its
+`agent-name set` and survives the next prompt and a resume; without it the
+name is written straight into the session's peer file.
 
 Two more files are yours and deliberately not in this repo, because putting them
 here would publish what they exist to protect:
