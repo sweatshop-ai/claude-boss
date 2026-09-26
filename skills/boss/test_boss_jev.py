@@ -1163,6 +1163,51 @@ class PanesState(unittest.TestCase):
             kid.wait()
             shutil.rmtree(tmp)
 
+    def set_name(self, with_agent_name):
+        """Run --set-name for pane %7 against a live peer; returns (peer name, agent-name calls)."""
+        tmp = Path(tempfile.mkdtemp())
+        kid = subprocess.Popen(["sleep", "30"])
+        old_path, old_argv = os.environ.get("PATH", ""), sys.argv
+        try:
+            (tmp / "sessions").mkdir()
+            stat = Path("/proc/%d/stat" % kid.pid).read_text()
+            (tmp / "sessions" / ("%d.json" % kid.pid)).write_text(json.dumps(
+                {"pid": kid.pid, "sessionId": "s1", "cwd": str(tmp), "name": "derived",
+                 "nameSource": "derived", "procStart": stat[stat.rindex(")") + 2:].split()[19]}))
+            bindir = tmp / "bin"
+            bindir.mkdir()
+            calls = tmp / "calls"
+            if with_agent_name:
+                fake = bindir / "agent-name"
+                fake.write_text("#!/bin/sh\necho \"$@\" >> %s\necho \"$3\"\n" % calls)
+                fake.chmod(0o755)
+            os.environ["PATH"] = str(bindir) + os.pathsep + "/usr/bin:/bin"
+            bp = self.load_panes(tmp)
+            bp.panes = lambda: [("%7", kid.pid)]
+            import io, contextlib
+            with contextlib.redirect_stdout(io.StringIO()):
+                sys.argv = ["boss-panes.py", "--set-name", "%7", "reviewer-1"]
+                bp.main()
+            name = json.loads((tmp / "sessions" / ("%d.json" % kid.pid)).read_text())["name"]
+            return name, calls.read_text().split("\n")[0] if calls.exists() else None
+        finally:
+            os.environ["PATH"], sys.argv = old_path, old_argv
+            kid.kill()
+            kid.wait()
+            shutil.rmtree(tmp)
+
+    def test_set_name_goes_through_agent_name_when_it_is_installed(self):
+        # cc-agent-names keeps an assigned name across the next prompt and a
+        # resume only when it is told; a direct write is undone by its hook.
+        name, call = self.set_name(with_agent_name=True)
+        self.assertEqual(call, "set s1 reviewer-1")
+        self.assertEqual(name, "derived")              # the fake wrote nothing itself
+
+    def test_set_name_writes_the_peer_file_without_agent_names(self):
+        name, call = self.set_name(with_agent_name=False)
+        self.assertIsNone(call)
+        self.assertEqual(name, "reviewer-1")
+
     def test_last_conversation_uuid(self):
         spec = importlib.util.spec_from_file_location("bp", str(HERE / "boss-panes.py"))
         bp = importlib.util.module_from_spec(spec)
