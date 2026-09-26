@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.2.0 — 2026-09-26
+
+The boss reads Claude Code's session registry through one module, shared with
+cc-agent-names and agentview, and agrees with them on which sessions are alive.
+
+- **A live session is one rule everywhere.** Its pid exists with the start
+  time the peer file records (`procStart`), it is not a zombie, and a terminal
+  session still has its terminal. boss-pulse and boss-panes used "`/proc/<pid>`
+  exists", which a reused pid or an orphaned worker passes; boss-reap used
+  "the peer file exists", so a leftover file kept a dead boss's marker forever.
+- **boss-reap sweeps markers whose session has gone**, even when Claude Code
+  left the peer file behind.
+- **A worker whose cwd moved has its transcript found**, so its context and
+  cost no longer show as 0.
+- `skills/boss/registry.py` is vendored from cc-agent-names
+  (`scripts/registry.py`); `scripts/vendor-registry` refreshes it and
+  `test_registry_sync.py` fails when it drifts.
+
 ## 0.1.0 — 2026-09-20
 
 First release as a plugin. The boss had lived in `~/.claude/skills/boss/` with
