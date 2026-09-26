@@ -31,9 +31,13 @@ class ReapCase(unittest.TestCase):
         self.sessions = self.tmp / "sessions"
         for d in (self.markers, self.pulse, self.sessions):
             d.mkdir(parents=True)
-        # one live session, one long gone
-        (self.sessions / (LIVE + ".json")).write_text(
-            json.dumps({"sessionId": LIVE, "pid": os.getpid(), "status": "idle"}))
+        # one live session -- this test process, start time and all -- and one
+        # long gone
+        stat = Path("/proc/%d/stat" % os.getpid()).read_text()
+        (self.sessions / ("%d.json" % os.getpid())).write_text(json.dumps(
+            {"sessionId": LIVE, "pid": os.getpid(), "status": "idle",
+             "entrypoint": "sdk-cli",
+             "procStart": stat[stat.rindex(")") + 2:].split()[19]}))
         for sid in (LIVE, DEAD):
             (self.markers / sid).write_text("demo\n")
             for name in ("%s.json", "%s.guard.json", "jev-%s.json", "jev-%s.lock"):
@@ -89,6 +93,15 @@ class Sweep(ReapCase):
     def test_sweep_keeps_the_live_one(self):
         self.run_reap("--sweep")
         self.assertEqual(4, len([n for n in self.names(self.pulse) if LIVE in n]))
+
+    def test_sweep_reaps_a_session_whose_file_outlived_it(self):
+        # Claude Code does not always remove the peer file. A file whose
+        # process is gone is no session.
+        (self.sessions / "4000000.json").write_text(json.dumps(
+            {"sessionId": DEAD, "pid": 4000000, "status": "idle", "procStart": "1"}))
+        self.run_reap("--sweep")
+        self.assertFalse((self.markers / DEAD).exists())
+        self.assertTrue((self.markers / LIVE).exists())
 
     def test_sweep_never_touches_jev_mode(self):
         """Deleting this silently re-arms jev. It has no session id in its name."""

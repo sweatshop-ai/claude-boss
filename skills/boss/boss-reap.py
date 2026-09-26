@@ -34,11 +34,13 @@ import re
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import registry  # noqa: E402
+
 CFG = Path(os.environ.get("CLAUDE_CONFIG_DIR", str(Path.home() / ".claude")))
 PM = CFG / "pm"
 MARKERS = PM / ".boss-sessions"
 STATE = PM / ".pulse"
-SESSIONS = CFG / "sessions"
 
 UUID = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}"
                   r"-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
@@ -46,22 +48,14 @@ GRACE_S = 30 * 60      # a session younger than this may simply not be registere
 
 
 def live_session_ids():
-    """Every session id Claude Code currently publishes."""
-    out = set()
-    if not SESSIONS.is_dir():
-        return out
-    for p in SESSIONS.glob("*.json"):
-        m = UUID.search(p.name)
-        if m:
-            out.add(m.group(0).lower())
-        try:
-            rec = json.loads(p.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            continue
-        sid = rec.get("sessionId")
-        if sid:
-            out.add(str(sid).lower())
-    return out
+    """Every session id Claude Code has a live session for.
+
+    A peer file alone is not enough: Claude Code does not always remove it
+    when the session ends, and a marker kept alive by a leftover file is
+    exactly the stale state this script exists to clear.
+    """
+    return {str(rec.get("sessionId")).lower()
+            for rec in registry.live(CFG) if rec.get("sessionId")}
 
 
 def candidates():
