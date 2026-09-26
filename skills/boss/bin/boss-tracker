@@ -19,13 +19,16 @@
 #   boss-tracker check <track>              size report + whether a trim is due
 #   boss-tracker list                       every track on this machine
 set -euo pipefail
-PM="${HOME}/.claude/pm"
+# The hooks read $CLAUDE_CONFIG_DIR/pm; so must every tool that writes there.
+PM="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/pm"
 CAP=15360          # 15 KB. Past this the live file is carrying history.
 mkdir -p "$PM"
 
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
-live() { printf '%s/%s.md' "$PM" "$1"; }
-arch() { printf '%s/%s.archive.md' "$PM" "$1"; }
+# A track becomes a file name under pm/: a plain name only (boss_store.TRACK_RE).
+plain() { [[ "$1" =~ ^[a-z0-9][a-z0-9._-]{0,63}$ && "$1" != *..* ]] || die "not a track name: '$1' (lowercase letters, digits, . _ -)"; }
+live() { plain "$1"; printf '%s/%s.md' "$PM" "$1"; }
+arch() { plain "$1"; printf '%s/%s.archive.md' "$PM" "$1"; }
 
 case "${1:-}" in
 init)
@@ -63,7 +66,9 @@ show)
 append)
   t=${2:-}; [[ -n "$t" ]] || die "usage: append <track>  (body on stdin)"
   f=$(live "$t"); [[ -f "$f" ]] || die "no such track: $t"
-  cat >> "$f"
+  # Under the lock boss-jev and the ladder routine take: they rewrite the
+  # tracker by temp file + rename, and an append outside it can be lost.
+  flock "$PM/.$t.md.lock" sh -c 'cat >> "$1"' _ "$f"
   printf 'appended to %s (%s B)\n' "$f" "$(stat -c%s "$f")" ;;
 
 archive)
