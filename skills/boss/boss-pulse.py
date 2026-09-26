@@ -43,11 +43,13 @@ import sys
 import time
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import registry  # noqa: E402
+
 CFG = Path(os.environ.get("CLAUDE_CONFIG_DIR", str(Path.home() / ".claude")))
 PM = CFG / "pm"
 MARKERS = PM / ".boss-sessions"
 STATE = PM / ".pulse"
-SESSIONS = CFG / "sessions"
 
 MIN_GAP_S = 60          # never twice inside a minute
 MAX_PER_HOUR = 12       # a boss needing more than this is in a loop, not a job
@@ -77,18 +79,9 @@ def section(body, title):
 # ------------------------------------------------------------------ fleet
 
 def live_sessions():
-    """Every peer session whose process is still alive, keyed by pane id."""
+    """Every live peer session in a tmux pane, keyed by pane id."""
     out = {}
-    if not SESSIONS.is_dir():
-        return out
-    for p in SESSIONS.glob("*.json"):
-        try:
-            rec = json.loads(p.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            continue
-        pid = rec.get("pid")
-        if not pid or not Path("/proc/%s" % pid).exists():
-            continue                              # stale peer file
+    for rec in registry.live(CFG):
         tm = rec.get("tmux") or ""
         if "%" in tm:
             out[tm.rsplit(".", 1)[-1]] = rec
@@ -175,20 +168,9 @@ def question_pending(sid):
     registry rather than trusting that. It is the difference between a boss
     that has asked and one that has gone quiet.
     """
-    f = SESSIONS / ("%s.json" % sid)
-    try:
-        rec = json.loads(f.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        for p in SESSIONS.glob("*.json"):          # registry is not keyed by sid everywhere
-            try:
-                r = json.loads(p.read_text(encoding="utf-8"))
-            except (OSError, ValueError):
-                continue
-            if r.get("sessionId") == sid:
-                rec = r
-                break
-        else:
-            return False
+    rec = registry.by_sid(sid, CFG)
+    if rec is None:
+        return False
     return bool(rec.get("waitingFor")) or (rec.get("status") or "") == "waiting"
 
 
