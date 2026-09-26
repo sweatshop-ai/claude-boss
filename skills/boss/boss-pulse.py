@@ -44,11 +44,11 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import boss_store  # noqa: E402
 import registry  # noqa: E402
 
 CFG = Path(os.environ.get("CLAUDE_CONFIG_DIR", str(Path.home() / ".claude")))
 PM = CFG / "pm"
-MARKERS = PM / ".boss-sessions"
 STATE = PM / ".pulse"
 
 MIN_GAP_S = 60          # never twice inside a minute
@@ -262,15 +262,11 @@ def main():
         return 0                                  # never stack on another block
 
     sid = payload.get("session_id") or ""
-    marker = MARKERS / sid
-    if not sid or not marker.is_file():
+    if not boss_store.is_boss(sid, CFG):
         return 0                                  # not a boss
-    try:
-        track = marker.read_text(encoding="utf-8").strip().splitlines()[0].strip()
-    except (OSError, IndexError):
-        return 0
+    track = boss_store.track_of(sid, CFG)
     if not track:
-        return 0                                  # no track claimed yet
+        return 0                                  # no track claimed yet, or not a plain name
 
     body = read_goal(track)
     if body is None:
