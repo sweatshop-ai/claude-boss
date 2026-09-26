@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.0 — 2026-09-26
+
+- **A worker keeps the name the boss gave it.** `boss-panes.py --set-name`
+  wrote the peer file itself, and cc-agent-names' hook took a name that was
+  not on its roster for Claude Code's own label and replaced it on the next
+  prompt; a roster name was lost on resume. It now calls `agent-name set`
+  (cc-agent-names 0.7.0) when that is on PATH, and writes the peer file
+  directly only when it is not.
+
 ## 0.2.0 — 2026-09-26
 
 The boss reads Claude Code's session registry through one module, shared with
