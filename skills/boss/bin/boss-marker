@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# Mark this session a boss and name its track. See ../boss_store.py.
+exec python3 "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")/../boss_store.py" "$@"
