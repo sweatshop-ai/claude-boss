@@ -18,10 +18,12 @@ Output is TSV, one line per resolved pane:
     pane_id  name  session_id  status  ctx_k  cost_per_turn_k  turns
 
 Panes with no Claude session are omitted. Nothing here writes; --set-name is the
-one exception and it goes through the plugin's own state file, atomically.
+one exception. It calls cc-agent-names' `agent-name set` when that is on PATH,
+and writes the peer file atomically when it is not.
 """
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -175,13 +177,24 @@ def resolve():
 def main():
     args = sys.argv[1:]
     if args and args[0] == "--set-name":
-        # boss-lifecycle spawn/claim uses this so the plugin stays the single
-        # store of a worker's name. Mirrors adopt_all.py: never clobber a name
-        # the user set by hand with /rename.
+        # boss-lifecycle spawn/claim/restart/move name a worker through here.
+        # With cc-agent-names installed, `agent-name set` is the one way in: it
+        # remembers the name as assigned, so the plugin's hook keeps it on the
+        # next prompt and gives it back on resume. Without the plugin there is
+        # no hook to undo it, and the peer file is written directly. A name set
+        # by hand with /rename is never clobbered either way.
         pane_id, name = args[1], args[2]
         for pid, rec in resolve():
             if pid != pane_id:
                 continue
+            if shutil.which("agent-name"):
+                try:
+                    out = subprocess.run(["agent-name", "set", rec.get("sessionId") or "", name],
+                                         capture_output=True, text=True, timeout=10)
+                except (OSError, subprocess.SubprocessError):
+                    return 1
+                print(out.stdout.strip(), end="")
+                return out.returncode
             path = rec["_path"]
             try:
                 with path.open(encoding="utf-8") as fh:
