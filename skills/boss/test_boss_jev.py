@@ -1136,14 +1136,16 @@ class PanesState(unittest.TestCase):
         try:
             (tmp / "sessions").mkdir()
             bp = self.load_panes(tmp)
-            rec = {"pid": kid.pid, "sessionId": "s1", "status": "idle", "cwd": str(tmp)}
-            bp.resolve = lambda: [("%7", dict(rec))]
+            os.environ["CLAUDE_CONFIG_DIR"] = str(tmp)
+            bp.panes = lambda: [("%7", kid.pid)]          # tmux, the one thing faked
+            stat = Path("/proc/%d/stat" % kid.pid).read_text()
+            real = stat[stat.rindex(")") + 2:].split()[19]
             outs = []
-            for ps in (None, "1", bp.proc_start(kid.pid)):
-                if ps is None:
-                    rec.pop("procStart", None)
-                else:
+            for ps in (None, "1", real):
+                rec = {"pid": kid.pid, "sessionId": "s1", "status": "idle", "cwd": str(tmp)}
+                if ps is not None:
                     rec["procStart"] = ps
+                (tmp / "sessions" / ("%d.json" % kid.pid)).write_text(json.dumps(rec))
                 import io, contextlib
                 buf = io.StringIO()
                 with contextlib.redirect_stdout(buf):
@@ -1156,6 +1158,7 @@ class PanesState(unittest.TestCase):
                 outs.append(buf.getvalue().split("\t")[0])
             self.assertEqual(outs, ["-", "-", "s1"])
         finally:
+            os.environ.pop("CLAUDE_CONFIG_DIR", None)
             kid.kill()
             kid.wait()
             shutil.rmtree(tmp)

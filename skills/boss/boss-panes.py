@@ -22,14 +22,14 @@ one exception and it goes through the plugin's own state file, atomically.
 """
 import json
 import os
-import re
 import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import registry  # noqa: E402
+
 CFG = Path(os.environ.get("CLAUDE_CONFIG_DIR", str(Path.home() / ".claude")))
-SESSIONS = CFG / "sessions"
-PROJECTS = CFG / "projects"
 
 # Relative Opus token prices. Cache reads are a tenth of fresh input, so raw
 # context traffic overstates spend ~7.5x; weighting is what makes the number
@@ -48,16 +48,6 @@ def ppid_of(pid):
         return 0
 
 
-def proc_start(pid):
-    """Start time of a pid in clock ticks (field 22 of /proc/<pid>/stat)."""
-    try:
-        with open(f"/proc/{pid}/stat", "rb") as fh:
-            data = fh.read()
-        return data[data.rindex(b")") + 2:].split()[19].decode()
-    except (OSError, ValueError, IndexError):
-        return None
-
-
 def ancestors(pid, stop_at, limit=40):
     """Walk up from pid looking for stop_at. Panes nest a shell then claude."""
     seen = 0
@@ -70,13 +60,7 @@ def ancestors(pid, stop_at, limit=40):
 
 
 def transcript_for(rec):
-    cwd = rec.get("cwd") or ""
-    sid = rec.get("sessionId") or ""
-    if not cwd or not sid:
-        return None
-    slug = re.sub(r"[^a-zA-Z0-9]", "-", cwd)
-    p = PROJECTS / slug / f"{sid}.jsonl"
-    return p if p.is_file() else None
+    return registry.transcript_of(rec, CFG)
 
 
 def usage_tail(path, band=BAND):
@@ -152,20 +136,10 @@ def last_conversation_uuid(path, nbytes=TAIL_BYTES):
 
 
 def load_sessions():
+    """Live sessions only: a reused pid or an orphaned worker is not one."""
     out = []
-    if not SESSIONS.is_dir():
-        return out
-    for path in SESSIONS.glob("*.json"):
-        try:
-            with path.open(encoding="utf-8") as fh:
-                rec = json.load(fh)
-        except (OSError, ValueError):
-            continue
-        if not isinstance(rec, dict) or not rec.get("pid"):
-            continue
-        if not Path(f"/proc/{rec['pid']}").exists():
-            continue          # stale peer file, process is gone
-        rec["_path"] = path
+    for rec in registry.live(CFG):
+        rec["_path"] = Path(rec["path"])
         out.append(rec)
     return out
 
@@ -232,10 +206,6 @@ def main():
         # usage scan), read immediately before the keystroke.
         for pane_id, rec in resolve():
             if pane_id != args[1]:
-                continue
-            # A session record whose pid was reused is not this pane's session:
-            # the record must carry procStart and match the live process.
-            if not rec.get("procStart") or str(rec["procStart"]) != proc_start(rec["pid"]):
                 continue
             t = transcript_for(rec)
             pin = last_conversation_uuid(t) if t else None
