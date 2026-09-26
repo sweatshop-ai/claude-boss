@@ -277,7 +277,6 @@ def transcript_of(rec):
     return registry.transcript_of(rec, CFG)
 
 
-TRACK_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 
 
 def regular_mine(path):

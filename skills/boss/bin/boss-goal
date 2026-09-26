@@ -30,12 +30,15 @@
 #   boss-goal status <track> open|paused|met [note]
 #   boss-goal list
 set -euo pipefail
-PM="${HOME}/.claude/pm"
+# The hooks read $CLAUDE_CONFIG_DIR/pm; so must every tool that writes there.
+PM="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/pm"
 CAP=4096
 mkdir -p "$PM"
 
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
-goal() { printf '%s/%s.goal.md' "$PM" "$1"; }
+# A track becomes a file name under pm/: a plain name only (boss_store.TRACK_RE).
+plain() { [[ "$1" =~ ^[a-z0-9][a-z0-9._-]{0,63}$ && "$1" != *..* ]] || die "not a track name: '$1' (lowercase letters, digits, . _ -)"; }
+goal() { plain "$1"; printf '%s/%s.goal.md' "$PM" "$1"; }
 
 need() {
   local t=${1:-}; [[ -n "$t" ]] || die "which track? (boss-goal list)"
@@ -141,9 +144,20 @@ check)
   st=$(sed -n '2s/_Status: \(.*\)_/\1/p' "$f")
   # An objective nothing reads is a note to self. Say plainly whether the pulse
   # that reads it is armed, rather than letting the skill assume it.
-  pulse="NOT ARMED — add boss-pulse.py as a Stop hook in ~/.claude/settings.json"
-  if [[ -f "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)/boss-pulse.py" ]] \
-     && grep -q 'boss-pulse.py' "${HOME}/.claude/settings.json" 2>/dev/null; then
+  # Armed when the plugin is enabled (it declares the pulse in hooks/hooks.json),
+  # or when an older install typed boss-pulse.py into settings.json by hand.
+  settings="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"
+  pulse="NOT ARMED — enable the claude-boss plugin (/plugin), or add boss-pulse.py as a Stop hook"
+  if python3 - "$settings" <<'PY' 2>/dev/null; then
+import json, sys
+try:
+    s = json.load(open(sys.argv[1]))
+except (OSError, ValueError):
+    sys.exit(1)
+on = any(v is True and k.split("@")[0] == "claude-boss"
+         for k, v in (s.get("enabledPlugins") or {}).items())
+sys.exit(0 if on or "boss-pulse.py" in json.dumps(s.get("hooks") or {}) else 1)
+PY
     pulse="armed"
   fi
   printf 'status: %s | %s B | %s criteria | %s queued | pulse: %s\n' \
