@@ -18,7 +18,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import boss_store  # noqa: E402
 
-MARKER = HERE / "bin" / "boss-marker"
+MARKER = HERE.parent.parent / "bin" / "boss-marker"
 SID = "11111111-1111-1111-1111-111111111111"
 
 

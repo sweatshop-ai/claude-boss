@@ -56,7 +56,7 @@ fi
 # ------------------------------------------------------------------ 3. bin
 if [[ -n ${BIN:-} ]]; then
   mkdir -p "$HOME/.local/bin"
-  for f in "$ROOT"/skills/boss/bin/*; do
+  for f in "$ROOT"/skills/boss/bin/* "$ROOT"/bin/*; do
     ln -sf "$f" "$HOME/.local/bin/$(basename "$f")"
   done
   echo "bin/ symlinked into ~/.local/bin"
