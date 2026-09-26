@@ -52,13 +52,14 @@ import urllib.request
 import uuid
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import registry  # noqa: E402
+
 HERE = Path(__file__).resolve().parent
 CFG = Path(os.environ.get("CLAUDE_CONFIG_DIR", str(Path.home() / ".claude")))
 PM = CFG / "pm"
 PULSE = PM / ".pulse"
 MARKERS = PM / ".boss-sessions"
-SESSIONS = CFG / "sessions"
-PROJECTS = CFG / "projects"
 SETTINGS = CFG / "settings.json"
 MODE_FILE = PULSE / "jev.mode"
 EGRESS_FILE = PULSE / "jev.egress"
@@ -233,31 +234,15 @@ def proc_start(pid):
 
 
 def session_by_pid(pid):
-    """The live session record of a pid, or None. procStart must match, so a
-    reused pid never inherits a dead worker's identity."""
-    try:
-        rec = json.loads((SESSIONS / ("%d.json" % int(pid))).read_text(encoding="utf-8"))
-    except (OSError, ValueError, TypeError):
-        return None
-    start = proc_start(pid)
-    if start is None or not rec.get("procStart") or str(rec["procStart"]) != start:
-        return None                          # no procStart, no identity (plan R10.3)
-    return rec
+    """The live session record of a pid, or None. A reused pid never inherits
+    a dead worker's identity: the registry requires procStart to match (plan
+    R10.3)."""
+    rec = registry.by_pid(pid, CFG)
+    return rec if rec and registry.is_live(rec) else None
 
 
 def live_sessions():
-    out = []
-    if not SESSIONS.is_dir():
-        return out
-    for p in SESSIONS.glob("*.json"):
-        try:
-            pid = int(p.stem)
-        except ValueError:
-            continue
-        rec = session_by_pid(pid)
-        if rec:
-            out.append(rec)
-    return out
+    return registry.live(CFG)
 
 
 def pane_of(rec):
@@ -289,10 +274,7 @@ def pane_info(pane, timeout=1.0):
 
 
 def transcript_of(rec):
-    cwd, sid = rec.get("cwd") or "", rec.get("sessionId") or ""
-    if not cwd or not sid:
-        return None
-    return PROJECTS / re.sub(r"[^a-zA-Z0-9]", "-", cwd) / ("%s.jsonl" % sid)
+    return registry.transcript_of(rec, CFG)
 
 
 TRACK_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
@@ -1458,19 +1440,8 @@ def install_hook(print_only):
 
 
 def own_session():
-    pid = os.getppid()
-    for _ in range(40):
-        if pid <= 1:
-            break
-        rec = session_by_pid(pid)
-        if rec:
-            return rec
-        try:
-            data = Path("/proc/%d/stat" % pid).read_bytes()
-            pid = int(data[data.rindex(b")") + 2:].split()[1])
-        except (OSError, ValueError, IndexError):
-            break
-    return None
+    rec = registry.own(pid=os.getppid(), cfg=CFG, env={})
+    return rec if rec and registry.is_live(rec) else None
 
 
 def footer(task, repos):
