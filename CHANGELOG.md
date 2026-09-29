@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.5.0 — 2026-09-29
+
+- **`/hand-to-boss` starts a boss on an approved plan.** It is the last link of
+  grill → plan → to-tickets → hand-to-boss: it checks the plan and its ticket
+  graph, writes a brief from a fixed template (sources by path, the frontier
+  and who holds each external blocker, staffing, guardrails quoted from the
+  repo's and the owner's CLAUDE.md, time windows, report language), commits it
+  beside the tickets, launches `boss-start` in a new tmux session and reports
+  the boss's name from `ListAgents`. User-invoked only: it starts a team that
+  spends for hours.
+- **The brief travels as a path, not as text.** The first manual run passed
+  the whole brief on the command line, where `ps` and shell history keep it.
+- **A ticket has an owner.** The boss protocol assigns work but kept no owner
+  on a ticket file, so two workers picking from one frontier could take the
+  same ticket. The brief makes the worker write a `Claimed by:` line in the
+  shared ticket file before it starts, and `frontier.py` never lists a
+  claimed ticket as ready.
+- `skills/hand-to-boss/frontier.py` reads a to-tickets folder and prints the
+  frontier; it exits 2 on a broken graph. 10 tests.
+
 ## 0.3.0 — 2026-09-26
 
 - **A worker keeps the name the boss gave it.** `boss-panes.py --set-name`
