@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- **The boss no longer asks the owner what could go wrong.** It asked one
+  blank-page question, *"What would make you say this went wrong?"*, and an
+  owner who says yes to most suggestions gave thin answers. `boss-goal
+  premortem <track> [repo-dir]` now has a second model (Codex, Haiku as
+  fallback) list every concrete way the track could fail, reading the code in
+  `repo-dir` when given. The owner strikes out the numbers that are not a
+  problem; every risk left in, or never answered, gets a criterion, a
+  constraint or a pause in the objective.
+- `review` and `premortem` share one second-model path in `boss-goal`.
+
 ## 0.3.0 — 2026-09-26
 
 - **A worker keeps the name the boss gave it.** `boss-panes.py --set-name`

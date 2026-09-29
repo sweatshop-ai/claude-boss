@@ -27,6 +27,7 @@
 #   boss-goal check <track>                is it actually usable by the pulse?
 #   boss-goal verify <track> [--tick]      run the checkable criteria against GitHub
 #   boss-goal review <track>               a second model reads it for what is missing
+#   boss-goal premortem <track> [dir]      a second model lists how it could go wrong
 #   boss-goal status <track> open|paused|met [note]
 #   boss-goal list
 set -euo pipefail
@@ -42,6 +43,40 @@ need() {
   local f; f=$(goal "$t")
   [[ -f "$f" ]] || die "no objective for '$t' — boss-goal init $t"
   printf '%s' "$f"
+}
+
+# Fill a references/ prompt template with the objective and put it to a second
+# model: Codex first, Haiku if Codex is absent or silent. Sets $out and $who;
+# $out stays empty unless the answer carries a line matching $3. With $4, the
+# model runs in that directory and may read the files there.
+ask_second_model() {
+  local tpl=$1 t=$2 shape=$3 dir=${4:-} prompt last secs=120
+  [[ -n "$dir" ]] && secs=300   # reading code takes longer than reading the file
+  local here; here="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+  tpl="${here}/../references/${tpl}"
+  [[ -f "$tpl" ]] || die "prompt missing: $tpl"
+  [[ -z "$dir" || -d "$dir" ]] || die "not a directory: $dir"
+  prompt=$(python3 -c '
+import pathlib, sys
+tpl, goal, track = (pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"),
+                    pathlib.Path(sys.argv[2]).read_text(encoding="utf-8"),
+                    sys.argv[3])
+sys.stdout.write(tpl.replace("{{TRACK}}", track).replace("{{GOAL}}", goal))
+' "$tpl" "$(goal "$t")" "$t")
+
+  out=""; who="none"
+  if command -v codex >/dev/null 2>&1; then
+    last=$(mktemp)
+    timeout "$secs" codex exec -s read-only --skip-git-repo-check ${dir:+-C "$dir"} \
+      -c 'model_reasoning_effort="medium"' -o "$last" "$prompt" </dev/null >/dev/null 2>&1 || true
+    out=$(cat "$last" 2>/dev/null); rm -f "$last"
+    grep -qiE "$shape" <<<"$out" && who="codex" || out=""
+  fi
+  if [[ -z "$out" ]] && command -v claude >/dev/null 2>&1; then
+    out=$(cd "${dir:-.}" && timeout "$secs" claude -p --model claude-haiku-4-5-20251001 \
+      ${dir:+--allowedTools Read,Grep,Glob} "$prompt" </dev/null 2>/dev/null) || true
+    grep -qiE "$shape" <<<"$out" && who="haiku" || out=""
+  fi
 }
 
 case "${1:-}" in
@@ -249,32 +284,10 @@ print("ticked %d" % n)' "$f"
 review)
   # `check` asks whether the objective is well formed. This asks whether it is
   # the right objective — what a reader who has never seen the track would find
-  # missing. Same two-model path as boss-run: Codex first, Haiku if Codex is
-  # absent or silent. A reviewer that does not answer is not a pass; it says so.
-  t=${2:-}; f=$(need "${2:-}")
-  HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-  tpl="${HERE}/../references/boss-goal-review.md"
-  [[ -f "$tpl" ]] || die "reviewer prompt missing: $tpl"
-  prompt=$(python3 -c '
-import pathlib, sys
-tpl, goal, track = (pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"),
-                    pathlib.Path(sys.argv[2]).read_text(encoding="utf-8"),
-                    sys.argv[3])
-sys.stdout.write(tpl.replace("{{TRACK}}", track).replace("{{GOAL}}", goal))
-' "$tpl" "$f" "$t")
-
-  out=""; who="none"
-  if command -v codex >/dev/null 2>&1; then
-    last=$(mktemp)
-    timeout 120 codex exec -s read-only --skip-git-repo-check \
-      -c 'model_reasoning_effort="medium"' -o "$last" "$prompt" </dev/null >/dev/null 2>&1 || true
-    out=$(cat "$last" 2>/dev/null); rm -f "$last"
-    grep -qiE '^[[:space:]]*VERDICT:[[:space:]]*(COMPLETE|INCOMPLETE)' <<<"$out" && who="codex" || out=""
-  fi
-  if [[ -z "$out" ]] && command -v claude >/dev/null 2>&1; then
-    out=$(timeout 120 claude -p --model claude-haiku-4-5-20251001 "$prompt" </dev/null 2>/dev/null) || true
-    grep -qiE '^[[:space:]]*VERDICT:[[:space:]]*(COMPLETE|INCOMPLETE)' <<<"$out" && who="haiku" || out=""
-  fi
+  # missing. Same two-model path as boss-run. A reviewer that does not answer is
+  # not a pass; it says so.
+  t=${2:-}; need "$t" >/dev/null
+  ask_second_model boss-goal-review.md "$t" '^[[:space:]]*VERDICT:[[:space:]]*(COMPLETE|INCOMPLETE)'
   if [[ -z "$out" ]]; then
     printf 'no reviewer answered (codex and haiku both silent or absent).\n'
     printf 'That is not a pass — read the objective yourself against references/boss-goal-review.md.\n'
@@ -285,11 +298,28 @@ sys.stdout.write(tpl.replace("{{TRACK}}", track).replace("{{GOAL}}", goal))
   grep -qiE '^[[:space:]]*VERDICT:[[:space:]]*INCOMPLETE' <<<"$out" && exit 3
   exit 0 ;;
 
+premortem)
+  # `review` finds what is structurally missing. This lists how the track could
+  # fail, so the owner only strikes out what is not a problem: imagining failures
+  # is the model's job, judging them is the owner's. With [dir] the model reads
+  # the code there and grounds the risks in it.
+  t=${2:-}; need "$t" >/dev/null
+  ask_second_model boss-goal-premortem.md "$t" '^[[:space:]]*RISK:' "${3:-}"
+  if [[ -z "$out" ]]; then
+    printf 'no model answered (codex and haiku both silent or absent).\n'
+    printf 'Write the risks yourself against references/boss-goal-premortem.md; never ask the owner for them.\n'
+    exit 4
+  fi
+  printf '%s\n' "$out" | grep -iE '^[[:space:]]*RISK:' \
+    | sed -E 's/^[[:space:]]*RISK:[[:space:]]*//I' | awk '{ printf "R%d. %s\n", NR, $0 }'
+  printf -- '--- from: %s\n' "$who"
+  exit 0 ;;
+
 list)
   shopt -s nullglob
   for f in "$PM"/*.goal.md; do
     printf '%-28s %s\n' "$(basename "${f%.goal.md}")" "$(sed -n '2s/_Status: \(.*\)_/\1/p' "$f")"
   done ;;
 
-*) die "usage: boss-goal {init|set|next|show|check|verify|review|status|list} <track>" ;;
+*) die "usage: boss-goal {init|set|next|show|check|verify|review|premortem|status|list} <track>" ;;
 esac
