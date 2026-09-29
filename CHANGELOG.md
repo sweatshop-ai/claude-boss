@@ -23,6 +23,16 @@
 - `skills/hand-to-boss/frontier.py` reads a to-tickets folder and prints the
   frontier. It exits 2 on a graph a boss cannot finish: a missing field, an
   unknown ticket, a self-block, a cycle, a file that is not UTF-8. 20 tests.
+- **The boss no longer asks the owner what could go wrong.** It asked one
+  blank-page question, *"What would make you say this went wrong?"*, and an
+  owner who says yes to most suggestions gave thin answers. `boss-goal
+  premortem <track> [repo-dir]` now has a second model (Codex, Haiku as
+  fallback) list every concrete way the track could fail, reading the code in
+  `repo-dir` when given. The owner strikes out the numbers that are not a
+  problem; every risk left in gets a criterion, a constraint or a pause in
+  the objective, and the full mapping goes to the tracker. An answer with
+  fewer than 8 risks falls through to the next model; more than 25 is cut.
+- `review` and `premortem` share one second-model path in `boss-goal`.
 
 ## 0.3.0 — 2026-09-26
 
