@@ -53,19 +53,27 @@ waiting are listed with who holds them.
 
 ## Claiming a ticket
 
-The worker claims, as its first act, in the ticket file at the path under
-**Sources** — the shared file, never the copy inside its own worktree:
+The boss claims a ticket at dispatch, before the dispatch message goes out:
 
-1. Read the ticket. A `**Claimed by:**` line naming someone else → stop, report
-   to the boss, take nothing.
-2. Otherwise add a claim line above `**Status:**` with your own name and the
-   time, e.g. `**Claimed by:** Mei 2026-10-01 09:40`, and set
-   `**Status:** in-progress`.
-3. Then start work.
+```bash
+python3 {{plugin root}}/skills/hand-to-boss/frontier.py claim {{issues dir}} <NN> <worker>
+git -C {{repo holding the tickets}} commit -m "Claim <NN> for <worker>" -- <ticket file>
+```
 
-The boss dispatches a ticket only when `frontier.py` lists it under **Ready now**,
-which excludes anything claimed. To release a claim, the boss tells the claiming
-worker, which removes its own line, and the boss notes it in the tracker.
+`claim` writes `**Claimed by:** <worker> <date time>` above the Status line and
+sets `**Status:** in-progress`, under a lock, in the shared ticket file. It
+refuses (exit 3, naming the claimant) a ticket that is already claimed, done or
+still blocked; then nothing is dispatched. The commit names that one file by
+path, so it carries nothing else in a tree other sessions share, and no edit is
+left uncommitted. Both are coordination, not implementation: if the guard
+remarks on them, say so in one line and carry on.
+
+The worker never edits the claim. It reads the ticket at its path under
+**Sources**, the shared file, never the copy inside its own worktree, and when
+it finishes it ticks the boxes and sets Status there, committing that file by
+path in the same way. To release a claim, the boss removes the line, sets
+Status back to `ready-for-agent`, commits the file by path and notes it in the
+tracker.
 
 ## Done means verified
 
