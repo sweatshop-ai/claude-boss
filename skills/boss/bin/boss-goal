@@ -47,10 +47,11 @@ need() {
 
 # Fill a references/ prompt template with the objective and put it to a second
 # model: Codex first, Haiku if Codex is absent or silent. Sets $out and $who;
-# $out stays empty unless the answer carries a line matching $3. With $4, the
+# $out stays empty unless the answer carries at least $5 (default 1) lines
+# matching $3, so a thin answer falls through to the next model. With $4, the
 # model runs in that directory and may read the files there.
 ask_second_model() {
-  local tpl=$1 t=$2 shape=$3 dir=${4:-} prompt last secs=120
+  local tpl=$1 t=$2 shape=$3 dir=${4:-} min=${5:-1} prompt last secs=120
   [[ -n "$dir" ]] && secs=300   # reading code takes longer than reading the file
   local here; here="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
   tpl="${here}/../references/${tpl}"
@@ -70,12 +71,12 @@ sys.stdout.write(tpl.replace("{{TRACK}}", track).replace("{{GOAL}}", goal))
     timeout "$secs" codex exec -s read-only --skip-git-repo-check ${dir:+-C "$dir"} \
       -c 'model_reasoning_effort="medium"' -o "$last" "$prompt" </dev/null >/dev/null 2>&1 || true
     out=$(cat "$last" 2>/dev/null); rm -f "$last"
-    grep -qiE "$shape" <<<"$out" && who="codex" || out=""
+    (( $(grep -ciE "$shape" <<<"$out" || true) >= min )) && who="codex" || out=""
   fi
   if [[ -z "$out" ]] && command -v claude >/dev/null 2>&1; then
     out=$(cd "${dir:-.}" && timeout "$secs" claude -p --model claude-haiku-4-5-20251001 \
       ${dir:+--allowedTools Read,Grep,Glob} "$prompt" </dev/null 2>/dev/null) || true
-    grep -qiE "$shape" <<<"$out" && who="haiku" || out=""
+    (( $(grep -ciE "$shape" <<<"$out" || true) >= min )) && who="haiku" || out=""
   fi
 }
 
@@ -303,15 +304,18 @@ premortem)
   # fail, so the owner only strikes out what is not a problem: imagining failures
   # is the model's job, judging them is the owner's. With [dir] the model reads
   # the code there and grounds the risks in it.
+  # Fewer than 8 risks is a model that did not do the sweep; more than 25 is
+  # more than the owner will read, so the list is cut there.
   t=${2:-}; need "$t" >/dev/null
-  ask_second_model boss-goal-premortem.md "$t" '^[[:space:]]*RISK:' "${3:-}"
+  risk='^[[:space:]]*RISK:'
+  ask_second_model boss-goal-premortem.md "$t" "$risk" "${3:-}" 8
   if [[ -z "$out" ]]; then
-    printf 'no model answered (codex and haiku both silent or absent).\n'
+    printf 'no model gave at least 8 risks (codex and haiku silent, absent or thin).\n'
     printf 'Write the risks yourself against references/boss-goal-premortem.md; never ask the owner for them.\n'
     exit 4
   fi
-  printf '%s\n' "$out" | grep -iE '^[[:space:]]*RISK:' \
-    | sed -E 's/^[[:space:]]*RISK:[[:space:]]*//I' | awk '{ printf "R%d. %s\n", NR, $0 }'
+  printf '%s\n' "$out" | grep -iE "$risk" | head -25 \
+    | sed -E 's/^[[:space:]]*[Rr][Ii][Ss][Kk]:[[:space:]]*//' | awk '{ printf "R%d. %s\n", NR, $0 }'
   printf -- '--- from: %s\n' "$who"
   exit 0 ;;
 

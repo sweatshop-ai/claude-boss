@@ -363,23 +363,28 @@ imagines the failures, the owner judges them, and silence means *keep it*.
 `premortem` puts the objective to Codex (Haiku as fallback) against
 `references/boss-goal-premortem.md`: it is a week later, the track failed, list
 every concrete way that happened. It prints `R1.`…`R25.`, one risk per line, with
-no filtering and no fixes. Pass the repository the track works on as `repo-dir`
-and the model reads the code there and marks what it saw (`[seen: <path>]`).
-Run it straight after `review`; dispatch the first Next item while it runs.
+no filtering and no fixes; an answer with fewer than 8 falls through to the next
+model. Pass the repository the track works on as `repo-dir` and the model reads
+the code there and marks what it saw (`[seen: <path>]`). It takes one to five
+minutes: run it in the background straight after `review`, and dispatch the
+first Next item while it runs.
 
-In your first reply, read back the Outcome and the Done-when list, then the
-numbered risks, grouped as you see fit. Then open one `AskUserQuestion` (that is
-what rings the owner's chime): *"Which of these are **not** a problem? Type their
-numbers."* Recommend keeping them all.
+When it returns, read back the Outcome and the Done-when list, then the numbered
+risks, grouped as you see fit. Dispatch before you ask: `AskUserQuestion` holds
+your turn until the owner answers, and the workers should not wait with you. Then
+open one `AskUserQuestion` (that is what rings the owner's chime): *"Which of
+these are **not** a problem? Type their numbers."* Options: **All are real**
+(recommended) and **None of them matter**; the owner types numbers under Other.
 
 - **A struck risk is settled.** Record it in the tracker as accepted, and never
   raise it again.
-- **Every risk left in is real**, whether the owner kept it or never answered.
-  Cover each one in the objective: a Done-when criterion that would catch it, a
-  Constraint that forbids it, or a Pause-when line that hands it to the owner.
-  One criterion can cover several risks; the 4 KB cap is why. Write the mapping
-  (risk → the line that covers it) to the tracker, so `review` and the next boss
-  can see nothing was dropped.
+- **Every risk left in is real.** Cover each one: a Done-when criterion that would
+  catch it, a Constraint that forbids it, or a Pause-when line that hands it to
+  the owner. Group them first — twenty-five risks are usually five or six
+  failure modes, and one criterion covers a mode. The objective holds only the
+  covering lines (it is capped at 4 KB); the full mapping, each `R<n>` → the
+  line that covers it, goes to the tracker, so `review` and the next boss can
+  see nothing was dropped.
 
 On 2026-09-08 the risk that mattered, *"the Curator cross-owner vector"*, reached
 the boss at 01:35, six hours in, because the owner happened to still be awake. It

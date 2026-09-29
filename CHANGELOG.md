@@ -8,8 +8,9 @@
   premortem <track> [repo-dir]` now has a second model (Codex, Haiku as
   fallback) list every concrete way the track could fail, reading the code in
   `repo-dir` when given. The owner strikes out the numbers that are not a
-  problem; every risk left in, or never answered, gets a criterion, a
-  constraint or a pause in the objective.
+  problem; every risk left in gets a criterion, a constraint or a pause in
+  the objective, and the full mapping goes to the tracker. An answer with
+  fewer than 8 risks falls through to the next model; more than 25 is cut.
 - `review` and `premortem` share one second-model path in `boss-goal`.
 
 ## 0.3.0 — 2026-09-26
