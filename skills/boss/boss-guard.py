@@ -27,6 +27,9 @@ import sys
 import time
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import boss_store  # noqa: E402
+
 CFG = Path(os.environ.get("CLAUDE_CONFIG_DIR", str(Path.home() / ".claude")))
 MARKERS = CFG / "pm" / ".boss-sessions"
 LOG = CFG / "pm" / "boss-guard.log"
@@ -141,7 +144,7 @@ def main():
         return 0
 
     sid = payload.get("session_id") or ""
-    if not sid or not (MARKERS / sid).exists():
+    if not boss_store.is_boss(sid, CFG):
         return 0                      # not a boss session; nothing to say
 
     tool = payload.get("tool_name") or ""

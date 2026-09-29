@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.5.0 — 2026-09-29
+
+One rule for the boss files, and the tools write where the hooks read.
+
+- **`boss-marker register [track]`** replaces the `touch` and `echo` SKILL.md
+  told the model to run. It is on every session's PATH.
+- **`boss_store.py`** is the one reader of the marker: guard, pulse, compact
+  and jev each had their own. Pulse and compact turned an unchecked first line
+  into a file name under `pm/`; a marker reading `../evil` made the pulse act
+  on a goal file outside `pm/`.
+- **`boss-tracker`, `boss-goal` and `boss-run` honour `CLAUDE_CONFIG_DIR`**, as
+  the hooks always did. They wrote to `$HOME/.claude/pm`, so with another
+  config dir the boss's tracker was one no hook read.
+- **Track names are checked** before they become file names
+  (`boss-tracker init ../x` wrote outside `pm/`).
+- **`boss-tracker append` takes the tracker lock** boss-jev and the ladder
+  routine rewrite under.
+- **`boss-goal check` no longer says the pulse is NOT ARMED** under a plugin
+  install; it reads `enabledPlugins`.
+
 ## 0.4.0 — 2026-09-29
 
 - **`/hand-to-boss` starts a boss on an approved plan.** It is the last link of

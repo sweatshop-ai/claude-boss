@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Mark this session a boss and name its track. Claude Code puts this plugin's
+# bin/ on every session's PATH, so the skill calls it by name.
+# See skills/boss/boss_store.py.
+exec python3 "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")/../skills/boss/boss_store.py" "$@"
