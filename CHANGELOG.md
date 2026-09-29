@@ -1,7 +1,28 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 — 2026-09-29
 
+- **`/hand-to-boss` starts a boss on an approved plan.** It is the last link of
+  grill → plan → to-tickets → hand-to-boss: it checks the plan and its ticket
+  graph, writes a brief from a fixed template (sources by path, the frontier
+  and who holds each external blocker, staffing, guardrails quoted from the
+  repo's and the owner's CLAUDE.md, time windows, report language), commits it
+  beside the tickets, launches `boss-start` in a new tmux session and reports
+  the boss's name from `ListAgents`. User-invoked only: it starts a team that
+  spends for hours.
+- **The brief travels as a path, not as text.** The first manual run passed
+  the whole brief on the command line, where `ps` and shell history keep it.
+- **A boss stuck on the trust prompt is caught.** The folder's trust is
+  checked in `~/.claude.json` before launch, and the wait for the boss's name
+  gives up after 90 seconds and reports what the pane shows.
+- **A ticket has an owner.** The boss protocol assigns work but kept no owner
+  on a ticket file, so two workers picking from one frontier could take the
+  same ticket. The boss now claims it at dispatch with `frontier.py claim`,
+  which refuses a ticket already claimed, done or blocked, and commits that
+  one file by path.
+- `skills/hand-to-boss/frontier.py` reads a to-tickets folder and prints the
+  frontier. It exits 2 on a graph a boss cannot finish: a missing field, an
+  unknown ticket, a self-block, a cycle, a file that is not UTF-8. 20 tests.
 - **The boss no longer asks the owner what could go wrong.** It asked one
   blank-page question, *"What would make you say this went wrong?"*, and an
   owner who says yes to most suggestions gave thin answers. `boss-goal
