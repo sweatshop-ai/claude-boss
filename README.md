@@ -73,6 +73,29 @@ here would publish what they exist to protect:
 
 Point `BOSS_REDACT_LIST` and `BOSS_HARD_RULES` elsewhere if you prefer.
 
+## Handing a plan to a boss
+
+`/claude-boss:hand-to-boss <plan> [boss-model] [worker-model]` takes a plan
+and the tickets `to-tickets` cut from it, writes a brief for a boss, commits
+it beside the tickets, and starts that boss in its own tmux session
+(`boss-<track>`). It answers with the boss's name, so you can talk to it.
+
+```
+grill -> plan -> to-tickets -> hand-to-boss -> boss + workers
+```
+
+A handoff passes a conversation to one agent. This passes a dependency graph
+to a manager with a team, so the brief carries what one agent never needs: the
+frontier, who holds each external blocker, the models, one worktree per worker,
+how a ticket is claimed, the rules that must hold for days, and the hours when
+something must not be touched. `--dry-run <dir>` writes the brief and stops.
+
+It never fires on its own. To see the frontier of any ticket folder:
+
+```bash
+python3 skills/hand-to-boss/frontier.py path/to/issues
+```
+
 ## The board
 
 Phase C reads a GitHub project board, and which board is yours, not this
@@ -109,7 +132,7 @@ writes a timestamped backup first.
 ## Tests
 
 ```bash
-for t in skills/boss/test_boss_*.py; do python3 "$t"; done    # 119
+for t in skills/boss/test_boss_*.py skills/hand-to-boss/test_*.py; do python3 "$t"; done
 ```
 
 They run each hook the way the harness does — as a process, JSON on stdin,
