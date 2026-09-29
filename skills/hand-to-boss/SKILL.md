@@ -1,6 +1,7 @@
 ---
 name: hand-to-boss
 description: Hand an approved plan and its tickets to a new boss session in its own tmux session, which runs a team of workers on them.
+user_invocable: true
 disable-model-invocation: true
 argument-hint: "<plan-path> [boss-model=opus] [worker-model=sonnet] [--dry-run <dir>]"
 ---
@@ -90,8 +91,9 @@ that holds the `issues/` folder, and fill every `{{placeholder}}`:
 
 The claiming rule and the verified-done rule are in the template already. They
 stay word for word: the boss protocol assigns work but keeps no owner on a
-ticket file, so the claim line is what stops two workers from taking the same
-ticket off one frontier.
+ticket file, so the claim, written by the boss with `frontier.py claim` and
+committed by path, is what stops two workers from taking the same ticket off
+one frontier.
 
 Done when: `grep -n '{{' boss-brief.md` finds no placeholder left, every path in
 it exists, and it holds no secret. In `--dry-run`, stop here and give the owner
@@ -113,10 +115,28 @@ file from disk; the push is backup, not a precondition.
 
 ## 4. Launch
 
-Name the tmux session `boss-<track>`, where `<track>` is the feature slug. First
-check it is free: `tmux has-session -t boss-<track>` must fail, and
-`boss-tracker list` must not show the track. Either exists → a boss may already
-run this plan; stop and ask the owner.
+The boss starts through `boss-start`, never a bare `claude`: that is where the
+boss's effort, autocompact and fallback settings live, and a boss started
+without them compacts only at the 1M ceiling.
+
+Name the tmux session `boss-<track>`, where `<track>` is the feature slug. Two
+checks before anything starts:
+
+- **Free.** `tmux has-session -t boss-<track>` must fail, and `boss-tracker list`
+  must not show the track. Either exists → a boss may already run this plan;
+  stop and ask the owner.
+- **Trusted.** Claude Code asks "Do you trust this folder?" on its first run in
+  a folder, and a boss stuck on that question never registers. The folder is
+  trusted when it or a parent has `hasTrustDialogAccepted: true` in
+  `~/.claude.json`:
+
+  ```bash
+  python3 -c 'import json,sys; from pathlib import Path; p=json.loads((Path.home()/".claude.json").read_text()).get("projects",{}); d=Path(sys.argv[1]).resolve(); print(any(p.get(str(q),{}).get("hasTrustDialogAccepted") for q in [d,*d.parents]))' <repo>
+  ```
+
+  `False` → ask the owner with `AskUserQuestion` whether to launch anyway and
+  answer the prompt in the pane themselves (`tmux attach -t boss-<track>`), or
+  to stop. Only their hand answers it.
 
 ```bash
 tmux new-session -d -s boss-<track> -c <repo> \
@@ -128,27 +148,34 @@ tmux new-session -d -s boss-<track> -c <repo> \
 
 The seed carries **the brief's path**, never its text: the command line of a
 process is readable by every user on the machine and ends up in `ps`, shell
-history and logs. `boss-start` adds the boss's effort, autocompact and fallback
-settings; `BOSS_WORKER_MODEL` makes the worker model the default for every spawn
-in that session. `exec $SHELL` keeps the pane open if Claude exits, so the
-reason can be read.
+history and logs. `BOSS_WORKER_MODEL` makes the worker model the default for
+every spawn in that session. `exec $SHELL` keeps the pane open if Claude exits,
+so the reason can be read.
 
 ## 5. Find the boss's name
 
-The pane id: `tmux list-panes -t boss-<track> -F '#{pane_id}'`. Wait until
-Claude has registered in it (use `Monitor` with an until-loop on the command
-below, not `sleep`):
+The pane id: `tmux list-panes -t boss-<track> -F '#{pane_id}'`. Wait up to 90
+seconds for Claude to register in it, with `Monitor` on an until-loop, never
+`sleep`:
 
 ```bash
-python3 ${CLAUDE_PLUGIN_ROOT}/skills/boss/boss-panes.py <pane-id>
+for i in $(seq 90); do
+  row=$(python3 ${CLAUDE_PLUGIN_ROOT}/skills/boss/boss-panes.py <pane-id>)
+  [ -n "$row" ] && { echo "$row"; exit 0; }; sleep 1
+done; echo TIMEOUT; tmux capture-pane -p -t <pane-id> | tail -40
 ```
 
-It prints `pane  name  session  status …` once the session exists. Then confirm
-with `ListAgents`: the row whose tmux location ends in `.<pane-id>` is the boss,
-and that row's name is the one to report. If the pane stays at a trust or
-permission dialog, that is the owner's hand: tell them to attach and answer it.
+A row reads `pane  name  session  status …`. Then confirm with `ListAgents`:
+the row whose tmux location ends in `.<pane-id>` is the boss, and that row's
+name is the one to report.
 
-Report, in three lines:
+**TIMEOUT**: report what the captured pane shows, verbatim, and stop. A trust
+or permission dialog there is the owner's hand: ask them through
+`AskUserQuestion` to attach and answer it, then run the wait once more. Any
+other screen (an error, a shell prompt) is the finding; report it rather than
+relaunching.
+
+Report, in three lines, in the owner's conversation language:
 
 - the boss's name (what `SendMessage` reaches),
 - the tmux session `boss-<track>` and `tmux attach -t boss-<track>`,
