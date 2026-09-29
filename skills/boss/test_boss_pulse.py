@@ -121,5 +121,18 @@ class StuckBoss(PulseCase):
         self.assertEqual(res.stdout.strip(), "")
 
 
+class Marker(PulseCase):
+    """The track in the marker becomes a file name. Only a plain name is one."""
+
+    def test_a_track_that_climbs_out_of_pm_is_no_track(self):
+        # A goal and tracker planted one level above pm/, reachable as ../evil.
+        (self.tmp / "evil.goal.md").write_text(
+            "# Objective\n\n_Status: OPEN_\n\n## Next, in priority order\n- x\n", encoding="utf-8")
+        (self.tmp / "evil.md").write_text(
+            "# Tracker\n\n## Open blockers\n- planted blocker\n", encoding="utf-8")
+        (self.tmp / "pm/.boss-sessions" / self.sid).write_text("../evil\n")
+        self.assertEqual(self.stop(), "")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

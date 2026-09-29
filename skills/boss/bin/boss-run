@@ -29,7 +29,8 @@
 #   5                   refused by a hard rule
 set -uo pipefail
 
-PM="${HOME}/.claude/pm"
+# The hooks read $CLAUDE_CONFIG_DIR/pm; so must every tool that writes there.
+PM="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/pm"
 LOG="${PM}/boss-run.log"
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 PROMPT_FILE="${HERE}/../references/boss-run-review.md"

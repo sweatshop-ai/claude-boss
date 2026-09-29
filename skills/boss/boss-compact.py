@@ -30,9 +30,11 @@ import os
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import boss_store  # noqa: E402
+
 CFG = Path(os.environ.get("CLAUDE_CONFIG_DIR", str(Path.home() / ".claude")))
 PM = CFG / "pm"
-MARKERS = PM / ".boss-sessions"
 CAP = 15360   # boss-tracker's cap; anything past it is history we do not inject
 
 RESTORE_HEAD = (
@@ -50,16 +52,7 @@ LIVE_HEAD = "\n--- ~/.claude/pm/{track}.md (live state) ---\n"
 
 
 def track_for(sid):
-    if not sid:
-        return None
-    m = MARKERS / sid
-    if not m.is_file():
-        return None
-    try:
-        t = m.read_text(encoding="utf-8").strip().splitlines()
-    except OSError:
-        return None
-    return t[0].strip() if t and t[0].strip() else None
+    return boss_store.track_of(sid, CFG) or None
 
 
 def main():

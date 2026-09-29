@@ -25,8 +25,8 @@ will compact only at the 1M ceiling, and the fix is the owner typing
 1. **Register as a boss** so the guard knows who you are, and find out whether
    your voice is on:
    ```bash
-   mkdir -p ~/.claude/pm/.boss-sessions && touch ~/.claude/pm/.boss-sessions/"$CLAUDE_CODE_SESSION_ID"
-   [ -f ~/.claude/pm/.pulse/boss.voice ] && echo "voice: ON" || echo "voice: off (silent)"
+   boss-marker register
+   [ -f "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/pm/.pulse/boss.voice" ] && echo "voice: ON" || echo "voice: off (silent)"
    ```
    **Silence is the default and the fail-safe.** If you never ran that check, or
    it said `off`, you do not call `mcp__tts__speak` at all — the owner is reached
@@ -36,8 +36,10 @@ will compact only at the 1M ceiling, and the fix is the owner typing
    Then write the track into your marker, so the compaction hook knows which
    tracker to hand back to you after an autocompact:
    ```bash
-   echo <track> > ~/.claude/pm/.boss-sessions/"$CLAUDE_CODE_SESSION_ID"
+   boss-marker register <track>
    ```
+   A track is a plain name (lowercase letters, digits, `.` `_` `-`); anything
+   else is refused, because it becomes a file name under `pm/`.
 3. **Claim your objective**: `boss-goal show <track>`, or `boss-goal init <track>`,
    fill it in from what the owner asked for, then `check` it, `review` it, run
    `premortem` on it, and ask them which risks are not a problem. See Objective.
@@ -46,7 +48,8 @@ will compact only at the 1M ceiling, and the fix is the owner typing
    workers are.
 
 `bin/` is at `${CLAUDE_PLUGIN_ROOT}/skills/boss/bin/`; add it to PATH or call the commands by
-full path.
+full path. `boss-marker` is the exception: it sits in the plugin's own `bin/`, which Claude
+Code puts on every session's PATH.
 
 ---
 

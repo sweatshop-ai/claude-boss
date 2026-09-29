@@ -53,13 +53,13 @@ import uuid
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import boss_store  # noqa: E402
 import registry  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 CFG = Path(os.environ.get("CLAUDE_CONFIG_DIR", str(Path.home() / ".claude")))
 PM = CFG / "pm"
 PULSE = PM / ".pulse"
-MARKERS = PM / ".boss-sessions"
 SETTINGS = CFG / "settings.json"
 MODE_FILE = PULSE / "jev.mode"
 EGRESS_FILE = PULSE / "jev.egress"
@@ -277,7 +277,6 @@ def transcript_of(rec):
     return registry.transcript_of(rec, CFG)
 
 
-TRACK_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 
 
 def regular_mine(path):
@@ -298,19 +297,8 @@ def in_pm(path):
 
 
 def boss_track(sid):
-    """The track in this session's boss marker, or "". The track becomes a file
-    name under pm/, so it must be a plain identifier and the marker a regular
-    file of this user."""
-    if not sid or not re.match(r"^[\w-]{1,80}$", sid):
-        return ""
-    marker = MARKERS / sid
-    if not regular_mine(marker):
-        return ""
-    try:
-        track = marker.read_text(encoding="utf-8").strip().splitlines()[0].strip()
-    except (OSError, IndexError):
-        return ""
-    return track if TRACK_RE.match(track) and ".." not in track else ""
+    """The track in this session's boss marker, or "" (boss_store's rule)."""
+    return boss_store.track_of(sid, CFG)
 
 
 # --------------------------------------------------------------------- events
