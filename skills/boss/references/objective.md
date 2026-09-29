@@ -117,7 +117,7 @@ boss should never have needed a human to notice.
 | `check` | Is it well formed? Placeholders, criteria present, size, pulse armed | Whether any of it is true or relevant |
 | `review` | Is anything structurally missing? | Anything only the owner knows |
 | `verify` | Which criteria are true right now, by query | Criteria with no machine anchor |
-| the one question | What the owner is actually afraid of | Nothing else — ask it every time |
+| `premortem` + the owner's strike-out | Which failures matter to the owner | Risks neither the model nor the owner imagined — run it every time |
 
 They are cheap in that order and none substitutes for another. A worked case,
 measured on 2026-09-09 against the objective as it stood the night before:
@@ -130,7 +130,10 @@ measured on 2026-09-09 against the objective as it stood the night before:
   touches production.
 - `review` did **not** find the two-user isolation gap — the Curator cross-owner
   vector. Nothing in the file pointed at it. That is the shape of what a reviewer
-  structurally cannot supply, and it is why the one question is not optional.
+  structurally cannot supply, and it is why the sweep is not optional.
+- `premortem`, run on the same objective on 2026-09-29, listed the isolation
+  gap four ways in its first dozen of 25 lines. The owner never had to think of
+  it; they would only have had to leave it in.
 
 ## GitHub is the anchor, not the store
 
