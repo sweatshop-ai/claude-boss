@@ -22,11 +22,12 @@ import sys
 import tempfile
 import time
 import unittest
+import unittest.mock
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-REAL_CFG = HERE.parent.parent
-PLANS = REAL_CFG / "plans"
+# The #76 sample lives with the plans, outside the repo.
+PLANS = Path(os.environ.get("BOSS_JEV_PLANS") or Path.home() / ".claude" / "plans")
 
 
 def load(cfg=None):
@@ -228,9 +229,12 @@ class Replay(unittest.TestCase):
         mod = load()
         mod.ASK_RE = re.compile(r"(?!x)x")
         cands = {k for k, (_, r) in self.replay(mod).items() if "absorb-candidate" in r}
-        self.assertEqual(cands, {"ev41", "ev43"})
-        mod.CTX_MIN = 10 ** 9
-        cands = {k for k, (_, r) in self.replay(mod).items() if "absorb-candidate" in r}
+        # Every message in the sample comes from a worker past 150k bar ev34,
+        # ev53, ev54 (policy.WORKER_SPLIT), so none is a candidate until the
+        # size gate is lifted.
+        self.assertEqual(cands, set())
+        with unittest.mock.patch.object(mod.policy, "heavy", lambda *a, **k: False):
+            cands = {k for k, (_, r) in self.replay(mod).items() if "absorb-candidate" in r}
         self.assertEqual(cands, {"ev41", "ev43", "ev46"})
 
 

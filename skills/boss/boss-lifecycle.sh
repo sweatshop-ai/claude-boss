@@ -362,39 +362,19 @@ cmd_list() {
     # Live name/status/context from the plugin + transcript; fall back to the
     # pane mirror only when the session is gone (a crashed worker still shows
     # the name it had, which is what makes it recognisable in the watchdog).
-    local row name state ctx cpt turns
+    local row name state ctx cpt turns flags
     row=$(printf '%s\n' "$meta" | awk -F'\t' -v p="$id" '$1==p{print;exit}')
     if [[ -n "$row" ]]; then
       name=$(cut -f2 <<<"$row"); state=$(cut -f4 <<<"$row")
       ctx=$(cut -f5 <<<"$row"); cpt=$(cut -f6 <<<"$row"); turns=$(cut -f7 <<<"$row")
+      flags=$(cut -f8 <<<"$row")
     else
-      name="$mirror"; state="$cmd"; ctx="-"; cpt="-"; turns=""
+      name="$mirror"; state="$cmd"; ctx="-"; cpt="-"; turns=""; flags="-"
     fi
 
-    # Flag what proposal A acts on: cost per turn well above a fresh session's
-    # ~30k. This is the recycle signal, and it is a number, not a hunch.
+    # Flags come from boss-panes, which reads them from policy.py by role.
     local flag=""
-    if [[ "$cpt" =~ ^[0-9]+$ ]]; then
-      if   (( cpt >= 90 )); then flag=" RECYCLE"
-      elif (( cpt >= 60 )); then flag=" heavy"
-      fi
-    fi
-    # Second signal, on absolute context. A worker gets one task per session
-    # (the owner, 2026-10-01), so its context only grows within a task: past
-    # 150k the task is bigger than the smart zone and gets split at its next
-    # natural boundary; past 250k that is overdue. The boss keeps its own
-    # 400k/500k band: its state is the tracker and it compacts at 450k.
-    if [[ "$ctx" =~ ^[0-9]+$ ]]; then
-      if [[ "$tag" == "self" ]]; then
-        if   (( ctx >= 500 )); then flag="$flag CTX-RESTART"
-        elif (( ctx >= 400 )); then flag="$flag CTX-EVAL"
-        fi
-      else
-        if   (( ctx >= 250 )); then flag="$flag CTX-OVER"
-        elif (( ctx >= 150 )); then flag="$flag CTX-SPLIT"
-        fi
-      fi
-    fi
+    if [[ -n "$flags" && "$flags" != "-" ]]; then flag=" $flags"; fi
 
     printf '%s\t%s\t%s\t%s\t%sk\t%sk%s\t%s\t%s%s\n' \
       "$id" "$coord" "$name" "$state" "$ctx" "$cpt" "$flag" "$tag" "$path" "$mark"

@@ -45,6 +45,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import boss_store  # noqa: E402
+import policy  # noqa: E402
 import registry  # noqa: E402
 
 CFG = Path(os.environ.get("CLAUDE_CONFIG_DIR", str(Path.home() / ".claude")))
@@ -53,7 +54,6 @@ STATE = PM / ".pulse"
 
 MIN_GAP_S = 60          # never twice inside a minute
 MAX_PER_HOUR = 12       # a boss needing more than this is in a loop, not a job
-RUNGS = (5, 15, 30, 60, 90, 120, 180, 240)   # minutes, matching escalation.md
 
 
 # ---------------------------------------------------------------- goal file
@@ -209,9 +209,9 @@ def due_rungs(track, fired):
         except (ValueError, OverflowError):
             continue
         mins = int((time.time() - t0) / 60)
-        if mins < RUNGS[0] or mins > 60 * 24:
+        rung = policy.rung_for(mins)              # the ladder's rungs (policy.py)
+        if rung is None or mins > policy.STOP_MIN:
             continue                              # too fresh, or stale/mistyped
-        rung = max(r for r in RUNGS if r <= mins)
         key = re.sub(r"\W+", "", line)[:40]
         if fired.get(key) == rung:
             continue                              # already said this one
