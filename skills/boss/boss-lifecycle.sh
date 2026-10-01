@@ -379,13 +379,20 @@ cmd_list() {
       elif (( cpt >= 60 )); then flag=" heavy"
       fi
     fi
-    # Second signal, on absolute context (the owner, 2026-09-08): between 400k and
-    # 500k the boss starts evaluating a clear/restart with a handoff; at 500k it
-    # is overdue. Independent of cost/turn — a cheap-per-turn session still
-    # dies at the window ceiling.
+    # Second signal, on absolute context. A worker gets one task per session
+    # (the owner, 2026-10-01), so its context only grows within a task: past
+    # 150k the task is bigger than the smart zone and gets split at its next
+    # natural boundary; past 250k that is overdue. The boss keeps its own
+    # 400k/500k band: its state is the tracker and it compacts at 450k.
     if [[ "$ctx" =~ ^[0-9]+$ ]]; then
-      if   (( ctx >= 500 )); then flag="$flag CTX-RESTART"
-      elif (( ctx >= 400 )); then flag="$flag CTX-EVAL"
+      if [[ "$tag" == "self" ]]; then
+        if   (( ctx >= 500 )); then flag="$flag CTX-RESTART"
+        elif (( ctx >= 400 )); then flag="$flag CTX-EVAL"
+        fi
+      else
+        if   (( ctx >= 250 )); then flag="$flag CTX-OVER"
+        elif (( ctx >= 150 )); then flag="$flag CTX-SPLIT"
+        fi
       fi
     fi
 

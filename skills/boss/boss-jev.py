@@ -442,6 +442,14 @@ def decide_message(p, mem, report, ctx, cost):
     return "wake", "; ".join(why) or "first finished report"
 
 
+def prune_proposals(props, now):
+    """Drop restart proposals past the cooldown. Keyed by session, the map
+    would otherwise gain one entry per finished task for good; this also
+    clears the pane-keyed entries older state files carry."""
+    for k in [k for k, t in props.items() if not isinstance(t, (int, float)) or now - t >= PROPOSAL_COOLDOWN_S]:
+        del props[k]
+
+
 def absorb_ready(mem, scan_complete):
     if not scan_complete:
         return False, "dispatch memory incomplete (first run, rescan or catch-up)"
@@ -896,8 +904,8 @@ class Hook:
             rec = session_by_pid(w["pid"])
             if not rec or rec.get("sessionId") != w["sid"] or rec.get("status") != "idle":
                 return False, facts, "status is %r, not idle" % ((rec or {}).get("status"),)
-            if ctx < CTX_MIN and cost < COST_MIN:
-                return False, facts, "CTX %dk and COST/TURN %dk under the thresholds" % (ctx // 1000, cost // 1000)
+            # No size gate: one task per session (the owner, 2026-10-01), so
+            # every finished task is a restart, however small the context.
             facts["ctx"] = "CTX %dk, COST/TURN %dk" % (ctx // 1000, cost // 1000)
             i, sent_at = report_turn(records, ev["body"])
             if i is None:
@@ -912,7 +920,10 @@ class Hook:
                 return False, facts, "the boss sent it something after the report"
             if p["redirected"] >= 0.5:
                 return False, facts, "redirected %.2f" % p["redirected"]
-            last = self.st["proposals"].get(w["pane"], 0)
+            # Keyed by session, not pane: a restart keeps the pane, and the
+            # fresh session finishing its own task within the hour must still
+            # get its restart (one task, one session).
+            last = self.st["proposals"].get(w["sid"], 0)
             if time.time() - last < PROPOSAL_COOLDOWN_S:
                 return False, facts, "a restart was proposed for this pane %d min ago" % ((time.time() - last) // 60)
             need()
@@ -1063,7 +1074,8 @@ class Hook:
         elif action == "finished":
             ok, facts, failed = self.restart_gates(w, ev, p, ctx, cost, mem, records)
             if ok:
-                self.st["proposals"][w["pane"]] = time.time()
+                prune_proposals(self.st["proposals"], time.time())
+                self.st["proposals"][w["sid"]] = time.time()
                 lines.append(
                     "[boss-jev] RESTART proposed for %s (%s): task #%s reported finished (task_complete %.2f), "
                     "%s, handoff %s with its footer, repos clean and pushed (%s), no child processes, no input "
