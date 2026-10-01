@@ -768,7 +768,7 @@ are re-invoked is the single easiest way to make a boss expensive.
 | **Blocked on a permission prompt** | P12 — say which kind, then the ladder |
 | **Anything blocks on the owner** | P12 ladder. Do not go quiet |
 | Worker asks a **question** | Answer it, or dispatch someone to find out — never investigate yourself |
-| Worker goes **idle** (your subscription fires) | Check whether it actually finished — silence is not success; dispatch the top item from the objective's Next list |
+| Worker goes **idle** (your subscription fires) | Check whether it actually finished — silence is not success. Finished: same as **done** — handoff on disk, `restart`, then dispatch the top item from the objective's Next list. No handoff: ask for it first |
 | **Silence** past a reasonable time | One `SendMessage`: "status? still on #N?". No reply and state looks wrong → propose a restart |
 | Worker looks **crashed** (`list --mine` shows its pane back at a shell) | Report it, propose `restart` — only with approval |
 | **Pulse fires** | Run plain `list` as well as `--mine`: claim any `unowned` pane in your project, or say why not |
