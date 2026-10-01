@@ -29,7 +29,7 @@ set -a; . "$ENVF"; set +a
 
 rung=${1:-}; shift || true
 text=${*:-}
-[[ -n "$text" ]] || { printf 'usage: boss-alert {0|5|15|30|clear} <text>\n' >&2; exit 1; }
+[[ -n "$text" ]] || { printf 'usage: boss-alert {0|<minutes>|clear} <text>\n' >&2; exit 1; }
 
 case "$rung" in
   0)     icon="🔴" ; pre="blocked" ;;
@@ -37,7 +37,7 @@ case "$rung" in
   15)    icon="🔴" ; pre="blocked 15 min" ;;
   30|*[0-9]*) icon="🔴" ; pre="blocked ${rung} min" ;;
   clear) icon="✅" ; pre="cleared" ;;
-  *) printf 'ERROR: rung must be 0|5|15|30|clear\n' >&2; exit 1 ;;
+  *) printf 'ERROR: rung must be 0, minutes or clear\n' >&2; exit 1 ;;
 esac
 
 msg="$icon *$pre* — $text"

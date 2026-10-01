@@ -7,7 +7,7 @@ Lucas on track `acme-groups`).
 ## The failure this exists to prevent
 
 The P12 ladder (`${CLAUDE_PLUGIN_ROOT}/skills/boss/references/escalation.md`) posts rungs at
-T+5, T+15, T+30 and every 30 after. Its timer is a detached `sleep` that
+T+5, T+15, T+30, T+60, T+120 and every 120 after (`policy.py`). Its timer is a detached `sleep` that
 re-invokes the boss session, so **a rung only fires when the boss wakes**. Once
 the Jev hook (`~/.claude/plans/2026-09-18-boss-jev-hook.md`) absorbs no-action
 events, the boss wakes less often and can sleep straight through a rung. A
@@ -68,8 +68,8 @@ the boss and this timer both post the same rung.
    that *documents* the format — a roster row, a state note — parse as a
    malformed marker. That happened at 14:59 on 2026-09-18 and put the routine
    into exit 1 on every tick.
-4. For each marker: `elapsed = now - t0`; the rung is 5 → 15 → 30 → 60 → 120 →
-   then every 120, **stopping for good at 24 h** since `t0` with one last line
+4. For each marker: `elapsed = now - t0`; the rung (`policy.rung_for`) is
+   5 → 15 → 30 → 60 → 120 → then every 120, **stopping for good at 24 h** since `t0` with one last line
    saying so (the staleness guard `due_rungs` already had). Posts the highest
    rung that is due and greater than `last`, **one per run** — with
    `Persistent=true` a laptop waking after three hours would otherwise fire

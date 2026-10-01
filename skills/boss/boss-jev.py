@@ -54,6 +54,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import boss_store  # noqa: E402
+import policy  # noqa: E402
 import registry  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
@@ -76,7 +77,6 @@ KEY_FILE = Path(os.environ.get("BOSS_TYPESAFE_ENV",
 DEADLINE_S = 4.0          # settings timeout is 8 s; this leaves half of it spare
 HI, LO = 0.85, 0.15       # "decided" means at or beyond one of these
 ARM_ACC = 0.95            # arming: accuracy at conf >= 0.85 on the two gate questions
-CTX_MIN, COST_MIN = 400_000, 90_000
 MAX_SCAN = 2 * 1024 * 1024
 TAIL = 4 * 1024 * 1024
 LATE_CHILD_S = 120
@@ -423,7 +423,7 @@ def decide_message(p, mem, report, ctx, cost):
     decided = (pt >= HI or pt <= LO) and po <= LO and pr <= LO
     ask = ASK_RE.search(report or "")
     new = sorted(tokens(report) - set(mem.get("known") or []))
-    heavy = ctx >= CTX_MIN or cost >= COST_MIN
+    heavy = policy.heavy(ctx, cost)
     cand = decided and not ask and not new and not heavy and (pt <= LO or bool(mem.get("finished")))
     tag = " [absorb-candidate]" if cand else ""
     if pt >= HI:
