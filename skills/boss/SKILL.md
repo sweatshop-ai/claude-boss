@@ -234,31 +234,38 @@ can tell whether the output is right.
 
 Measured 2026-08-30 across the fleet (`~/.claude/plans/2026-08-30-boss-team-token-audit.md`).
 
-### 1. Session age. Recycle old workers.
+### 1. Session age. One task, one session.
 
 A session pays for its **whole context on every turn**, and context trends up all
 session. Priced cost per turn rose **3.9× over a boss's life and 4.7× over a
 worker's**. A worker at 113k cost-units/turn is doing the same work a fresh one
 does at 30k.
 
-`boss-lifecycle.sh list` shows `CTX` and `COST/TURN`, and flags `heavy` at 60k and
-`RECYCLE` at 90k cost per turn.
+Cost is the smaller half. The larger is quality: a model gets worse as its
+context fills — it forgets instructions, repeats corrected mistakes, ignores files
+it read. Matt Pocock's "smart zone" ends around 125–150k on frontier models;
+Anthropic's long-running-agent harness gives each session one feature and hands
+over through git and a progress file. So (the owner, 2026-10-01):
 
-**Second signal: absolute context.** Keep `CTX` in view on every `list` — it is
-there and `ListAgents` does not carry it. Between **400k and 500k** the list shows `CTX-EVAL`: start evaluating
-a clear of that session, and decide between a fresh context and a restart with a
-handoff — the answer is "handoff" whenever the worker holds anything not on disk
-(probe scripts, a diagnosis, a half-formed plan). At **500k** it shows
-`CTX-RESTART`: overdue, propose it at the worker's next idle moment. Cost per turn
-and context size are independent: a session that is cheap per turn still hits the
-window ceiling, and a compaction there loses what a handoff would have kept.
-
-**When a flagged worker finishes a task** — not mid-task — have it write a handoff
-(branch, what was tried and rejected, live constraints, next step), confirm its
-work is pushed, then `restart` it. It keeps its name and its pane. When boss-jev
-proposes the restart (below, Phase D), it has already checked the handoff footer,
-git and the worker's child processes: run the command it gives you, which is
+**Every task starts in a fresh session.** When a worker reports a task done, it
+has written a handoff and pushed (Phase B asks for both in every dispatch); you
+`restart` it before its next dispatch. It keeps its name and its pane; the next
+task starts at ~30k instead of where the last one ended. Re-reading the repo is
+cheaper than carrying the last task's dead ends. When boss-jev proposes the
+restart (below, Phase D), it has already checked the handoff footer, git and the
+worker's child processes: run the command it gives you, which is
 `restart --require-idle` with the session and the last record pinned.
+
+**A task bigger than one smart zone gets split.** Keep `CTX` in view on every
+`list` — `ListAgents` does not carry it. At **150k** a worker shows `CTX-SPLIT`:
+send it one message — at its next natural boundary (a commit, a passing test, a
+finished sub-step), write the handoff, push, and report; then restart it and
+dispatch the remainder with the handoff as its input. At **250k** it shows
+`CTX-OVER`: overdue, ask for the boundary now. Size dispatches so one fits in
+150k: one ticket, one PR, one diagnosis — not "the feature".
+
+`list` also flags `heavy` at 60k and `RECYCLE` at 90k cost per turn; under this
+rule they mean a task that ran long, the same remedy as `CTX-SPLIT`.
 
 Two limits:
 - **A finished worker with its handoff on disk is yours to restart** (the owner,
@@ -271,8 +278,8 @@ Two limits:
 it takes a turn. Recycling an old **active** one saves a great deal. These are
 different actions; do not collapse them.*
 
-**Your own context: compact, don't clear (2026-09-08).** The same 400–500k band
-applies to you, and `list` shows your own row (`self`) with the same flags. The
+**Your own context: compact, don't clear (2026-09-08).** You keep a 400–500k
+band, and `list` shows your own row (`self`) with `CTX-EVAL` and `CTX-RESTART`. The
 remedy differs. A worker holds things that exist nowhere else — probe scripts, a
 diagnosis, a half-formed plan — so it gets a handoff and a restart. Your durable
 state is the tracker, on disk, by construction; a compaction costs you little.
@@ -287,7 +294,7 @@ Open blockers listed there are still live — resume their ladders from the
 recorded T+0.
 
 Workers are deliberately left at the default (compaction at the 1M ceiling) so
-that your 400k/500k handoff protocol fires first. Do not set `autoCompactWindow`
+that your one-task rule and the 150k split fire first. Do not set `autoCompactWindow`
 globally — it would take that choice away from you for every worker.
 
 ### 2. Broadcasts. They cost N times one message.
@@ -556,10 +563,10 @@ does not.
 
 Long sessions degrade as well as cost. Signs: repetitive errors, circular
 reasoning, re-reading files they already read, forgetting earlier instructions.
-
-This is the same remedy as recycling, for a different reason: once the worker has
-pushed and written its handoff, restart it yourself and tell them; propose it first
-only when its state is not on disk.
+They show up below 150k too. Treat them as `CTX-SPLIT`: ask for the boundary and
+the handoff, then restart it yourself and tell them; propose it first only when
+its state is not on disk. Re-explaining the instruction it forgot adds context
+and makes it worse.
 
 ### P11. Plan review
 
@@ -660,11 +667,13 @@ Parse `$ARGUMENTS`: empty or `status` → **A** · `dispatch <task> [worker]` �
 4. **Send a self-contained prompt** — task and issue number, how to read it, the
    project path, branch instructions (P8), and that it reports back to you by name
    when done or blocked. **Name the task as `Task #<N>` in the first line**:
-   boss-jev reads that number to tie a handoff to the dispatch. To a worker at
-   `CTX-EVAL`, `CTX-RESTART` or `RECYCLE`, add: *"When the task is done, write
-   `handoff-<name>-<date>.md` in your cwd and end it with the line printed by
+   boss-jev reads that number to tie a handoff to the dispatch. Every dispatch
+   ends with: *"When the task is done, or when I ask you to stop at a boundary,
+   write `handoff-<name>-<date>.md` in your cwd and end it with the line printed by
    `python3 ${CLAUDE_PLUGIN_ROOT}/skills/boss/boss-jev.py footer --task <N> --repos <every repo
-   you touched>`, after committing and pushing."* For a judgment task, add: *"Use a
+   you touched>`, after committing and pushing. You will be restarted fresh
+   after it."* A dispatch that continues a split task names the handoff to read
+   first. For a judgment task, add: *"Use a
    cheap subagent for the mechanical parts; keep for yourself only the steps where
    a plausible-looking wrong answer would pass."*
 5. **Verification is the tool result.** An error means it didn't land. If the
@@ -754,7 +763,7 @@ are re-invoked is the single easiest way to make a boss expensive.
 
 | Event | Response |
 |---|---|
-| Worker reports **done** | Update tracker, run P8 git checks, check its COST/TURN for recycling, dispatch next |
+| Worker reports **done** | Update tracker, run P8 git checks, check the handoff is on disk, `restart` it, then dispatch next |
 | Worker sends a **plan** | Review per P11, reply with a verdict |
 | **Blocked on a permission prompt** | P12 — say which kind, then the ladder |
 | **Anything blocks on the owner** | P12 ladder. Do not go quiet |
@@ -770,8 +779,8 @@ Nothing on the board → the tracker's pending items. Still nothing → say so.
 
 Every cycle: update the tracker, keep the objective's Next list three deep and
 tick off any Done-when criterion that has just been met, re-check P8 conflicts,
-watch for P9 and for `RECYCLE` / `CTX-EVAL` / `CTX-RESTART` flags. A worker crossing 400k gets its
-handoff asked for at its next idle moment, not after it has hit the ceiling.
+watch for P9 and for `CTX-SPLIT` / `CTX-OVER` / `RECYCLE` flags. A worker crossing 150k is asked
+for a boundary and a handoff, not left to drift towards the ceiling.
 With `voice: ON`, every response to the owner also gets TTS; silent otherwise.
 
 ## Phase E: Wrap-up
@@ -800,7 +809,7 @@ With `voice: ON`, every response to the owner also gets TTS; silent otherwise.
 6. **Confirm the first dispatch**; after the owner grants autonomy, skip confirmations.
 7. **Intelligent assignment only** — P6.
 8. **No two workers on the same project + branch** — P8. No one on `main`.
-9. **Restart a finished worker with a handoff on disk yourself and report it**;
+9. **One task, one session.** Restart a finished worker with a handoff on disk yourself and report it;
    propose it when the task is unfinished, the handoff is missing, or the worker
    looks crashed. Never on a BUSY worker.
 10. **One message per topic.**
