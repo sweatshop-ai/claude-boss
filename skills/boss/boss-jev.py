@@ -442,6 +442,14 @@ def decide_message(p, mem, report, ctx, cost):
     return "wake", "; ".join(why) or "first finished report"
 
 
+def prune_proposals(props, now):
+    """Drop restart proposals past the cooldown. Keyed by session, the map
+    would otherwise gain one entry per finished task for good; this also
+    clears the pane-keyed entries older state files carry."""
+    for k in [k for k, t in props.items() if not isinstance(t, (int, float)) or now - t >= PROPOSAL_COOLDOWN_S]:
+        del props[k]
+
+
 def absorb_ready(mem, scan_complete):
     if not scan_complete:
         return False, "dispatch memory incomplete (first run, rescan or catch-up)"
@@ -1066,6 +1074,7 @@ class Hook:
         elif action == "finished":
             ok, facts, failed = self.restart_gates(w, ev, p, ctx, cost, mem, records)
             if ok:
+                prune_proposals(self.st["proposals"], time.time())
                 self.st["proposals"][w["sid"]] = time.time()
                 lines.append(
                     "[boss-jev] RESTART proposed for %s (%s): task #%s reported finished (task_complete %.2f), "
