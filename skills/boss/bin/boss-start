@@ -13,9 +13,10 @@
 #                          is on disk by construction (the tracker), so a
 #                          compaction costs it little, while a worker holds
 #                          probe scripts and half-formed diagnoses in its head
-#                          and gets a handoff + restart instead. 450k sits inside
-#                          the 400–500k band the skill uses for workers and
-#                          below the 500k CTX-RESTART line, so a boss never
+#                          and gets a handoff + restart after every task.
+#                          450k sits inside the boss's own 400–500k band
+#                          (workers use 150k/250k) and below the 500k
+#                          CTX-RESTART line, so a boss never
 #                          shows up on its own list as overdue. A session cannot
 #                          compact itself on demand (there is no programmatic
 #                          /compact) — the threshold is the whole lever, and it
