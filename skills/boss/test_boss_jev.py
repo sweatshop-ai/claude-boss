@@ -178,6 +178,16 @@ class Decisions(unittest.TestCase):
         self.assertTrue(bj.absorb_ready(self.MEM, True)[0])
 
 
+class Proposals(unittest.TestCase):
+    def test_prune_keeps_only_live_cooldowns(self):
+        mod = load()
+        now = 1_000_000.0
+        props = {"sid-fresh": now - 60, "sid-old": now - mod.PROPOSAL_COOLDOWN_S,
+                 "%7": now - 10 * mod.PROPOSAL_COOLDOWN_S, "junk": "x"}
+        mod.prune_proposals(props, now)
+        self.assertEqual(props, {"sid-fresh": now - 60})
+
+
 class Replay(unittest.TestCase):
     """R5.2: the 31 labelled events of #76, in order, through decide_message."""
     SAMPLE = PLANS / "2026-09-18-boss-jev-sample.jsonl"

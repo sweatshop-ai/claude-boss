@@ -35,8 +35,9 @@ defaults to Opus regardless of the global `model` setting, and why `/model
 fable` typed by the owner in their own terminal must not leak into the fleet.
 Override per worker with `--model` when the criterion below says so.
 
-Same tokenizer across Fable 5.1 and Opus 4.7+, so the 400k/500k context lines
-and the 60k/90k cost-per-turn lines need no re-baselining.
+Same tokenizer across Fable 5.1 and Opus 4.7+, so the context lines (150k/250k
+for workers, 400k/500k for the boss) and the 60k/90k cost-per-turn lines need no
+re-baselining.
 
 **Effort: `xhigh` on both**, pinned by `boss-start` and by `spawn`. Claude
 Code's default is `high` on every model except Opus 4.7, so a global
