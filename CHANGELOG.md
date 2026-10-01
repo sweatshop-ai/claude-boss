@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.6.0 — 2026-10-01
+
+One task, one session. A model gets worse as its context fills, well before
+the window ends (Pocock's "smart zone", ~125–150k), so workers no longer carry
+one task's dead ends into the next.
+
+- **Every finished task is a restart.** Every dispatch asks for the handoff and
+  the push; the boss restarts the worker before its next dispatch. boss-jev
+  drops its 400k / 90k-per-turn gate and proposes the restart for any finished
+  task that passes the other gates.
+- **A task bigger than 150k gets split.** `list` flags workers `CTX-SPLIT` at
+  150k and `CTX-OVER` at 250k (was `CTX-EVAL` 400k, `CTX-RESTART` 500k): the
+  worker stops at its next boundary, hands off, and a fresh session continues.
+- **The boss keeps its 400k/500k band** and its 450k autocompact; its state is
+  the tracker.
+
 ## 0.5.0 — 2026-09-29
 
 One rule for the boss files, and the tools write where the hooks read.

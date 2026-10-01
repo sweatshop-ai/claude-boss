@@ -896,8 +896,8 @@ class Hook:
             rec = session_by_pid(w["pid"])
             if not rec or rec.get("sessionId") != w["sid"] or rec.get("status") != "idle":
                 return False, facts, "status is %r, not idle" % ((rec or {}).get("status"),)
-            if ctx < CTX_MIN and cost < COST_MIN:
-                return False, facts, "CTX %dk and COST/TURN %dk under the thresholds" % (ctx // 1000, cost // 1000)
+            # No size gate: one task per session (the owner, 2026-10-01), so
+            # every finished task is a restart, however small the context.
             facts["ctx"] = "CTX %dk, COST/TURN %dk" % (ctx // 1000, cost // 1000)
             i, sent_at = report_turn(records, ev["body"])
             if i is None:
