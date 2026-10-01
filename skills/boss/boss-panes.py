@@ -11,11 +11,13 @@ One place answers all the questions the boss keeps asking badly:
                         abort it.
   what is it costing -> context carried on its most recent turn, read from the
                         session transcript, plus a priced cost-per-turn over
-                        the last 200 turns.
+                        the last 200 turns (transcript.py).
 
 Output is TSV, one line per resolved pane:
 
     pane_id  name  session_id  status  ctx_k  cost_per_turn_k  turns  flags
+
+`turns` counts the turns in the transcript's last 4 MB, not the whole session.
 
 `flags` is policy.flag_for() for the session's role (boss when it holds a boss
 marker, worker otherwise), space-separated, or "-".
@@ -35,14 +37,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import boss_store  # noqa: E402
 import policy  # noqa: E402
 import registry  # noqa: E402
+import transcript  # noqa: E402
 
 CFG = Path(os.environ.get("CLAUDE_CONFIG_DIR", str(Path.home() / ".claude")))
 
-# Relative Opus token prices. Cache reads are a tenth of fresh input, so raw
-# context traffic overstates spend ~7.5x; weighting is what makes the number
-# comparable between a young session and an old one.
-W_IN, W_CACHE_WRITE, W_CACHE_READ, W_OUT = 1.0, 1.25, 0.10, 5.0
-BAND = 200
 
 
 def ppid_of(pid):
@@ -68,78 +66,6 @@ def ancestors(pid, stop_at, limit=40):
 
 def transcript_for(rec):
     return registry.transcript_of(rec, CFG)
-
-
-def usage_tail(path, band=BAND):
-    """Last-turn context and priced cost/turn over the final `band` turns.
-
-    Reads the whole file: transcripts are append-only JSONL and a turn's usage
-    block is not fixed-width, so seeking from the end is not reliable.
-    """
-    rows = []
-    try:
-        with path.open(errors="replace") as fh:
-            for line in fh:
-                if '"usage"' not in line:
-                    continue
-                try:
-                    d = json.loads(line)
-                except ValueError:
-                    continue
-                u = (d.get("message") or {}).get("usage")
-                if not u:
-                    continue
-                rows.append((u.get("input_tokens", 0),
-                             u.get("cache_creation_input_tokens", 0),
-                             u.get("cache_read_input_tokens", 0),
-                             u.get("output_tokens", 0)))
-    except OSError:
-        return 0, 0, 0
-    if not rows:
-        return 0, 0, 0
-    last = rows[-1]
-    ctx = last[0] + last[1] + last[2]
-    tail = rows[-band:]
-    cost = sum(r[0] * W_IN + r[1] * W_CACHE_WRITE + r[2] * W_CACHE_READ + r[3] * W_OUT
-               for r in tail) / len(tail)
-    return ctx, cost, len(rows)
-
-
-TAIL_BYTES = 4 * 1024 * 1024
-
-
-def last_conversation_uuid(path, nbytes=TAIL_BYTES):
-    """uuid of the last user, assistant or queued_command record in the tail.
-
-    This is the pin `boss-lifecycle.sh --require-idle --expect-last` compares
-    against: a worker that took any input after the boss looked has a newer one.
-    Not the file size, because idle sessions still append records of their own
-    (away_summary, ai-title, bridge-session, measured 2026-09-18).
-    """
-    try:
-        with open(path, "rb") as fh:
-            fh.seek(0, os.SEEK_END)
-            size = fh.tell()
-            fh.seek(max(0, size - nbytes))
-            data = fh.read()
-    except OSError:
-        return None
-    lines = data.split(b"\n")
-    if size > nbytes:
-        lines = lines[1:]                 # the first line is cut in half
-    last = None
-    for raw in lines:
-        if b'"uuid"' not in raw:
-            continue
-        try:
-            d = json.loads(raw)
-        except ValueError:
-            continue
-        t = d.get("type")
-        if t in ("user", "assistant") or (
-                t == "attachment" and (d.get("attachment") or {}).get("type") == "queued_command"):
-            last = d.get("uuid") or last
-    return last
 
 
 def load_sessions():
@@ -226,7 +152,7 @@ def main():
             if pane_id != args[1]:
                 continue
             t = transcript_for(rec)
-            pin = last_conversation_uuid(t) if t else None
+            pin = transcript.pin(transcript.tail(t)) if t else None
             print("\t".join([rec.get("sessionId") or "-", rec.get("status") or "-", pin or "-"]))
             return 0
         print("-\t-\t-")
@@ -237,7 +163,7 @@ def main():
         if want and pane_id != want:
             continue
         t = transcript_for(rec)
-        ctx, cost, turns = usage_tail(t) if t else (0, 0, 0)
+        ctx, cost, turns = transcript.usage(transcript.tail(t)) if t else (0, 0, 0)
         role = policy.BOSS if boss_store.is_boss(rec.get("sessionId") or "", CFG) else policy.WORKER
         flags = policy.flag_for(ctx, cost, role) if t else []
         print("\t".join([
