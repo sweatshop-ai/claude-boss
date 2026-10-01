@@ -105,35 +105,11 @@ class MarkerError(Exception):
 
 # ---------------------------------------------------------------- the ladder
 
-# After 24 h the ladder says so once and stops for good, matching the
-# staleness guard boss-pulse.py's due_rungs already had (mins > 60 * 24).
-STOP_MIN = 24 * 60
-
-def rung_for(elapsed_min: int) -> int | None:
-    """Highest rung reached at `elapsed_min`: 5, 15, 30, 60, 120, every 120.
-
-    escalation.md: "T+30, then every 30 ... widening". Lucas set the widening on
-    2026-09-18: 30 -> 60 -> 120, then every 120 until the stop. A blocker that
-    has held two hours is more urgent than one that has held five minutes, so
-    the rung label stays the elapsed minutes, which is what boss-alert prints.
-    """
-    if elapsed_min < 5:
-        return None
-    if elapsed_min < 15:
-        return 5
-    if elapsed_min < 30:
-        return 15
-    if elapsed_min < 60:
-        return 30
-    if elapsed_min < 120:
-        return 60
-    if elapsed_min >= STOP_MIN:
-        return STOP_MIN
-    return (elapsed_min // 120) * 120
-
-
-def next_rung(rung: int) -> int:
-    return {5: 15, 15: 30, 30: 60, 60: 120}.get(rung, min(rung + 120, STOP_MIN))
+# The rungs, the 24 h stop and next_rung live in skills/boss/policy.py, which
+# boss-pulse reads too. After STOP_MIN the ladder says so once and stops.
+_POLICY = Path(__file__).resolve().parent.parent / "skills" / "boss"
+sys.path.insert(0, str(_POLICY))
+from policy import STOP_MIN, next_rung, rung_for  # noqa: E402,F401
 
 
 # ---------------------------------------------------------------- parsing
@@ -559,7 +535,7 @@ def selftest() -> int:
         if got != want:
             fails.append(f"{name}: got {got!r}, want {want!r}")
 
-    # --- the ladder itself: 5, 15, 30, then every 30
+    # --- the ladder itself: 5, 15, 30, 60, 120, then every 120 (policy.py)
     for elapsed, want in [(0, None), (4, None), (5, 5), (14, 5), (15, 15),
                           (29, 15), (30, 30), (59, 30), (60, 60), (119, 60),
                           (120, 120), (239, 120), (240, 240), (1439, 1320),

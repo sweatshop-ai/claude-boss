@@ -17,7 +17,7 @@ Restart at T+0 each time a NEW blocker appears; run to completion or until it cl
 | **T+0** | `AskUserQuestion` when the blocker has discrete choices — it rings the FleetView chime and raises a phone notification; plain text otherwise, and TTS too if `voice: ON`. Name **one** action, where it must happen (pane), and what is idle waiting for it. Set the client emoji on the blocked worker's pane as an attention marker (`~/.claude/skills/afk/colors.json`). **Write the blocker, the pane and the T+0 time into the tracker's `## Open blockers`** — you autocompact at 450k, and a ladder that lives only in your context dies with the compaction. Start the timer. |
 | **T+5 min** | Re-check first. Still blocked → say it again, shorter. `boss-alert 5 "<text>"` |
 | **T+15 min** | `boss-alert 15 "<text>"`, naming the cost: how long, how many workers idle, what it holds up. |
-| **T+30, then every 30** | Keep going, widening the interval. A blocker that has held two hours is more urgent than one that has held five minutes, not less. |
+| **T+30, T+60, T+120, then every 120** | Keep going, widening the interval, and stop at 24 h. A blocker that has held two hours is more urgent than one that has held five minutes, not less. The rungs are `policy.RUNGS` (`skills/boss/policy.py`); the ladder routine and the pulse both read them there. |
 | **cleared** | `boss-alert clear "<text>"`, strip the emoji, say so. An alert channel that keeps firing after the fact becomes wallpaper. |
 
 ## The timer
