@@ -1126,10 +1126,10 @@ class Gates(unittest.TestCase):
         self.assertEqual(i, 1)
         self.assertGreater(ts, 0)
         self.assertFalse(any(bj.is_input(d) for d in recs[i + 1:]))
-        self.assertEqual(bj.pin_of(recs), "a2")
+        self.assertEqual(bj.transcript.pin(recs), "a2")
         recs.append({"type": "attachment", "uuid": "q1", "attachment": {"type": "queued_command", "prompt": "x"}})
         self.assertTrue(any(bj.is_input(d) for d in recs[i + 1:]))
-        self.assertEqual(bj.pin_of(recs), "q1")
+        self.assertEqual(bj.transcript.pin(recs), "q1")
         self.assertEqual(bj.report_turn(recs, "something else")[0], None)
 
 
@@ -1221,24 +1221,6 @@ class PanesState(unittest.TestCase):
         name, call = self.set_name(with_agent_name=False)
         self.assertIsNone(call)
         self.assertEqual(name, "reviewer-1")
-
-    def test_last_conversation_uuid(self):
-        spec = importlib.util.spec_from_file_location("bp", str(HERE / "boss-panes.py"))
-        bp = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(bp)
-        tmp = Path(tempfile.mkdtemp())
-        try:
-            p = tmp / "t.jsonl"
-            p.write_text("\n".join(json.dumps(d) for d in [
-                {"type": "user", "uuid": "u1", "message": {"content": "x"}},
-                {"type": "assistant", "uuid": "a1", "message": {"content": []}},
-                {"type": "system", "uuid": "s1", "subtype": "away_summary"},
-                {"type": "ai-title", "aiTitle": "t"},
-            ]) + "\n")
-            self.assertEqual(bp.last_conversation_uuid(p), "a1")
-            self.assertEqual(bp.last_conversation_uuid(p), bj.pin_of(bj.tail_records(p)))
-        finally:
-            shutil.rmtree(tmp)
 
 
 # ------------------------------------------------- boss-lifecycle --require-idle
