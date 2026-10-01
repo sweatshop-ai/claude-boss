@@ -912,7 +912,10 @@ class Hook:
                 return False, facts, "the boss sent it something after the report"
             if p["redirected"] >= 0.5:
                 return False, facts, "redirected %.2f" % p["redirected"]
-            last = self.st["proposals"].get(w["pane"], 0)
+            # Keyed by session, not pane: a restart keeps the pane, and the
+            # fresh session finishing its own task within the hour must still
+            # get its restart (one task, one session).
+            last = self.st["proposals"].get(w["sid"], 0)
             if time.time() - last < PROPOSAL_COOLDOWN_S:
                 return False, facts, "a restart was proposed for this pane %d min ago" % ((time.time() - last) // 60)
             need()
@@ -1063,7 +1066,7 @@ class Hook:
         elif action == "finished":
             ok, facts, failed = self.restart_gates(w, ev, p, ctx, cost, mem, records)
             if ok:
-                self.st["proposals"][w["pane"]] = time.time()
+                self.st["proposals"][w["sid"]] = time.time()
                 lines.append(
                     "[boss-jev] RESTART proposed for %s (%s): task #%s reported finished (task_complete %.2f), "
                     "%s, handoff %s with its footer, repos clean and pushed (%s), no child processes, no input "

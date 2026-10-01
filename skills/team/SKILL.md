@@ -65,8 +65,11 @@ Check yours any time:
 ${CLAUDE_PLUGIN_ROOT}/skills/boss/boss-panes.py            # every pane: name, status, CTX, COST/TURN
 ```
 
-**Above ~90k cost-units per turn, you are expensive.** At your next finished task —
-never mid-task — say so to the owner (or to your boss, if you have one) and propose a
+Quality falls too: past ~150k of context a model forgets instructions and repeats
+corrected mistakes (Pocock's "smart zone"). **If you work for a boss, every finished
+task ends in a handoff and a restart** — the dispatch says so; do it even when the
+task was small. On your own: **above ~150k of context or ~90k cost-units per turn**,
+at your next finished task — never mid-task — say so to the owner and propose a
 restart: write a short handoff (branch, what you tried and rejected, live
 constraints, next step), push your work, then let the session be recycled. You keep
 your name and your pane.
