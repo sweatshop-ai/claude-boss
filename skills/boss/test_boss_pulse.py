@@ -134,5 +134,48 @@ class Marker(PulseCase):
         self.assertEqual(self.stop(), "")
 
 
+class DueRungs(unittest.TestCase):
+    """due_rungs() directly: which rung is due, and what counts as already said."""
+
+    def setUp(self):
+        import importlib.util
+        self.tmp = Path(tempfile.mkdtemp(prefix="boss-pulse-rungs-"))
+        (self.tmp / "pm").mkdir()
+        old = os.environ.get("CLAUDE_CONFIG_DIR")
+        os.environ["CLAUDE_CONFIG_DIR"] = str(self.tmp)
+        try:
+            spec = importlib.util.spec_from_file_location("pulse_%d" % time.monotonic_ns(), str(PULSE))
+            self.mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(self.mod)
+        finally:
+            if old is None:
+                os.environ.pop("CLAUDE_CONFIG_DIR", None)
+            else:
+                os.environ["CLAUDE_CONFIG_DIR"] = old
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def due(self, minutes_ago, fired):
+        t0 = time.localtime(time.time() - minutes_ago * 60)
+        line = "- Ottilie blocked on OWNER — T+0 %s" % time.strftime("%Y-%m-%d %H:%M", t0)
+        (self.tmp / "pm" / (TRACK + ".md")).write_text(
+            "# Tracker\n\n## Open blockers\n%s\n\n## Decisions\n" % line, encoding="utf-8")
+        return self.mod.due_rungs(TRACK, fired)
+
+    def test_rung_follows_policy(self):
+        (key, rung, _, _), = self.due(100, {})
+        self.assertEqual(rung, 60)
+        self.assertEqual(self.due(130, {})[0][1], 120)
+
+    def test_a_later_rung_already_fired_holds(self):
+        # A state file from the old schedule (5…90…240) holds 90 at T+100,
+        # where the policy now says 60: no step back down, no repeat.
+        (key, _, _, _), = self.due(100, {})
+        self.assertEqual(self.due(100, {key: 90}), [])
+        self.assertEqual(self.due(100, {key: 60}), [])
+        self.assertEqual(self.due(130, {key: 90})[0][1], 120)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

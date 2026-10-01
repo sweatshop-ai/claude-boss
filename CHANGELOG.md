@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.7.0 — 2026-10-01
+
+The steering numbers live in one module.
+
+- **`skills/boss/policy.py`** holds the context bands (worker 150k/250k, boss
+  400k/500k), the cost lines (60k/90k per turn) and the escalation rungs
+  (5, 15, 30, 60, 120, then every 120, stop at 24 h). `flag_for`, `heavy`,
+  `rung_for` and `next_rung` are its interface.
+- **`boss-panes.py` prints the flags** as an eighth column, by role: a session
+  with a boss marker gets the boss band, every other session the worker band.
+  `boss-lifecycle.sh list` shows them and no longer codes any threshold. A
+  second boss in the list now gets the boss band too (it got the worker one).
+- **The pulse and the ladder share one rung schedule.** The pulse had its own
+  (5…90…240) and could remind the boss of a rung the ladder never posts.
+- **boss-jev's `heavy` gate uses the worker band** (150k), not the boss's 400k.
+- **`test_policy.py` checks every prose quote** of these numbers in SKILL.md,
+  team/SKILL.md, models.md, escalation.md, boss-ladder.md and boss-start.
+  Change a number and it names each line to update.
+- **The #76 Replay tests run again**: they looked for the sample next to the
+  repo, a path left from the `~/.claude/skills` layout, and skipped silently.
+- `escalation.md` and `boss-alert`'s usage now state the real rungs.
+
 ## 0.6.0 — 2026-10-01
 
 One task, one session. A model gets worse as its context fills, well before

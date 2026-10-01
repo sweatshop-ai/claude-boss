@@ -15,7 +15,10 @@ One place answers all the questions the boss keeps asking badly:
 
 Output is TSV, one line per resolved pane:
 
-    pane_id  name  session_id  status  ctx_k  cost_per_turn_k  turns
+    pane_id  name  session_id  status  ctx_k  cost_per_turn_k  turns  flags
+
+`flags` is policy.flag_for() for the session's role (boss when it holds a boss
+marker, worker otherwise), space-separated, or "-".
 
 Panes with no Claude session are omitted. Nothing here writes; --set-name is the
 one exception. It calls cc-agent-names' `agent-name set` when that is on PATH,
@@ -29,6 +32,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import boss_store  # noqa: E402
+import policy  # noqa: E402
 import registry  # noqa: E402
 
 CFG = Path(os.environ.get("CLAUDE_CONFIG_DIR", str(Path.home() / ".claude")))
@@ -233,6 +238,8 @@ def main():
             continue
         t = transcript_for(rec)
         ctx, cost, turns = usage_tail(t) if t else (0, 0, 0)
+        role = policy.BOSS if boss_store.is_boss(rec.get("sessionId") or "", CFG) else policy.WORKER
+        flags = policy.flag_for(ctx, cost, role) if t else []
         print("\t".join([
             pane_id,
             rec.get("name") or "-",
@@ -241,6 +248,7 @@ def main():
             f"{ctx/1000:.0f}",
             f"{cost/1000:.0f}",
             str(turns),
+            " ".join(flags) or "-",
         ]))
     return 0
 
