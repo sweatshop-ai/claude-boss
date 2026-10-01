@@ -213,8 +213,10 @@ def due_rungs(track, fired):
         if rung is None or mins > policy.STOP_MIN:
             continue                              # too fresh, or stale/mistyped
         key = re.sub(r"\W+", "", line)[:40]
-        if fired.get(key) == rung:
-            continue                              # already said this one
+        prev = fired.get(key)
+        if isinstance(prev, int) and prev >= rung:
+            continue                              # already said this one, or a later one
+                                                  # (state from an older schedule: 90, 180)
         due.append((key, rung, mins, line.strip()[:120]))
     return due
 

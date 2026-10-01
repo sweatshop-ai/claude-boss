@@ -535,7 +535,7 @@ def selftest() -> int:
         if got != want:
             fails.append(f"{name}: got {got!r}, want {want!r}")
 
-    # --- the ladder itself: 5, 15, 30, then every 30
+    # --- the ladder itself: 5, 15, 30, 60, 120, then every 120 (policy.py)
     for elapsed, want in [(0, None), (4, None), (5, 5), (14, 5), (15, 15),
                           (29, 15), (30, 30), (59, 30), (60, 60), (119, 60),
                           (120, 120), (239, 120), (240, 240), (1439, 1320),
