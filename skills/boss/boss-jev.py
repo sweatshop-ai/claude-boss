@@ -56,6 +56,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import boss_store  # noqa: E402
 import policy  # noqa: E402
 import registry  # noqa: E402
+import transcript  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 CFG = Path(os.environ.get("CLAUDE_CONFIG_DIR", str(Path.home() / ".claude")))
@@ -78,11 +79,9 @@ DEADLINE_S = 4.0          # settings timeout is 8 s; this leaves half of it spar
 HI, LO = 0.85, 0.15       # "decided" means at or beyond one of these
 ARM_ACC = 0.95            # arming: accuracy at conf >= 0.85 on the two gate questions
 MAX_SCAN = 2 * 1024 * 1024
-TAIL = 4 * 1024 * 1024
 LATE_CHILD_S = 120
 PROPOSAL_COOLDOWN_S = 3600
 QIDS = ("task_complete", "needs_owner", "redirected")
-W_IN, W_CACHE_WRITE, W_CACHE_READ, W_OUT = 1.0, 1.25, 0.10, 5.0   # as boss-panes.py
 
 
 class Refused(Exception):
@@ -466,47 +465,7 @@ def remember(mem, report, p):
         mem["finished"] = True
 
 
-# --------------------------------------------------------- transcript reading
-
-def tail_records(path, nbytes=TAIL):
-    try:
-        with open(path, "rb") as fh:
-            fh.seek(0, os.SEEK_END)
-            size = fh.tell()
-            fh.seek(max(0, size - nbytes))
-            data = fh.read()
-    except (OSError, TypeError):
-        return []
-    lines = data.split(b"\n")
-    if size > nbytes:
-        lines = lines[1:]
-    out = []
-    for raw in lines:
-        if not raw.strip():
-            continue
-        try:
-            out.append(json.loads(raw))
-        except ValueError:
-            continue
-    return out
-
-
-def usage(records):
-    """(context tokens of the last turn, priced cost per turn over the last 200)."""
-    rows = []
-    for d in records:
-        u = (d.get("message") or {}).get("usage") if isinstance(d.get("message"), dict) else None
-        if u:
-            rows.append((u.get("input_tokens", 0), u.get("cache_creation_input_tokens", 0),
-                         u.get("cache_read_input_tokens", 0), u.get("output_tokens", 0)))
-    if not rows:
-        return 0, 0
-    last = rows[-1]
-    tail = rows[-200:]
-    cost = sum(r[0] * W_IN + r[1] * W_CACHE_WRITE + r[2] * W_CACHE_READ + r[3] * W_OUT
-               for r in tail) / len(tail)
-    return last[0] + last[1] + last[2], cost
-
+# ------------------------------------------- report and input in a transcript
 
 def send_messages(d):
     """SendMessage tool_uses in an assistant record: [(to, message)]."""
@@ -561,16 +520,6 @@ def is_input(d):
     if isinstance(c, list):
         return any(isinstance(x, dict) and x.get("type") == "text" for x in c)
     return False
-
-
-def pin_of(records):
-    last = None
-    for d in records:
-        t = d.get("type")
-        if t in ("user", "assistant") or (
-                t == "attachment" and (d.get("attachment") or {}).get("type") == "queued_command"):
-            last = d.get("uuid") or last
-    return last
 
 
 # ------------------------------------------------------------------ the hook
@@ -912,7 +861,7 @@ class Hook:
                 return False, facts, "its report is not in the last 4 MB of its transcript"
             if any(is_input(d) for d in records[i + 1:]):
                 return False, facts, "it took input after the report"
-            facts["pin"] = pin_of(records)
+            facts["pin"] = transcript.pin(records)
             if not facts["pin"]:
                 return False, facts, "no complete conversation record in the last 4 MB to pin"
             disp = self.dispatch_for(w)
@@ -1028,8 +977,8 @@ class Hook:
                 if armed and pending:
                     return self.pending_only(pending)
                 return None
-            records = tail_records(w["transcript"]) if w["transcript"] else []
-            ctx, cost = usage(records)
+            records = transcript.tail(w["transcript"]) if w["transcript"] else []
+            ctx, cost, _ = transcript.usage(records)
             handoff = bool(newest_handoff(w["cwd"], (disp or {}).get("ts", 0)))
             p = self.ask_jev(self.request(w, ev, disp, ctx, handoff))
             action, reason = decide_message(p, mem, ev["body"], ctx, cost)

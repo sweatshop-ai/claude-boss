@@ -12,6 +12,12 @@ itself. It holds a marker under `pm/.boss-sessions/` and a track.
 bands, cost lines, escalation rungs. One module, `skills/boss/policy.py`; the
 prose quotes it and `test_policy.py` keeps the quotes true.
 
+**Transcript**: a session's append-only JSONL log. Context, cost per turn and
+the pin are read from its last 4 MB by one module, `skills/boss/transcript.py`.
+
+**Pin**: the uuid of the last user, assistant or queued-command record in a
+transcript. A worker that took input after the boss looked has a newer one.
+
 **Flag**: what the policy says about one session right now, by role.
 Worker: `CTX-SPLIT` (cut the task at its next boundary), `CTX-OVER` (overdue).
 Boss: `CTX-EVAL`, `CTX-RESTART`. Either: `heavy`, `RECYCLE` (cost per turn).
