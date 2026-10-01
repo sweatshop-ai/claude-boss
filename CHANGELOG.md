@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.8.0 — 2026-10-01
+
+One module reads a transcript.
+
+- **`skills/boss/transcript.py`** holds the tail read (last 4 MB), the token
+  price weights and the pin. `tail`, `usage` and `pin` are its interface.
+  boss-panes and boss-jev each had their own copy of all three.
+- **boss-panes reads the last 4 MB**, not the whole file. On the six largest
+  transcripts on the machine (20-33 MB) the context and cost came out identical
+  and the read was 2-5x faster.
+- **The `turns` column now counts the turns in that tail**, not the whole
+  session. Nothing reads it; `boss-lifecycle.sh list` does not show it.
+- `test_transcript.py` tests the module on JSONL fixtures. The test that only
+  checked the two pin copies agreed is gone with the second copy.
+
 ## 0.7.0 — 2026-10-01
 
 The steering numbers live in one module.

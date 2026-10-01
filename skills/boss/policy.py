@@ -17,7 +17,7 @@ numbers so that a model reading it does not need this file. test_policy.py
 checks that every quote still matches; change a number here and that test
 names each file to update.
 
-Units are tokens for context and priced cost-units for cost (see boss-panes.py
+Units are tokens for context and priced cost-units for cost (see transcript.py
 for the weights), minutes for rungs.
 """
 
