@@ -12,12 +12,16 @@ import fcntl
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import time
 import unittest
 from pathlib import Path
 
-BIN = Path(__file__).resolve().parent / "bin"
+HERE = Path(__file__).resolve().parent
+BIN = HERE / "bin"
+sys.path.insert(0, str(HERE))
+import tracker as tracker_mod  # noqa: E402
 
 
 class Tools(unittest.TestCase):
@@ -72,7 +76,8 @@ class Tools(unittest.TestCase):
         # land in the file the rename is about to replace.
         self.run_tool("boss-tracker", "init", "demo", "Boss")
         tracker = self.cfg / "pm" / "demo.md"
-        with open(self.cfg / "pm" / ".demo.md.lock", "a") as lock:
+        # The lock boss-jev and the ladder take, from the module they share.
+        with open(tracker_mod.lock_path(tracker), "a") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
             proc = subprocess.Popen([str(BIN / "boss-tracker"), "append", "demo"],
                                     stdin=subprocess.PIPE, env=self.env, text=True,

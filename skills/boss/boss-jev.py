@@ -57,7 +57,6 @@ import boss_store  # noqa: E402
 import policy  # noqa: E402
 import registry  # noqa: E402
 import tracker  # noqa: E402
-from tracker import insert_in_section  # noqa: E402
 import transcript  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
@@ -395,14 +394,14 @@ def ladder_ack(track, rec):
         return step.startswith("done") and "dry run" not in step
     try:
         found = tracker.scan_marker(line)
+        m = tracker.validate(found[1]) if found else None
     except tracker.MarkerError:
+        m = None
+    if m is None:
         # The ladder cannot read it either, so nothing escalates from it: the
         # report keeps coming until the boss repairs the line.
         return False
-    if found is None:
-        return False
-    fields = found[1]
-    return bool(fields.get("cleared")) or fields.get("ask") != tracker.PLACEHOLDER
+    return bool(m["cleared"]) or m["ask"] != tracker.PLACEHOLDER
 
 
 # ------------------------------------------------------------------ decisions
@@ -1078,8 +1077,8 @@ def escalation_report(rec, interrupted, again=None):
     parts = [head, "Done by the hook: %s." % (", ".join(done) or "nothing")]
     if bad:
         parts.append("Not done: %s: do these yourself." % "; ".join(bad))
-    tracker = str(steps.get("tracker", ""))
-    if rec.get("line") and (not tracker.startswith("done") or "dry run" in tracker):
+    step = str(steps.get("tracker", ""))
+    if rec.get("line") and (not step.startswith("done") or "dry run" in step):
         parts.append("The Open blockers line was not written; add it yourself, with your action in ask=: %s"
                      % rec["line"])
     if unknown:
@@ -1290,7 +1289,7 @@ def tracker_add(path, line, tag, deadline):
             if tag in body:
                 return "done (already there)"
             tmp = path.with_name(".%s.%d.tmp" % (path.name, os.getpid()))
-            tmp.write_text(insert_in_section(body, tracker.BLOCKERS, line), encoding="utf-8")
+            tmp.write_text(tracker.insert_in_section(body, tracker.BLOCKERS, line), encoding="utf-8")
             os.chmod(tmp, s1.st_mode & 0o777)
             s2 = os.stat(path)
             if (s2.st_mtime_ns, s2.st_size, s2.st_ino) != (s1.st_mtime_ns, s1.st_size, s1.st_ino):

@@ -18,12 +18,43 @@ Who reads and writes them:
 The bash tools keep their own templates; test_tracker.py runs them and reads
 what they wrote with this module, so the two cannot drift apart unnoticed.
 
-Marker:
+    lock_path(tracker)          the sibling every writer flocks
+    scan_marker(line)           (raw, fields) for the first marker, None, or MarkerError
+    validate(fields)            typed fields, or MarkerError
+    has_marker(line)            a marker token, readable or not
+    render_marker(id, t0, nxt)  the token scan_marker reads back
+    marker_tag(id)              the text that finds one marker by id
+    rewrite(raw, last, nxt)     last= and next= updated, the rest byte for byte
+    blockers_range(lines)       the Open blockers body, as line indices
+    blocker_lines(text)         the same, as lines
+    open_blockers(text)         its bulleted entries
+    insert_in_section(body, title, line)
+    goal_status(text)           OPEN, PAUSED — …, MET …, or "" when unreadable
+    goal_open(text)
+
+Marker, appended to a `## Open blockers` line:
 
     [ladder id=a1b2c3d4 t0=2026-09-18T10:53+02:00 last=0
      next=2026-09-18T10:58+02:00 pane=20:0.2 ask="put the u2 file on lab-0"]
 
-The fields are documented in routines/boss_ladder_core.py, which acts on them.
+  id       required, [a-z0-9]{4,16}, stable forever. The key. Survives any
+           rewording of the line, and keys the state journal.
+  t0       required, ISO 8601 WITH offset. When the blocker was raised. Never
+           rewritten.
+  last     required, the rung already posted. Born 0: the hook posts rung 0.
+  next     required, ISO 8601 with offset. Authoritative gate — nothing posts
+           before now >= next. Pushing it forward by hand defers a rung without
+           losing t0, which is how "rungs held while the owner is at the keyboard"
+           works.
+  ask      required, double-quoted, no '"' inside. The one action. Slack text.
+  pane     optional, sess:win.pane.
+  cost     optional, quoted. What is idle behind it.
+  cleared  optional, ISO 8601. Present -> the line is skipped forever. This
+           never posts `boss-alert clear` itself; whoever sets cleared= posts it,
+           because only they know it actually cleared.
+
+A line with no marker is ignored. A malformed marker is reported by the ladder
+and skipped, never guessed at.
 """
 import re
 from datetime import datetime
@@ -225,7 +256,7 @@ def insert_in_section(body: str, title: str, line: str) -> str:
                  if re.match(r"^##\s+%s\b" % re.escape(title), ln)), None)
     if head is None:
         return body.rstrip("\n") + "\n\n## %s\n%s\n" % (title, line)
-    end = next((i for i in range(head + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
+    end = next((i for i in range(head + 1, len(lines)) if NEXT_H2_RE.match(lines[i])), len(lines))
     at = end
     while at > head + 1 and not lines[at - 1].strip():
         at -= 1
@@ -235,7 +266,7 @@ def insert_in_section(body: str, title: str, line: str) -> str:
 
 # ---------------------------------------------------------- the objective
 
-STATUS_RE = re.compile(r"^_Status:\s*(.+?)_\s*$", re.M)
+STATUS_RE = re.compile(r"^_Status:\s*(.+?)_\s*$")
 
 
 def goal_status(text: str) -> str:
@@ -244,9 +275,11 @@ def goal_status(text: str) -> str:
     The first `_Status:` line is the one bin/boss-goal writes (line 2) and
     rewrites on `status`. A later one is a stale copy: on 2026-10-02 six of
     nineteen objectives had their header twice, and three of them said MET or
-    PAUSED on line 2 and OPEN on line 4.
+    PAUSED on line 2 and OPEN on line 4. A first status line that does not
+    read is "", which is not open: a stale copy further down never stands in.
     """
-    m = STATUS_RE.search(text)
+    line = next((ln for ln in text.splitlines() if ln.startswith("_Status:")), "")
+    m = STATUS_RE.match(line)
     return m.group(1).strip().upper() if m else ""
 
 

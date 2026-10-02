@@ -939,14 +939,6 @@ class Tracker(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.tmp)
 
-    def test_insert_in_section(self):
-        out = bj.insert_in_section(self.path.read_text(), "Open blockers", "- two")
-        self.assertIn("- one\n- two\n\n## Decisions", out)
-
-    def test_no_section_is_created(self):
-        out = bj.insert_in_section("# T\n", "Open blockers", "- two")
-        self.assertTrue(out.endswith("## Open blockers\n- two\n"))
-
     def test_add_is_idempotent(self):
         dl = time.monotonic() + 4
         add = self.mod.tracker_add
@@ -966,7 +958,7 @@ class Tracker(unittest.TestCase):
 
     def test_a_foreign_write_between_read_and_rename_is_kept(self):
         mod = self.mod
-        real = mod.insert_in_section
+        real = tracker.insert_in_section
         n = []
 
         def racing(body, title, line):
@@ -976,8 +968,9 @@ class Tracker(unittest.TestCase):
                 with open(self.path, "a") as fh:
                     fh.write("- written by someone else\n")
             return real(body, title, line)
-        mod.insert_in_section = racing
-        self.assertEqual(mod.tracker_add(self.path, "- mine", "- mine", time.monotonic() + 4), "done")
+        with unittest.mock.patch.object(tracker, "insert_in_section", racing):
+            self.assertEqual(mod.tracker_add(self.path, "- mine", "- mine", time.monotonic() + 4), "done")
+        self.assertEqual(n, [1], "the race never ran")
         body = self.path.read_text()
         self.assertIn("- written by someone else", body)
         self.assertIn("- mine", body)
@@ -995,6 +988,9 @@ class Tracker(unittest.TestCase):
     def test_ladder_ack_on_a_line_the_ladder_cannot_read_is_no(self):
         # Nothing escalates from it, so the report keeps coming until it is fixed.
         self.assertFalse(self.ack('- x [ladder id=abcd1234 t0=nope ask="named, but the line is broken'))
+        # Closed and named, but the ladder's validate refuses it (Codex, PR #10).
+        self.assertFalse(self.ack('- x [ladder id=abcd1234 t0=nope last=0 next=2026-09-18T10:58+02:00 '
+                                  'ask="put the file on lab-0"]'))
 
     def test_ladder_ack_on_a_line_that_is_gone(self):
         self.assertTrue(self.ack("", {"tracker": "done"}))
