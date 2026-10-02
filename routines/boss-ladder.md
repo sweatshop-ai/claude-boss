@@ -58,8 +58,9 @@ the boss and this timer both post the same rung.
 
 ## What it does, every 5 minutes
 
-1. Every `~/.claude/pm/<track>.md` whose `<track>.goal.md` says `_Status: OPEN_`.
-   No goal file, or a goal that is not OPEN → skipped.
+1. Every `~/.claude/pm/<track>.md` whose `<track>.goal.md` says `_Status: OPEN_`
+   on its first status line (`tracker.goal_open`, the pulse's rule too). No goal
+   file, or a goal that is not OPEN → skipped.
 2. `flock` on `~/.claude/pm/.<track>.md.lock` — a sibling, not the tracker's own
    inode, because both writers replace that inode by rename. Berit's hook takes
    the same lock.
@@ -105,7 +106,8 @@ minutes late does not.
 ## Tests
 
 ```bash
-python3 ~/.claude/routines/boss_ladder_core.py --selftest   # 107 checks, posts nothing
+python3 ~/.claude/routines/boss_ladder_core.py --selftest   # 84 checks, posts nothing
+python3 -m pytest skills/boss/test_tracker.py               # the marker format
 DRY_RUN=1 ~/.claude/routines/boss-ladder.sh                 # real trackers, writes nothing
 ```
 
@@ -113,13 +115,16 @@ The selftest builds fixture trackers in a temp dir with a fake `boss-alert` and
 covers: the ladder arithmetic including the 24 h stop; an unreadable marker
 reported once and then forgotten when it goes; the scoping to
 `## Open blockers`, with prose documenting the format left alone; a marker that
-vanishes from the tracker; parsing, including `]` inside a quoted value;
-every malformed shape (missing field, bad id, naive timestamp, unknown field,
-unterminated quote, duplicate key); a rewrite that leaves `ask`/`t0`/`pane`
-untouched; due, held-by-hand, cleared and non-OPEN tracks; one rung per run
-after a long sleep; the placeholder hold, its single alert, and the resume; a
-failed post leaving the marker alone; a foreign write landing during the Slack
-call; and `DRY_RUN` writing and posting nothing.
+vanishes from the tracker; due, held-by-hand, cleared and non-OPEN tracks; one
+rung per run after a long sleep; the placeholder hold, its single alert, and the
+resume; a failed post leaving the marker alone; a foreign write landing during
+the Slack call; and `DRY_RUN` writing and posting nothing.
+
+The marker itself lives in `skills/boss/tracker.py`, and `test_tracker.py`
+covers it: parsing, including `]` inside a quoted value; every malformed shape
+(missing field, bad id, naive timestamp, unknown field, unterminated quote,
+duplicate key); render → parse round trip; and a rewrite that leaves
+`ask`/`t0`/`pane` untouched.
 
 `--now <ISO>` drives it at any instant, which is how the fixtures work.
 

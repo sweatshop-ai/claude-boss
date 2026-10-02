@@ -11,26 +11,8 @@ boss turn.
 
 No LLM anywhere: the decision is arithmetic on two timestamps.
 
-Marker, appended to a `## Open blockers` line:
-
-    [ladder id=a1b2c3d4 t0=2026-09-18T10:53+02:00 last=0
-     next=2026-09-18T10:58+02:00 pane=20:0.2 ask="put the u2 file on lab-0"]
-
-  id       required, [a-z0-9]{4,16}, stable forever. The key. Survives any
-           rewording of the line, and keys the state journal.
-  t0       required, ISO 8601 WITH offset. When the blocker was raised. Never
-           rewritten.
-  last     required, the rung already posted. Born 0: the hook posts rung 0.
-  next     required, ISO 8601 with offset. Authoritative gate — nothing posts
-           before now >= next. Pushing it forward by hand defers a rung without
-           losing t0, which is how "rungs held while the owner is at the keyboard"
-           works.
-  ask      required, double-quoted, no '"' inside. The one action. Slack text.
-  pane     optional, sess:win.pane.
-  cost     optional, quoted. What is idle behind it.
-  cleared  optional, ISO 8601. Present -> the line is skipped forever. This
-           never posts `boss-alert clear` itself; whoever sets cleared= posts it,
-           because only they know it actually cleared.
+The marker on a `## Open blockers` line, and what each field means, is
+documented in skills/boss/tracker.py, which parses it.
 
 A line with no marker is ignored. A malformed marker is logged and skipped,
 never guessed at.
@@ -42,7 +24,6 @@ import fcntl
 import hashlib
 import json
 import os
-import re
 import subprocess
 import sys
 import tempfile
@@ -59,48 +40,9 @@ BOSS_ALERT = os.environ.get("BOSS_ALERT",
                             str(HERE.parent / "skills" / "boss" / "bin" / "boss-alert"))
 DRY_RUN = os.environ.get("DRY_RUN", "0") == "1"
 
-ID_RE = re.compile(r"^[a-z0-9]{4,16}$")
-KEY_RE = re.compile(r"^[a-z][a-z0-9_]*$")
-REQUIRED = ("id", "t0", "last", "next", "ask")
-KNOWN = set(REQUIRED) | {"pane", "cost", "cleared"}
-
-# What the hook writes into ask= until the boss names the action.
-PLACEHOLDER = "(boss names it)"
-# Agreed with Berit 2026-09-18: her hook and this routine both take
-# fcntl.flock on this sibling, because both write by temp file + rename and
-# a lock on the tracker's own inode does not survive the replace.
-def lock_path(path: Path) -> Path:
-    return path.parent / f".{path.name}.lock"
-
-
-BLOCKERS_RE = re.compile(r"^##\s+Open blockers.*?$", re.M)
-NEXT_H2_RE = re.compile(r"^##\s", re.M)
-
-
-def blockers_range(lines: list[str]) -> tuple[int, int]:
-    """Line indices of the `## Open blockers` body, or (0, 0) if there is none.
-
-    A marker only means anything on a blocker line. Reading the whole file makes
-    prose that documents the marker format — in a roster row, in a state note —
-    parse as a malformed marker, which is exactly what happened at 14:59 on
-    2026-09-18. due_rungs has always scoped itself this way.
-    """
-    start = None
-    for i, line in enumerate(lines):
-        if start is None:
-            if BLOCKERS_RE.match(line):
-                start = i + 1
-        elif NEXT_H2_RE.match(line):
-            return start, i
-    return (start, len(lines)) if start is not None else (0, 0)
-
 
 class Concurrent(Exception):
     """The tracker changed between our read and our write."""
-
-
-class MarkerError(Exception):
-    """A token that starts with [ladder but does not parse. Never guessed at."""
 
 
 # ---------------------------------------------------------------- the ladder
@@ -110,90 +52,10 @@ class MarkerError(Exception):
 _POLICY = Path(__file__).resolve().parent.parent / "skills" / "boss"
 sys.path.insert(0, str(_POLICY))
 from policy import STOP_MIN, next_rung, rung_for  # noqa: E402,F401
-
-
-# ---------------------------------------------------------------- parsing
-
-def _parse_ts(value: str, field: str) -> datetime:
-    raw = value[:-1] + "+00:00" if value.endswith("Z") else value
-    try:
-        dt = datetime.fromisoformat(raw)
-    except ValueError:
-        raise MarkerError(f"{field}={value!r} is not ISO 8601")
-    if dt.tzinfo is None:
-        # A naive timestamp is ambiguous across a DST change, and this routine
-        # is nothing but time arithmetic.
-        raise MarkerError(f"{field}={value!r} has no UTC offset")
-    return dt
-
-
-def scan_marker(line: str):
-    """Return (raw_token, fields) for the first [ladder ...] token, or None."""
-    start = line.find("[ladder")
-    if start < 0:
-        return None
-    after = start + len("[ladder")
-    if after < len(line) and line[after] not in " \t]":
-        return None  # [ladderish — not our token
-    i, fields = after, {}
-    while True:
-        while i < len(line) and line[i] in " \t":
-            i += 1
-        if i >= len(line):
-            raise MarkerError("marker is not closed with ']'")
-        if line[i] == "]":
-            i += 1
-            break
-        eq = line.find("=", i)
-        if eq < 0:
-            raise MarkerError(f"no '=' after {line[i:i + 20]!r}")
-        key = line[i:eq]
-        if not KEY_RE.match(key):
-            raise MarkerError(f"bad field name {key!r}")
-        if key in fields:
-            raise MarkerError(f"duplicate field {key!r}")
-        j = eq + 1
-        if j < len(line) and line[j] == '"':
-            end = line.find('"', j + 1)
-            if end < 0:
-                raise MarkerError(f"{key}= has no closing quote")
-            fields[key], i = line[j + 1:end], end + 1
-        else:
-            end = j
-            while end < len(line) and line[end] not in " \t]":
-                end += 1
-            fields[key], i = line[j:end], end
-    return line[start:i], fields
-
-
-def validate(fields: dict) -> dict:
-    missing = [k for k in REQUIRED if k not in fields]
-    if missing:
-        raise MarkerError(f"missing field(s): {', '.join(missing)}")
-    unknown = sorted(set(fields) - KNOWN)
-    if unknown:
-        raise MarkerError(f"unknown field(s): {', '.join(unknown)}")
-    if not ID_RE.match(fields["id"]):
-        raise MarkerError(f"id={fields['id']!r} is not [a-z0-9]{{4,16}}")
-    if not fields["ask"].strip():
-        raise MarkerError("ask= is empty")
-    try:
-        last = int(fields["last"])
-    except ValueError:
-        raise MarkerError(f"last={fields['last']!r} is not a number")
-    if last < 0:
-        raise MarkerError(f"last={last} is negative")
-    out = {
-        "id": fields["id"], "last": last,
-        "t0": _parse_ts(fields["t0"], "t0"),
-        "next": _parse_ts(fields["next"], "next"),
-        "ask": fields["ask"],
-        "pane": fields.get("pane", ""), "cost": fields.get("cost", ""),
-        "cleared": fields.get("cleared", ""),
-    }
-    if out["cleared"]:
-        _parse_ts(out["cleared"], "cleared")
-    return out
+# The marker, the Open blockers section, the lock and the objective's status
+# live in skills/boss/tracker.py, which boss-jev and boss-pulse read too.
+from tracker import (PLACEHOLDER, MarkerError, blockers_range, goal_open,  # noqa: E402,F401
+                     lock_path, parse_ts, rewrite, scan_marker, validate)
 
 
 def slack_text(track: str, m: dict) -> str:
@@ -210,12 +72,6 @@ def stop_text(track: str, m: dict) -> str:
     where = f" — pane {m['pane']}" if m["pane"] else ""
     return (f"{track}: ladder stopped at 24 h, still open — {m['ask']}{where} "
             f"— since {m['t0'].strftime('%Y-%m-%d %H:%M')} (T+0)")
-
-
-def rewrite(raw: str, last: int, nxt: datetime) -> str:
-    """Update last= and next= inside the token, byte for byte elsewhere."""
-    out = re.sub(r"(?<=\blast=)[^\s\]]*", str(last), raw, count=1)
-    return re.sub(r"(?<=\bnext=)[^\s\]]*", nxt.isoformat(), out, count=1)
 
 
 # ---------------------------------------------------------------- state
@@ -255,7 +111,7 @@ def open_tracks(pm_dir: Path):
         except OSError as exc:
             yield track, md, f"goal unreadable: {exc}"
             continue
-        yield track, md, None if "_Status: OPEN_" in head else "goal not OPEN"
+        yield track, md, None if goal_open(head) else "goal not OPEN"
 
 
 # ---------------------------------------------------------------- the run
@@ -545,54 +401,7 @@ def selftest() -> int:
                     (1320, 1440), (1440, 1440)]:
         check(f"next_rung({r})", next_rung(r), want)
 
-    # --- parsing
-    raw, f = scan_marker('- x [ladder id=ab12 t0=2026-09-18T10:53+02:00 last=0 '
-                         'next=2026-09-18T10:58+02:00 pane=20:0.2 ask="do the thing"]')
-    check("ask with spaces", f["ask"], "do the thing")
-    check("pane", f["pane"], "20:0.2")
-    check("raw ends at ]", raw.endswith("]"), True)
-    check("no marker", scan_marker("- a plain blocker line, no marker"), None)
-    check("[ladderish ignored", scan_marker("- see [ladderish] elsewhere"), None)
-    r2, f2 = scan_marker('x [ladder id=ab12 t0=2026-09-18T10:53Z last=0 '
-                         'next=2026-09-18T10:58Z ask="brackets ] inside"]')
-    check("] inside a quoted value", f2["ask"], "brackets ] inside")
-
-    for bad, why in [
-        ('[ladder id=ab12 last=0 ask="x"]', "missing t0/next"),
-        ('[ladder id=AB t0=2026-09-18T10:53+02:00 last=0 next=2026-09-18T10:58+02:00 ask="x"]', "bad id"),
-        ('[ladder id=ab12 t0=2026-09-18T10:53 last=0 next=2026-09-18T10:58+02:00 ask="x"]', "naive t0"),
-        ('[ladder id=ab12 t0=nope last=0 next=2026-09-18T10:58+02:00 ask="x"]', "unparseable t0"),
-        ('[ladder id=ab12 t0=2026-09-18T10:53+02:00 last=x next=2026-09-18T10:58+02:00 ask="x"]', "last not a number"),
-        ('[ladder id=ab12 t0=2026-09-18T10:53+02:00 last=0 next=2026-09-18T10:58+02:00 ask=""]', "empty ask"),
-        ('[ladder id=ab12 t0=2026-09-18T10:53+02:00 last=0 next=2026-09-18T10:58+02:00 ask="x" wat=1]', "unknown field"),
-    ]:
-        checks += 1
-        try:
-            validate(scan_marker(bad)[1])
-            fails.append(f"malformed accepted ({why}): {bad}")
-        except MarkerError:
-            pass
-    for bad, why in [('[ladder id=ab12 ask="unterminated]', "no closing quote"),
-                     ('[ladder id=ab12 ask="x"', "not closed"),
-                     ('[ladder id]', "no '='"),
-                     ('[ladder Id=ab12]', "bad field name"),
-                     ('[ladder id=ab id=cd]', "duplicate field")]:
-        checks += 1
-        try:
-            scan_marker(bad)
-            fails.append(f"malformed token accepted ({why}): {bad}")
-        except MarkerError:
-            pass
-
-    # --- rewrite touches only last= and next=
-    before = ('[ladder id=ab12 t0=2026-09-18T10:53+02:00 last=0 '
-              'next=2026-09-18T10:58+02:00 pane=20:0.2 ask="keep me"]')
-    after = rewrite(before, 15, datetime(2026, 9, 18, 11, 23, tzinfo=timezone(timedelta(hours=2))))
-    check("rewrite last", "last=15" in after, True)
-    check("rewrite next", "next=2026-09-18T11:23:00+02:00" in after, True)
-    check("rewrite keeps ask", 'ask="keep me"' in after, True)
-    check("rewrite keeps t0", "t0=2026-09-18T10:53+02:00" in after, True)
-    check("rewrite keeps pane", "pane=20:0.2" in after, True)
+    # The marker parser and rewrite are tested in skills/boss/test_tracker.py.
 
     tz = timezone(timedelta(hours=2))
     t0 = "2026-09-18T10:00+02:00"
@@ -884,7 +693,7 @@ def main() -> int:
     a = ap.parse_args()
     if a.selftest:
         return selftest()
-    now = _parse_ts(a.now, "--now") if a.now else datetime.now().astimezone()
+    now = parse_ts(a.now, "--now") if a.now else datetime.now().astimezone()
     return run(now)
 
 
