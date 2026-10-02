@@ -56,6 +56,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import boss_store  # noqa: E402
 import policy  # noqa: E402
 import registry  # noqa: E402
+import tracker  # noqa: E402
 import transcript  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
@@ -386,11 +387,21 @@ def ladder_ack(track, rec):
         body = (PM / ("%s.md" % track)).read_text(encoding="utf-8")
     except OSError:
         return False
-    line = next((l for l in body.splitlines() if "[ladder id=%s " % rec.get("id") in l), None)
+    tag = tracker.marker_tag(rec.get("id"))
+    line = next((ln for ln in body.splitlines() if tag in ln), None)
     if line is None:
         step = str((rec.get("steps") or {}).get("tracker", ""))
         return step.startswith("done") and "dry run" not in step
-    return "cleared=" in line or 'ask="(boss names it)"' not in line
+    try:
+        found = tracker.scan_marker(line)
+        m = tracker.validate(found[1]) if found else None
+    except tracker.MarkerError:
+        m = None
+    if m is None:
+        # The ladder cannot read it either, so nothing escalates from it: the
+        # report keeps coming until the boss repairs the line.
+        return False
+    return bool(m["cleared"]) or m["ask"] != tracker.PLACEHOLDER
 
 
 # ------------------------------------------------------------------ decisions
@@ -797,17 +808,16 @@ class Hook:
     def tracker_line(self, w, ev):
         t0 = datetime.datetime.now().astimezone().replace(second=0, microsecond=0)
         nxt = t0 + datetime.timedelta(minutes=5)
-        line = ('- boss-jev %s: %s (%s) blocked on OWNER: %s — T+0 %s [ladder id=%s t0=%s last=0 next=%s '
-                'pane=%s ask="(boss names it)"]' % (
-                    self.id8, w["name"], w["coord"], first_sentence(ev["body"]), t0.strftime("%Y-%m-%d %H:%M"),
-                    self.id8, t0.isoformat(timespec="minutes"), nxt.isoformat(timespec="minutes"), w["coord"]))
+        line = '- boss-jev %s: %s (%s) blocked on OWNER: %s — T+0 %s %s' % (
+            self.id8, w["name"], w["coord"], first_sentence(ev["body"]), t0.strftime("%Y-%m-%d %H:%M"),
+            tracker.render_marker(self.id8, t0, nxt, pane=w["coord"]))
         esc = ((self.st or {}).get("escalations") or {}).get(self.digest)
         if esc is not None:
             esc["line"] = line
         if dry():
             log("(dry run) tracker line: " + line)
             return "done (dry run)"
-        return tracker_add(PM / ("%s.md" % self.track), line, "[ladder id=%s" % self.id8, self.deadline)
+        return tracker_add(PM / ("%s.md" % self.track), line, tracker.marker_tag(self.id8), self.deadline)
 
     def emoji(self, w):
         rec = session_by_pid(w["pid"])
@@ -1067,8 +1077,8 @@ def escalation_report(rec, interrupted, again=None):
     parts = [head, "Done by the hook: %s." % (", ".join(done) or "nothing")]
     if bad:
         parts.append("Not done: %s: do these yourself." % "; ".join(bad))
-    tracker = str(steps.get("tracker", ""))
-    if rec.get("line") and (not tracker.startswith("done") or "dry run" in tracker):
+    step = str(steps.get("tracker", ""))
+    if rec.get("line") and (not step.startswith("done") or "dry run" in step):
         parts.append("The Open blockers line was not written; add it yourself, with your action in ask=: %s"
                      % rec["line"])
     if unknown:
@@ -1258,27 +1268,13 @@ def children_gate(pid):
 
 # ------------------------------------------------------------ shared files
 
-def insert_in_section(body, title, line):
-    lines = body.split("\n")
-    head = next((i for i, l in enumerate(lines) if re.match(r"^##\s+%s\b" % re.escape(title), l)), None)
-    if head is None:
-        return body.rstrip("\n") + "\n\n## %s\n%s\n" % (title, line)
-    end = next((i for i in range(head + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
-    at = end
-    while at > head + 1 and not lines[at - 1].strip():
-        at -= 1
-    lines.insert(at, line)
-    return "\n".join(lines)
-
-
 def tracker_add(path, line, tag, deadline):
     """Add `line` to Open blockers unless `tag` is already in the file. Under the
     lock the ladder timer also takes, and only if the file did not change
     between the read and the rename."""
     if not in_pm(path) or not regular_mine(path):
         return "failed: the tracker is not a regular file of this user in pm/"
-    lockp = path.with_name(".%s.lock" % path.name)
-    with open(lockp, "a") as lf:
+    with open(tracker.lock_path(path), "a") as lf:
         while True:
             try:
                 fcntl.flock(lf, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -1293,7 +1289,7 @@ def tracker_add(path, line, tag, deadline):
             if tag in body:
                 return "done (already there)"
             tmp = path.with_name(".%s.%d.tmp" % (path.name, os.getpid()))
-            tmp.write_text(insert_in_section(body, "Open blockers", line), encoding="utf-8")
+            tmp.write_text(tracker.insert_in_section(body, tracker.BLOCKERS, line), encoding="utf-8")
             os.chmod(tmp, s1.st_mode & 0o777)
             s2 = os.stat(path)
             if (s2.st_mtime_ns, s2.st_size, s2.st_ino) != (s1.st_mtime_ns, s1.st_size, s1.st_ino):
