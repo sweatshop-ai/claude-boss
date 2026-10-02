@@ -56,6 +56,8 @@ Marker, appended to a `## Open blockers` line:
 A line with no marker is ignored. A malformed marker is reported by the ladder
 and skipped, never guessed at.
 """
+from __future__ import annotations
+
 import re
 from datetime import datetime
 from pathlib import Path
