@@ -11,26 +11,8 @@ boss turn.
 
 No LLM anywhere: the decision is arithmetic on two timestamps.
 
-Marker, appended to a `## Open blockers` line:
-
-    [ladder id=a1b2c3d4 t0=2026-09-18T10:53+02:00 last=0
-     next=2026-09-18T10:58+02:00 pane=20:0.2 ask="put the u2 file on lab-0"]
-
-  id       required, [a-z0-9]{4,16}, stable forever. The key. Survives any
-           rewording of the line, and keys the state journal.
-  t0       required, ISO 8601 WITH offset. When the blocker was raised. Never
-           rewritten.
-  last     required, the rung already posted. Born 0: the hook posts rung 0.
-  next     required, ISO 8601 with offset. Authoritative gate — nothing posts
-           before now >= next. Pushing it forward by hand defers a rung without
-           losing t0, which is how "rungs held while the owner is at the keyboard"
-           works.
-  ask      required, double-quoted, no '"' inside. The one action. Slack text.
-  pane     optional, sess:win.pane.
-  cost     optional, quoted. What is idle behind it.
-  cleared  optional, ISO 8601. Present -> the line is skipped forever. This
-           never posts `boss-alert clear` itself; whoever sets cleared= posts it,
-           because only they know it actually cleared.
+The marker on a `## Open blockers` line, and what each field means, is
+documented in skills/boss/tracker.py, which parses it.
 
 A line with no marker is ignored. A malformed marker is logged and skipped,
 never guessed at.
@@ -73,8 +55,7 @@ from policy import STOP_MIN, next_rung, rung_for  # noqa: E402,F401
 # The marker, the Open blockers section, the lock and the objective's status
 # live in skills/boss/tracker.py, which boss-jev and boss-pulse read too.
 from tracker import (PLACEHOLDER, MarkerError, blockers_range, goal_open,  # noqa: E402,F401
-                     lock_path, rewrite, scan_marker, validate)
-from tracker import parse_ts as _parse_ts  # noqa: E402
+                     lock_path, parse_ts, rewrite, scan_marker, validate)
 
 
 def slack_text(track: str, m: dict) -> str:
@@ -712,7 +693,7 @@ def main() -> int:
     a = ap.parse_args()
     if a.selftest:
         return selftest()
-    now = _parse_ts(a.now, "--now") if a.now else datetime.now().astimezone()
+    now = parse_ts(a.now, "--now") if a.now else datetime.now().astimezone()
     return run(now)
 
 
