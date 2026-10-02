@@ -27,3 +27,15 @@ and rejected, live constraints, next step — ending with the boss-jev footer.
 
 **Rung**: a point on the escalation ladder, in minutes since a blocker's T+0,
 at which the blocker is raised to the owner again.
+
+**Tracker**: `pm/<track>.md`, the boss's live state. Its formats — the Open
+blockers section, the marker, the lock — live in `skills/boss/tracker.py`.
+
+**Open blocker**: a bulleted line under the tracker's first `## Open blockers`
+heading. Something is blocked on the owner.
+
+**Marker**: the `[ladder id=… t0=… last=… next=… ask="…"]` token on an open
+blocker. The ladder escalates that line from it, with no boss turn.
+
+**Objective status**: the first `_Status: …_` line of `pm/<track>.goal.md`,
+line 2 as `boss-goal` writes it. A track is open when it starts with OPEN.

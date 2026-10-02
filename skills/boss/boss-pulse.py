@@ -47,6 +47,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import boss_store  # noqa: E402
 import policy  # noqa: E402
 import registry  # noqa: E402
+import tracker  # noqa: E402
 
 CFG = Path(os.environ.get("CLAUDE_CONFIG_DIR", str(Path.home() / ".claude")))
 PM = CFG / "pm"
@@ -63,11 +64,6 @@ def read_goal(track):
         return (PM / ("%s.goal.md" % track)).read_text(encoding="utf-8")
     except OSError:
         return None
-
-
-def goal_status(body):
-    m = re.search(r"^_Status:\s*(.+?)_\s*$", body, re.M)
-    return (m.group(1).strip() if m else "").upper()
 
 
 def section(body, title):
@@ -146,15 +142,7 @@ def open_blockers(track):
         body = (PM / ("%s.md" % track)).read_text(encoding="utf-8")
     except OSError:
         return []
-    m = re.search(r"^##\s+Open blockers.*?$(.*?)(?=^##\s|\Z)", body, re.M | re.S)
-    if not m:
-        return []
-    out = []
-    for line in m.group(1).splitlines():
-        line = line.strip()
-        if line.startswith(("-", "*")) and len(line) > 2:
-            out.append(line.lstrip("-* ").strip()[:160])
-    return out
+    return [b[:160] for b in tracker.open_blockers(body)]
 
 
 def question_pending(sid):
@@ -185,13 +173,10 @@ def due_rungs(track, fired):
         body = (PM / ("%s.md" % track)).read_text(encoding="utf-8")
     except OSError:
         return []
-    m = re.search(r"^##\s+Open blockers.*?$(.*?)(?=^##\s|\Z)", body, re.M | re.S)
-    if not m:
-        return []
     now = time.localtime()
     due = []
-    for line in m.group(1).splitlines():
-        if "[ladder" in line:
+    for line in tracker.blocker_lines(body):
+        if tracker.has_marker(line):
             # boss-ladder.timer owns this line and posts its rungs from a user
             # timer, with no boss turn. Telling the boss to post it too is a
             # double rung, and a channel that repeats itself becomes wallpaper.
@@ -273,7 +258,7 @@ def main():
     body = read_goal(track)
     if body is None:
         return 0                                  # opt-in: no objective, no pulse
-    if not goal_status(body).startswith("OPEN"):
+    if not tracker.goal_open(body):
         return 0                                  # paused, or met
 
     # "Session is done" vs "session is paused waiting for background work" — the

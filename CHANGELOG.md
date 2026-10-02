@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.9.0 — 2026-10-02
+
+One module knows the formats of a track's files, and the ladder no longer
+counts a closed track as open.
+
+- **`skills/boss/tracker.py`** holds the ladder marker (`scan_marker`,
+  `validate`, `render_marker`, `rewrite`), the `## Open blockers` section
+  (`blockers_range`, `open_blockers`, `insert_in_section`), the shared lock
+  path and the objective's status (`goal_status`, `goal_open`). boss-jev, the
+  pulse and the ladder read it; each had its own copy, and the tests a third
+  regex for the marker.
+- **Fix: the ladder read `_Status: OPEN_` anywhere in the objective.** On
+  2026-10-02 six of nineteen objectives carried their header twice, and three
+  (ai-consultancy, purpleshares, tray-indicator-state) said MET or PAUSED on
+  line 2 and OPEN on line 4. The pulse read them as closed, the ladder as open,
+  so a marker there would have kept escalating. Both now read the first status
+  line. No rung went out from it: none of the three had a marker.
+- **Fix: `boss-goal set` drops a header piped in on stdin.** That is how the
+  duplicates came about: a body edited from `show` kept its header under the
+  file's own, and `status` only ever rewrote line 2.
+- **boss-jev's ladder acknowledgement parses the marker** instead of searching
+  for `ask="(boss names it)"`. A marker the ladder cannot read now counts as not
+  acted on, so the report keeps coming until the line is repaired.
+- The Open blockers readers in the pulse and the ladder agreed on every real
+  tracker; that part removes duplication and changes no output.
+- The marker tests moved from the ladder's `--selftest` to `test_tracker.py`,
+  which also runs `boss-tracker` and `boss-goal` and reads their output back.
+
 ## 0.8.0 — 2026-10-01
 
 One module reads a transcript.

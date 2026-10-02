@@ -26,6 +26,8 @@ import unittest.mock
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import tracker  # noqa: E402
 # The #76 sample lives with the plans, outside the repo.
 PLANS = Path(os.environ.get("BOSS_JEV_PLANS") or Path.home() / ".claude" / "plans")
 
@@ -926,9 +928,6 @@ class PulseLadder(unittest.TestCase):
 
 # ------------------------------------------------------------ tracker file
 
-LADDER_RE = re.compile(r'\[ladder id=([a-z0-9]{4,16}) t0=(\S+) last=(\d+) next=(\S+) pane=(\S+) ask="([^"]*)"\]')
-
-
 class Tracker(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
@@ -983,6 +982,25 @@ class Tracker(unittest.TestCase):
         self.assertIn("- written by someone else", body)
         self.assertIn("- mine", body)
 
+    def ack(self, line, steps=None):
+        self.path.write_text("## Open blockers\n%s\n" % line if line else "## Open blockers\n")
+        return self.mod.ladder_ack("t", {"id": "abcd1234", "steps": steps or {}})
+
+    def test_ladder_ack_wants_the_action_named_or_the_line_cleared(self):
+        base = '- x [ladder id=abcd1234 t0=2026-09-18T10:53+02:00 last=0 next=2026-09-18T10:58+02:00 ask="%s"%s]'
+        self.assertFalse(self.ack(base % ("(boss names it)", "")))
+        self.assertTrue(self.ack(base % ("put the file on lab-0", "")))
+        self.assertTrue(self.ack(base % ("(boss names it)", " cleared=2026-09-18T11:00+02:00")))
+
+    def test_ladder_ack_on_a_line_the_ladder_cannot_read_is_no(self):
+        # Nothing escalates from it, so the report keeps coming until it is fixed.
+        self.assertFalse(self.ack('- x [ladder id=abcd1234 t0=nope ask="named, but the line is broken'))
+
+    def test_ladder_ack_on_a_line_that_is_gone(self):
+        self.assertTrue(self.ack("", {"tracker": "done"}))
+        self.assertFalse(self.ack("", {"tracker": "done (dry run)"}))
+        self.assertFalse(self.ack("", {"tracker": "failed: tracker lock held"}))
+
     def test_worker_name_and_coord_cannot_break_the_line(self):
         self.assertEqual(bj.one_line("Wan\nda\r"), "Wan da")
         self.assertEqual(re.sub(r"[^\w:.%-]", "", "9:0.2\n- T+0 09:00"), "9:0.2-T009:00")
@@ -999,13 +1017,12 @@ class Tracker(unittest.TestCase):
         finally:
             os.environ.pop("DRY_RUN")
         line = next(m for m in seen if "tracker line" in m)
-        m = LADDER_RE.search(line)
-        self.assertIsNotNone(m, line)
-        t0 = datetime.datetime.fromisoformat(m.group(2))
-        nxt = datetime.datetime.fromisoformat(m.group(4))
-        self.assertIsNotNone(t0.tzinfo)
-        self.assertEqual(nxt - t0, datetime.timedelta(minutes=5))
-        self.assertEqual((m.group(1), m.group(3), m.group(5), m.group(6)), (h.id8, "0", "9:0.2", "(boss names it)"))
+        # Read with the ladder's own parser: what it cannot read never escalates.
+        found = tracker.scan_marker(line)
+        self.assertIsNotNone(found, line)
+        m = tracker.validate(found[1])
+        self.assertEqual(m["next"] - m["t0"], datetime.timedelta(minutes=5))
+        self.assertEqual((m["id"], m["last"], m["pane"], m["ask"]), (h.id8, 0, "9:0.2", tracker.PLACEHOLDER))
         self.assertIn("blocked on OWNER: The u2 file on lab-0 is absent.", line)
 
 

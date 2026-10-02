@@ -122,6 +122,18 @@ set)
   t=${2:-}; f=$(need "${2:-}")
   body=$(cat)
   [[ -n "$body" ]] || die "nothing on stdin"
+  # A body edited from `show` brings the header along. Kept, it sat under ours
+  # as a second `_Status:` line that `status` never rewrote: on 2026-10-02 three
+  # objectives said MET or PAUSED on line 2 and OPEN on line 4.
+  stripped=$(printf '%s\n' "$body" | awk '
+    h == 0 && /^# Objective/ { h = 1; next }
+    h < 2 && /^_Status:/     { h = 2; next }
+    { h = 2; print }')
+  if [[ "$stripped" != "$body" ]]; then
+    body=$stripped
+    printf 'dropped the header from stdin; the status stays as it was (boss-goal status to change it)\n' >&2
+  fi
+  [[ -n "$body" ]] || die "nothing on stdin but a header"
   hdr=$(sed -n '1,2p' "$f")
   printf '%s\n%s\n' "$hdr" "$body" > "$f"
   sz=$(stat -c%s "$f")
