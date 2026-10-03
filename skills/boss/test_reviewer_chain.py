@@ -124,6 +124,14 @@ class Reasons(Base):
                 self.assertEqual(len(tail), 2048)
                 self.assertEqual(tail, (body[1:] if expect_dropped else body) + "\n")
 
+    def test_only_the_end_of_a_very_long_stderr_is_kept_whatever_its_characters(self):
+        for name, unit in (("ascii", "a"), ("two-byte", "\u00e9"), ("four-byte", "\U0001f600")):
+            with self.subTest(name):
+                body = unit * 100_000 + "THE-END"
+                self.sb.stub("codex", rc=1, err=body)
+                tail = self.chain().attempts[0].stderr_tail
+                self.assertEqual(tail, (body + "\n")[-2048:])
+
     def test_exit_zero_and_no_usable_verdict_is_noverdict_and_the_raw_answer_is_kept(self):
         self.sb.stub("codex", answer=RAMBLE)
         self.sb.stub("claude", answer=approve())
@@ -209,12 +217,28 @@ class Timeouts(Base):
         self.assertEqual((haiku.reason, haiku.exit_code), ("answered", None))
         self.assertEqual(result.reviewer, "haiku")
 
-    def test_a_descendant_that_escaped_the_group_and_holds_the_pipe_does_not_hang_the_chain(self):
+    def test_a_descendant_that_escaped_the_group_does_not_hold_up_an_answered_reviewer(self):
         self.sb.stub("codex", answer=approve("done"), detached=True)
         started = time.monotonic()
-        result = self.chain(codex_timeout=1)
-        self.assertLess(time.monotonic() - started, 20)
+        result = self.chain(codex_timeout=8)
+        self.assertLess(time.monotonic() - started, 5, "waited on the descendant, not the reviewer")
+        (codex,) = result.attempts
+        self.assertEqual((codex.reason, codex.exit_code), ("answered", 0))
         self.assertEqual(result.reviewer, "codex")
+
+    def test_a_reviewer_that_exited_zero_is_noverdict_not_timeout_whatever_a_descendant_holds_open(self):
+        # Codex review 2 of PR 11: a fallback that runs only on ("absent", "timeout", "error")
+        # must not run because a grandchild kept the reviewer's output open.
+        self.sb.stub("codex", detached=True)
+        self.sb.stub("claude", answer=approve())
+        fb = rc.Fallback("haiku", HAIKU_ID, when=("absent", "timeout", "error"))
+        started = time.monotonic()
+        result = self.chain(codex_timeout=8, fallback=fb)
+        self.assertLess(time.monotonic() - started, 5)
+        self.assertEqual(result.reviewer, "none")
+        (codex,) = result.attempts
+        self.assertEqual((codex.reason, codex.exit_code), ("noverdict", 0))
+        self.assertNotCalled("claude")
 
     def test_each_reviewer_has_its_own_timeout(self):
         self.sb.stub("codex", answer=approve(), delay=3)
