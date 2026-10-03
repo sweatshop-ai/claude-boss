@@ -23,7 +23,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from hermetic import Sandbox  # noqa: E402
+from hermetic import Sandbox, alive  # noqa: E402
 
 HAIKU = "claude-haiku-4-5-20251001"
 WHY = "post the status comment on the PR"
@@ -41,18 +41,6 @@ def approve(reason="ok"):
 
 def reject(reason="too wide"):
     return "VERDICT: REJECT\nREASON: %s" % reason
-
-
-def alive(pid):
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    try:
-        state = Path("/proc/%d/stat" % pid).read_text().rsplit(")", 1)[1].split()[0]
-    except OSError:
-        return False
-    return state != "Z"
 
 
 class Base(unittest.TestCase):
