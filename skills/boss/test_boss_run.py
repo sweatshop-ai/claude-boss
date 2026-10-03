@@ -553,9 +553,16 @@ class FailClosed(Base):
         super().setUp()
         self.sb.stub("codex", answer=approve())
 
+    @staticmethod
+    def whole_result(reviewer="codex", word="APPROVE", reason="chain reason"):
+        """What the real chain returns when `reviewer` answered: the Result, with its attempt."""
+        return {"reviewer": reviewer, "output": "VERDICT: %s" % word,
+                "parsed": {"word": word, "reason": reason},
+                "attempts": [{"reviewer": reviewer, "reason": "answered", "output": "VERDICT: %s" % word,
+                              "exit_code": 0, "stderr_tail": "", "model": None}]}
+
     def chain_says(self, reviewer="codex", word="APPROVE", reason="chain reason", rc=0, **over):
-        answer = {"reviewer": reviewer, "output": "", "attempts": [],
-                  "parsed": {"word": word, "reason": reason}}
+        answer = self.whole_result(reviewer, word, reason)
         answer.update(over)
         self.sb.stub("python3", out=json.dumps(answer), rc=rc)
 
@@ -610,6 +617,38 @@ class FailClosed(Base):
                 self.chain_says(**over)
                 self.check_nothing_ran(self.live("touch must-not-run.flag"))
                 (self.sb.cfg / "pm" / "boss-run.log").unlink()
+
+    def test_a_result_that_breaks_the_chains_own_invariants_means_nothing_runs(self):
+        # Codex plan-review 1 of PR 11: boss-run is the gate, so it checks the Result is whole,
+        # not only that it names a reviewer and a verdict. The real chain never says these things.
+        other = self.whole_result("codex")["attempts"][0]
+        cases = {
+            "a reviewer boss-run never asked": lambda r: r.update(reviewer="intruder", attempts=[
+                dict(other, reviewer="intruder")]),
+            "no output field": lambda r: r.pop("output"),
+            "output not text": lambda r: r.update(output=None),
+            "no attempts field": lambda r: r.pop("attempts"),
+            "attempts not a list": lambda r: r.update(attempts="answered"),
+            "no attempts": lambda r: r.update(attempts=[]),
+            "only another reviewer's attempt": lambda r: r.update(attempts=[dict(other, reviewer="haiku")]),
+            "the attempt did not answer": lambda r: r.update(attempts=[dict(other, reason="noverdict")]),
+            "attempts that are not objects": lambda r: r.update(attempts=["codex"]),
+        }
+        for name, mutate in cases.items():
+            with self.subTest(name):
+                result = self.whole_result("codex")
+                mutate(result)
+                self.sb.stub("python3", out=json.dumps(result))
+                self.check_nothing_ran(self.live("touch must-not-run.flag"))
+                (self.sb.cfg / "pm" / "boss-run.log").unlink()
+
+    def test_either_reviewer_boss_run_asks_for_is_accepted_when_its_attempt_answered(self):
+        for reviewer in ("codex", "haiku"):
+            with self.subTest(reviewer):
+                self.chain_says(reviewer=reviewer)
+                r = self.dry()
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertIn("(reviewer: %s)" % reviewer, r.stdout)
 
     def test_more_than_one_json_value_on_stdout_is_not_one_answer(self):
         # `jq -e` alone judges only the last value, so a refusal followed by an approval would pass.

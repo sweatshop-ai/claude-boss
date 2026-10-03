@@ -36,6 +36,7 @@ LOG="${PM}/boss-run.log"
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 PROMPT_FILE="${HERE}/../references/boss-run-review.md"
 HAIKU_MODEL="claude-haiku-4-5-20251001"
+FALLBACK_NAME="haiku"      # what the log and the chain call the Haiku reviewer
 # Seconds each reviewer gets, whole numbers. Tests set it short so a hung reviewer is cut off at once.
 TIMEOUT="${BOSS_RUN_REVIEW_TIMEOUT:-120}"
 
@@ -146,14 +147,22 @@ render_prompt() {
 }
 
 # Takes the chain's JSON; sets REVIEWER, VERDICT and REASON from it. Returns 1
-# unless it is exactly one JSON value that names a reviewer (not "none") and a
-# verdict that is APPROVE or REJECT. (Slurped: `jq -e` alone judges only the last
-# value, so a refusal followed by an approval would have passed.)
+# unless it is exactly one JSON value that is a whole Result: a reviewer boss-run
+# asked for (codex or the fallback), a verdict that is APPROVE or REJECT with its
+# reason, the raw output, and an attempt by that reviewer that answered. (Slurped:
+# `jq -e` alone judges only the last value, so a refusal followed by an approval
+# would have passed. The real chain never breaks these invariants; this gate does
+# not rely on that.)
 adopt_answer() {
   local json=$1
-  jq -es 'length == 1 and (.[0] | (.reviewer | type == "string" and . != "" and . != "none")
-          and (.parsed.word | IN("APPROVE", "REJECT"))
-          and (.parsed.reason | type == "string"))' <<<"$json" >/dev/null 2>&1 || return 1
+  jq -es --arg fb "$FALLBACK_NAME" 'length == 1 and (.[0] | . as $r
+          | ($r.reviewer | IN("codex", $fb))
+          and ($r.output | type == "string")
+          and ($r.parsed.word | IN("APPROVE", "REJECT"))
+          and ($r.parsed.reason | type == "string")
+          and ($r.attempts | type == "array"
+               and any(.[]; .reviewer == $r.reviewer and .reason == "answered")))' \
+    <<<"$json" >/dev/null 2>&1 || return 1
   REVIEWER=$(jq -sr '.[0].reviewer' <<<"$json")
   VERDICT=$(jq -sr '.[0].parsed.word' <<<"$json")
   REASON=$(jq -sr '.[0].parsed.reason' <<<"$json")
@@ -166,7 +175,7 @@ run_reviewer() {
   json=$(python3 "$CHAIN" --prompt-file "$PROMPT_TMP" \
            --words APPROVE,REJECT --match prefix --effort medium \
            --codex-timeout "$TIMEOUT" \
-           --fallback-name haiku --fallback-model "$HAIKU_MODEL" --fallback-timeout "$TIMEOUT" \
+           --fallback-name "$FALLBACK_NAME" --fallback-model "$HAIKU_MODEL" --fallback-timeout "$TIMEOUT" \
            </dev/null 2>/dev/null); rc=$?
   rm -f -- "$PROMPT_TMP"; PROMPT_TMP=""
   [[ $rc -eq 0 ]] || return 1
