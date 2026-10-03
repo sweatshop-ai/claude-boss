@@ -1,6 +1,6 @@
 # Codex review 5 of the codex-down plan (structure of tickets 02 to 11, and ticket 02 in full)
 
-Run by Birgit's replacement Fabio (task #100), 2026-10-04 01:09-01:15 (+02:00). Reviewer: Codex (`codex exec -s read-only --skip-git-repo-check`,
+Run by Fabio (task #100, restarted after Birgit's handoff), 2026-10-04 01:09-01:15 (+02:00). Reviewer: Codex (`codex exec -s read-only --skip-git-repo-check`,
 model `gpt-5.6-sol`, reasoning effort high), stdin closed, working directory the checkout root, brief `brief-codex-5.md`
 (`brief-codex-4.md` plus a round-5 paragraph: check that round 4's fixes landed and hold, and look for what they broke).
 Answered after about 6 minutes; foreground command with `run_in_background: true`, activity confirmed in the first minute.
