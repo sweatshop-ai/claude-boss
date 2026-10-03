@@ -10,7 +10,7 @@
 
 The review function (R17):
 
-- [ ] `boss_review.review(...)` gains two optional parameters after 05's `track`: `head_sha`, a fixed commit to review (the PR's live head is then not compared with it, because a merged PR's head is no longer the thing being decided; the checkout's HEAD must still equal it, and the brief, the round record and the comment name it) and `allow_fallback` (default true; the recheck passes false). The CLI is unchanged. Tests: a merged PR whose live head differs from the reviewed SHA is reviewed and posted; an open PR with no `head_sha` still exits 6 when its head moves; with `allow_fallback=False` and a failing Codex the `claude` stub's call log stays empty
+- [ ] `boss_review.review(...)` gains one optional parameter after 08's `allow_fallback`: `head_sha`, a fixed commit to review (the PR's live head is then not compared with it, because a merged PR's head is no longer the thing being decided; the checkout's HEAD must still equal it, and the brief, the round record and the comment name it) The recheck passes `allow_fallback=False` (08's parameter). The CLI is unchanged. Tests: a merged PR whose live head differs from the reviewed SHA is reviewed and posted; an open PR with no `head_sha` still exits 6 when its head moves; with `allow_fallback=False` and a failing Codex the `claude` stub's call log stays empty
 
 The recheck (R17, R18):
 
