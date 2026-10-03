@@ -39,3 +39,19 @@ blocker. The ladder escalates that line from it, with no boss turn.
 
 **Objective status**: the first `_Status: …_` line of `pm/<track>.goal.md`,
 line 2 as `boss-goal` writes it. A track is open when it starts with OPEN.
+
+**Reviewer chain**: the order in which a second model is asked for a `VERDICT:`
+line: Codex first, then an optional fallback model through `claude`, otherwise
+nobody answered. One module, `skills/boss/reviewer_chain.py`; `boss-run` calls it
+and runs nothing unless it returns a whole answer. Its result says which
+reviewer answered (`codex`, the fallback's name, or `none`) and keeps every
+attempt.
+
+**Attempt reason**: why one reviewer's turn ended as it did, from a closed set:
+`answered` (a usable verdict), `absent` (not on PATH), `timeout`, `error`
+(non-zero exit), `noverdict` (it answered with no usable `VERDICT:` line). A
+usable verdict always wins, whatever the exit status.
+
+**Fallback**: the spec of the model asked when Codex fails: a name, an exact
+model id, a timeout, an optional tool restriction, and which Codex reasons let
+it run. Optional; without one the chain is Codex only.
