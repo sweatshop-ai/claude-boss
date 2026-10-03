@@ -45,9 +45,10 @@ Prefactor first: the reviewer chain moves out of `boss-run` into one shared modu
 the PR review becomes a command, so an outage passes through one place that can see and
 count it. The fallback, the merge gate, the re-run and the blocker build on that.
 
-Build order: 01, 02, then 03 and 05 side by side, then 04 (the gate, which tests against
-03's and 05's real records) and 06 (the provisional list and the recovery re-review, which
-needs 03 and 05 but not 04's code) side by side.
+Build order: 01, 02, 03, 05 (blocked by 03 because the owner's option "accept the fallback
+review" does not exist before it), then 04 (the gate, which tests against 03's and 05's
+real records) and 06 (the provisional list and the recovery re-review, which needs 03 and 05
+but not 04's code) side by side.
 
 ## Out of scope
 
