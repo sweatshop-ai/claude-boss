@@ -6,7 +6,7 @@ Written 2026-10-04 by Birgit for task #100, after tickets 03 to 06 were drafted,
 
 | Item | Ticket and box | Status |
 |---|---|---|
-| R1 gate unreachable during the outage | No ticket box. The goal file's "Pause when" line holds it: the track stops if Codex is down before the fallback exists. The fallback runs from 08, so that line must say 08; it said 03 when this table was written (the goal file is the boss's to change) | covered by the pause once the goal file says 08, not by a box |
+| R1 gate unreachable during the outage | No ticket box. The goal file's "Pause when" line holds it: the track stops if Codex is down before the fallback exists. The fallback runs from 08, so that line must say 08; it says 03 as this table is written (the goal file is the boss's to change, and she has been asked) | pending: not covered until the goal file's line says 08 (it says 03); no box can cover it |
 | R2 `boss-run` semantics change | 01: "Characterization tests pin", "A reviewer that hangs", "`boss-run` fails closed" | covered |
 | R3 sequential timeouts stall | 01: "The timeout is per reviewer"; 02: "The chain call is 01's `run_chain`, Codex only" (`REVIEW_CODEX_TIMEOUT` and `REVIEW_FALLBACK_TIMEOUT`, 600 s each); 03: "Codex and the fallback have separate timeout constants" (a sleeping Codex stub moves on to the fallback, elapsed time asserted) | bounded, not removed: a hung Codex costs one timeout per review; an absent or failing Codex costs nothing |
 | R4 prompt injection into the verdict | 07: "The brief puts the PR title, body and diff inside a fence" | residual, owner decision pending |
