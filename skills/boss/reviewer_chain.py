@@ -110,6 +110,12 @@ def _reason(lines: list[str]) -> str:
     return NO_REASON
 
 
+def _check_words(words: tuple[str, ...]) -> None:
+    """Refuse a vocabulary that would match any `VERDICT:` line (no words, or a blank one)."""
+    if not words or any(not w.strip() for w in words):
+        raise ValueError("words must be a non-empty list of non-blank verdict words: %r" % (tuple(words),))
+
+
 _SPACE = r"[ \t\r\f\v]*"   # what grep's [[:space:]]* matches within one line
 
 
@@ -197,10 +203,11 @@ def _run(argv: list[str], timeout: int) -> tuple[int | None, str, str, bool]:
     return code, out.decode("utf-8", "replace"), err.decode("utf-8", "replace"), timed_out
 
 
-def _attempt(reviewer, model, output, run, words, strict) -> Attempt:
+def _attempt(reviewer, model, output, run, words, strict) -> tuple[Attempt, Verdict | None]:
     """Decide the reason: a usable verdict beats everything, then timeout, error, noverdict."""
     code, _, err, timed_out = run
-    if _parse(output, words, strict):
+    verdict = _parse(output, words, strict)
+    if verdict:
         reason = "answered"
     elif timed_out:
         reason = "timeout"
@@ -208,12 +215,12 @@ def _attempt(reviewer, model, output, run, words, strict) -> Attempt:
         reason = "error"
     else:
         reason = "noverdict"
-    return Attempt(reviewer, reason, output, code, err[-STDERR_TAIL:], model)
+    return Attempt(reviewer, reason, output, code, err[-STDERR_TAIL:], model), verdict
 
 
-def _codex(prompt, effort, timeout, words, strict) -> Attempt:
+def _codex(prompt, effort, timeout, words, strict) -> tuple[Attempt, Verdict | None]:
     if shutil.which("codex") is None:
-        return Attempt("codex", "absent", "", None, "", None)
+        return Attempt("codex", "absent", "", None, "", None), None
     fd, last = tempfile.mkstemp(prefix="reviewer-chain-")
     try:
         os.close(fd)
@@ -225,9 +232,9 @@ def _codex(prompt, effort, timeout, words, strict) -> Attempt:
         Path(last).unlink(missing_ok=True)
 
 
-def _claude(prompt, fb: Fallback, words, strict) -> Attempt:
+def _claude(prompt, fb: Fallback, words, strict) -> tuple[Attempt, Verdict | None]:
     if shutil.which("claude") is None:
-        return Attempt(fb.name, "absent", "", None, "", fb.model)
+        return Attempt(fb.name, "absent", "", None, "", fb.model), None
     # --allowedTools takes a variable number of values, so it goes ahead of -p:
     # after it, the prompt would be read as one more tool name.
     tools = ["--allowedTools", ",".join(fb.allowed_tools)] if fb.allowed_tools else []
@@ -238,13 +245,19 @@ def _claude(prompt, fb: Fallback, words, strict) -> Attempt:
 def run_chain(prompt: str, *, words: tuple[str, ...], effort: str = "medium",
               codex_timeout: int = 120, fallback: Fallback | None = None,
               strict: bool = False) -> Result:
-    attempts = [_codex(prompt, effort, codex_timeout, words, strict)]
-    if fallback is not None and attempts[0].reason in fallback.when:
-        attempts.append(_claude(prompt, fallback, words, strict))
-    for a in attempts:
-        if a.reason == "answered":
-            return Result(a.reviewer, a.output, _parse(a.output, words, strict), tuple(attempts))
-    return Result("none", "", None, tuple(attempts))
+    """Ask Codex, then the fallback if one is given and Codex's reason is in its `when`.
+
+    The first attempt with a usable verdict answers; if none has one, the reviewer is "none".
+    """
+    _check_words(words)
+    tried = [_codex(prompt, effort, codex_timeout, words, strict)]
+    if fallback is not None and tried[0][0].reason in fallback.when:
+        tried.append(_claude(prompt, fallback, words, strict))
+    attempts = tuple(attempt for attempt, _ in tried)
+    for attempt, verdict in tried:
+        if verdict:
+            return Result(attempt.reviewer, attempt.output, verdict, attempts)
+    return Result("none", "", None, attempts)
 
 
 def _csv(text: str) -> tuple[str, ...]:
@@ -282,6 +295,7 @@ def main(argv: list[str] | None = None) -> int:
         ap.error("--fallback-name and --fallback-model go together, and not with --no-fallback")
     try:
         words = Words(args.words, match=args.match)
+        _check_words(words)
         fallback = None
         if args.fallback_name:
             extra = {} if args.fallback_when is None else {"when": args.fallback_when}
