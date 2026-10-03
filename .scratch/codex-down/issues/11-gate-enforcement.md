@@ -22,4 +22,4 @@ The skill:
 
 Tests:
 
-- [ ] Tests use 01's stub-directory harness with its PATH guard (`gh` and `boss-alert` stubs, a temp `CLAUDE_CONFIG_DIR` and `HOME`, `BOSS_TYPESAFE_ENV` pointing at a missing file): each test asserts its stub call logs and fails if `codex`, `claude` or `gh` resolves outside the stub directory [R25].
+- [ ] Tests use 01's stub-directory harness with its PATH guard (a logging stub for each of `codex`, `claude`, `gh` and `boss-alert`, the `codex` and `claude` logs empty here; a temp `CLAUDE_CONFIG_DIR` and `HOME`; `BOSS_TYPESAFE_ENV` pointing at a missing file): each test asserts its stub call logs and fails if `codex`, `claude` or `gh` resolves outside the stub directory [R25].
