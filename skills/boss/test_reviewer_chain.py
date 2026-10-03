@@ -279,6 +279,12 @@ class Matching(Base):
             ("VERDICT: NO-GOING", None), ("VERDICT: NO GO", None),
         ], words=rc.GO_NOGO)
 
+    def test_a_letter_or_digit_beyond_ascii_continues_a_token_too(self):
+        self.check([
+            ("VERDICT: GO\u00e9", None), ("VERDICT: GO\uff11", None), ("VERDICT: NO-GO\u65e5\u672c", None),
+            ("VERDICT: GO \u2014 fine", "GO"), ("VERDICT: GO\u2026", "GO"), ("VERDICT: NO-GO\u3002", "NO-GO"),
+        ], words=rc.GO_NOGO)
+
     def test_a_plain_tuple_of_words_is_matched_as_whole_tokens(self):
         self.check([("VERDICT: NO-GO", "NO-GO"), ("VERDICT: GOOD", None)], words=("GO", "NO-GO"))
 
@@ -341,6 +347,15 @@ class Matching(Base):
         for words in (("GO", "NO-GO"), ("NO-GO", "GO"), rc.GO_NOGO):
             with self.subTest(words=tuple(words)):
                 self.assertEqual(self.parsed("VERDICT: NO-GO", words), "NO-GO")
+
+
+class RawPrompt(Base):
+    def test_run_chain_hands_the_reviewer_the_prompts_bytes_when_it_holds_undecodable_ones(self):
+        raw = b"a\xffb"
+        for ask in (raw.decode("utf-8", "surrogateescape"),):
+            self.sb.stub("codex", answer=approve())
+            self.chain(ask)
+            self.assertEqual(self.sb.calls_of("codex")[-1].argv[-1].encode("utf-8", "surrogateescape"), raw)
 
 
 class FallbackSpec(Base):
@@ -420,11 +435,14 @@ class Unrunnable(Base):
 class Cli(Base):
     """`python3 reviewer_chain.py ...`, as boss-run calls it."""
 
-    def cli(self, *args, prompt="the prompt", prompt_file=True):
+    def cli(self, *args, prompt="the prompt", prompt_file=True, prompt_bytes=None):
         argv = [sys.executable, str(HERE / "reviewer_chain.py")]
         if prompt_file:
             path = self.sb.work / "prompt.txt"
-            path.write_text(prompt, encoding="utf-8")
+            if prompt_bytes is None:
+                path.write_text(prompt, encoding="utf-8")
+            else:
+                path.write_bytes(prompt_bytes)
             argv += ["--prompt-file", str(path)]
         return subprocess.run([*argv, *args], capture_output=True, text=True, env=self.sb.env,
                               cwd=str(self.sb.work), stdin=subprocess.DEVNULL, timeout=60)
@@ -490,6 +508,14 @@ class Cli(Base):
         prompt = "line one & two && 2>&1\n{{CMD}} \\ $HOME `x`\n"
         self.cli("--words", "APPROVE,REJECT", prompt=prompt)
         self.assertEqual(self.sb.calls_of("codex")[0].argv[-1], prompt)
+
+    def test_prompt_bytes_that_are_not_utf8_reach_the_reviewer_unchanged(self):
+        # What is approved must be what runs: a command byte like 0xFF may not become U+FFFD.
+        raw = b"COMMAND: echo a\xffb \xc3\x28 end\n"
+        self.sb.stub("codex", answer=approve())
+        self.cli("--words", "APPROVE,REJECT", prompt_bytes=raw)
+        sent = self.sb.calls_of("codex")[0].argv[-1]
+        self.assertEqual(sent.encode("utf-8", "surrogateescape"), raw)
 
     def test_effort_and_the_codex_timeout_are_carried(self):
         self.sb.stub("codex", hang=True)

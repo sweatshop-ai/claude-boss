@@ -134,12 +134,13 @@ _SPACE = r"[ \t\r\f\v]*"   # what grep's [[:space:]]* matches within one line
 def _verdict_line(words: tuple[str, ...]) -> re.Pattern:
     """`VERDICT: <word>` at the start of a line, longest word first.
 
-    Under the token rule the word must end at a boundary, and a hyphen continues
-    a token, so GO-AHEAD is not GO and NO-GOING is not NO-GO.
+    Under the token rule the word must end at a boundary: any letter or digit
+    (Unicode too) and a hyphen continue a token, so GO-AHEAD is not GO, NO-GOING
+    is not NO-GO and GO\u00e9 is not GO.
     """
     alternatives = "|".join(re.escape(w.upper()) for w in sorted(words, key=len, reverse=True))
     rule = words.match if isinstance(words, Words) else _default_rule(words)
-    end = "" if rule == "prefix" else r"(?![A-Za-z0-9_-])"
+    end = "" if rule == "prefix" else r"(?![\w-])"
     return re.compile(r"%sVERDICT:%s(%s)%s" % (_SPACE, _SPACE, alternatives, end), re.IGNORECASE)
 
 
@@ -335,7 +336,9 @@ def main(argv: list[str] | None = None) -> int:
             fallback = Fallback(args.fallback_name, args.fallback_model,
                                 DEFAULT_TIMEOUT if args.fallback_timeout is None else args.fallback_timeout,
                                 args.fallback_tools, **extra)
-        prompt = Path(args.prompt_file).read_bytes().decode("utf-8", "replace")
+        # surrogateescape, so that bytes that are not UTF-8 come back out of argv as the same bytes:
+        # the reviewer must be shown the command that will run, not a lossy copy of it.
+        prompt = Path(args.prompt_file).read_bytes().decode("utf-8", "surrogateescape")
     except (ValueError, OSError) as exc:
         ap.error(str(exc))
     result = run_chain(prompt, words=words, effort=args.effort, codex_timeout=args.codex_timeout,

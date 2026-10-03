@@ -526,6 +526,12 @@ class RenderedPrompt(Base):
                 prompt = self.prompt_for(WHY, cmd)
                 self.assertTrue(prompt.endswith("\nCOMMAND: " + cmd), prompt[-200:])
 
+    def test_a_command_with_bytes_that_are_not_utf8_is_shown_to_the_reviewer_as_it_will_run(self):
+        # What is approved must be what runs. boss-run has always passed the bytes through.
+        cmd = "echo a\udcffb \udcc3("          # surrogateescape: the bytes 0xFF and 0xC3 0x28
+        prompt = self.prompt_for(WHY, cmd)
+        self.assertTrue(prompt.endswith("\nCOMMAND: " + cmd), repr(prompt[-60:]))
+
     def test_the_whole_prompt_is_the_template_with_the_three_values_in_literally(self):
         why = "tidy up the A&B && C \\ branch"
         cmd = "git branch -d a&b && echo 2>&1"
