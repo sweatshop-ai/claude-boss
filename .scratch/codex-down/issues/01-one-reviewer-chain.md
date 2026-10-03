@@ -4,7 +4,9 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Claimed by:** Anouk 2026-10-03 23:54
+
+**Status:** in-progress
 
 - [ ] One module owns the reviewer chain; `boss-run` holds no reviewer logic of its own
 - [ ] The fallback model and the timeout are parameters, with `boss-run`'s current values as its defaults
