@@ -1,6 +1,6 @@
 ---
 name: team
-description: Use when several local Claude sessions run in parallel and need to coordinate — messaging or answering another session, asking a peer a question, handing off work, checking who else is running and how busy they are, or when the owner says "tell X…", "ask @y…", "tell everyone…".
+description: Use on "tell X…", "ask @y…", "tell everyone…", or a peer's cross-session message — send, reply, hand off work, see who is busy.
 user_invocable: true
 argument: (optional) status | send <name> <message> | roster
 argument-hint: "status | send <name> <message> | roster"

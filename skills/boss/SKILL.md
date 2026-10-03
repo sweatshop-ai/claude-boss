@@ -1,6 +1,6 @@
 ---
 name: boss
-description: Use when the owner wants several Claude worker sessions coordinated for them rather than doing the work themselves — "be the boss", "manage the team", "dispatch this", asking for team status, a task-board report, or a wrap-up across workers.
+description: Use on "be the boss", "you're /boss", "dispatch this", worker status or task-board report, wrap-up — coordinate worker sessions, delegate all work.
 user_invocable: true
 argument-hint: "status | dispatch <task> [worker] | report | monitor | wrap-up"
 ---
