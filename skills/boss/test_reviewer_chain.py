@@ -462,6 +462,12 @@ class Cli(Base):
             ("empty tool list", good + ["--fallback-name", "h", "--fallback-model", "m",
                                         "--fallback-tools", ""], {}),
             ("empty words", ["--words", ""], {}),
+            ("tools without a fallback", good + ["--fallback-tools", "Read"], {}),
+            ("when without a fallback", good + ["--fallback-when", "absent"], {}),
+            ("timeout without a fallback", good + ["--fallback-timeout", "5"], {}),
+            ("no-fallback with tools", good + ["--no-fallback", "--fallback-tools", "Read"], {}),
+            ("no-fallback with when", good + ["--no-fallback", "--fallback-when", "absent"], {}),
+            ("no-fallback with a timeout", good + ["--no-fallback", "--fallback-timeout", "5"], {}),
             ("when names an impossible reason", good + ["--fallback-name", "h", "--fallback-model", "m",
                                                         "--fallback-when", "answered"], {}),
         ]:
