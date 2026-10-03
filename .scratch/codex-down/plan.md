@@ -43,7 +43,7 @@ exist to prevent.
 
 Prefactor first: the reviewer chain moves out of `boss-run` into one shared module. Then
 the PR review becomes a command, so an outage passes through one place that can see and
-count it. The fallback, the merge gate, the re-run and the blocker build on that.
+count it. The fallback, the merge gate, the re-run and the blocker build on that. Until 08 lands there is no fallback and no outage rule, so the track pauses if Codex is down before then and a PR waits on it (premortem R1; the goal file's "Pause when" line).
 
 Build order: 01, 02, then 07 (the brief and the comment) and 03 (the fallback's confinement) side by side, 08 (the fallback review; it needs both), 05 (the health state, the tracker writer and the blocker; blocked by 02 and 08 because the owner's option "accept the fallback review" does not exist before 08), then 09 (the owner's choice and the waiver) and 06 (the provisional list) side by side, then 04 (the gate, which tests against 08's and 09's real records) and 10 (the recheck and the release stop) side by side, and last 11 (the test-only exception, the `boss-run` hard rule and the skill text). In ticket numbers: 01, 02, {07, 03}, 08, 05, {09, 06}, {04, 10}, 11.
 

@@ -24,4 +24,4 @@ Timeouts (R3 in part, finding 17):
 
 Tests:
 
-- [ ] Tests use 01's stub-directory harness with its PATH guard (`codex` and `claude` stubs, a temp `HOME` and `CLAUDE_CONFIG_DIR`, `BOSS_TYPESAFE_ENV` pointing at a missing file): each test asserts its stub call logs and fails if `codex`, `claude` or `gh` resolves outside the stub directory [R25]. Cases: the argv assertion, `Fallback` without `extra_args` unchanged, the four `--check-fallback` fixtures, and the elapsed-time test
+- [ ] Tests use 01's stub-directory harness with its PATH guard (a logging stub for each of `codex`, `claude` and `gh`, the `gh` log empty here; a temp `HOME` and `CLAUDE_CONFIG_DIR`; `BOSS_TYPESAFE_ENV` pointing at a missing file): each test asserts its stub call logs and fails if `codex`, `claude` or `gh` resolves outside the stub directory [R25]. Cases: the argv assertion, `Fallback` without `extra_args` unchanged, the four `--check-fallback` fixtures, and the elapsed-time test
