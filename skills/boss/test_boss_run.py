@@ -1,13 +1,20 @@
 #!/usr/bin/env python3
-"""Characterization tests for bin/boss-run: what it does today, hermetically.
+"""Tests for bin/boss-run, hermetically.
 
 Run: python3 skills/boss/test_boss_run.py
 
 boss-run asks a reviewer (codex, then Haiku through claude) whether a command
-matches its stated intent, and runs the command only on APPROVE. These tests pin
-its observable behaviour -- stdout, stderr, exit status, the log line, how the
-reviewers are called -- so that the reviewer logic can later move into a Python
-module with these tests staying green.
+matches its stated intent, and runs the command only on APPROVE. Three kinds of
+test live here:
+
+  characterization   Approve ... ReviewerIsolation, MoreCharacterization: stdout,
+                     stderr, exit status, the log line and how the reviewers are
+                     called, as boss-run behaved before its reviewer logic moved
+                     into reviewer_chain.py. They pass on both versions.
+  the move           RenderedPrompt (the prompt reaches the reviewer literally, `&`
+                     included) and FailClosed (a chain that crashes, prints garbage
+                     or dies by a signal means nothing runs).
+  the sandbox        SandboxSeal.
 
 Nothing here touches a real codex, claude, gh or tmux: every run goes through
 hermetic.Sandbox, which builds the child's environment from scratch and puts
@@ -430,12 +437,80 @@ class SandboxSeal(Base):
         self.assertEqual(found, [str(self.sb.stubs / "codex"), str(self.sb.stubs / "claude")])
 
 
+class MoreCharacterization(Base):
+    """Behaviour the ticket lists that the first 33 tests leave to the chain tests.
+    These pass against the script as it was before the move, too."""
+
+    ENTRY_TS = r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(Z|[+-]\d\d:\d\d)$"
+
+    def assertEntry(self, sb, entry, **expected):
+        self.assertEqual(list(entry), LOG_KEYS)
+        self.assertRegex(entry["ts"], self.ENTRY_TS)
+        self.assertEqual({k: v for k, v in entry.items() if k != "ts"},
+                         dict({"session": "sess-test", "cwd": str(sb.work), "why": WHY,
+                               "cmd": CMD}, **expected))
+
+    def test_no_space_after_the_colon_and_a_tab_instead_are_accepted(self):
+        for answer, verdict, code in [("VERDICT:APPROVE\nREASON: tight", "APPROVE", 0),
+                                      ("VERDICT:\tREJECT\nREASON: tab", "REJECT", 3)]:
+            with self.subTest(answer):
+                self.sb.stub("codex", answer=answer)
+                r = self.dry()
+                self.assertEqual(r.returncode, code, r.stderr)
+                self.assertEqual(self.sb.log_lines()[-1]["verdict"], verdict)
+
+    def test_a_usable_verdict_after_a_non_zero_exit_still_counts_for_either_reviewer(self):
+        self.sb.stub("codex", answer=approve("codex said so"), rc=3)
+        r = self.dry()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.only_log()["reviewer"], "codex")
+        self.assertNotCalled("claude")
+        sb2 = Sandbox()
+        self.addCleanup(sb2.cleanup)
+        sb2.stub("claude", answer=reject("haiku said so"), rc=2)
+        r = sb2.boss_run("--why", WHY, "--dry-run", "--", CMD)
+        self.assertEqual(r.returncode, 3, r.stderr)
+        self.assertEqual(sb2.log_lines()[0]["reviewer"], "haiku")
+
+    def test_codex_progress_on_stdout_is_never_read_as_the_answer(self):
+        self.sb.stub("codex", out=approve("progress, not an answer"))   # no answer in the -o file
+        self.sb.stub("claude", answer=reject("the real answer"))
+        r = self.dry()
+        self.assertEqual(r.returncode, 3, r.stderr)
+        self.assertEqual(self.only_log()["reviewer"], "haiku")
+        sb2 = Sandbox()
+        self.addCleanup(sb2.cleanup)
+        sb2.stub("codex", out=approve("progress, not an answer"))
+        r = sb2.boss_run("--why", WHY, "--dry-run", "--", CMD)
+        self.assertEqual(r.returncode, 4, r.stderr)
+
+    def test_the_nine_log_fields_and_their_values_for_haiku_none_and_a_hard_rule(self):
+        self.sb.stub("claude", answer=approve("haiku agrees"))
+        self.assertEqual(self.dry().returncode, 0)
+        self.assertEntry(self.sb, self.sb.log_lines()[-1], reviewer="haiku", verdict="APPROVE",
+                         reason="haiku agrees", exit=0)
+
+        sb2 = Sandbox()
+        self.addCleanup(sb2.cleanup)
+        self.assertEqual(sb2.boss_run("--why", WHY, "--dry-run", "--", CMD).returncode, 4)
+        self.assertEntry(sb2, sb2.log_lines()[-1], reviewer="none", verdict="",
+                         reason="no reviewer answered", exit=4)
+
+        sb3 = Sandbox()
+        self.addCleanup(sb3.cleanup)
+        self.assertEqual(sb3.boss_run("--why", WHY, "--dry-run", "--", "git push origin main").returncode, 5)
+        self.assertEntry(sb3, sb3.log_lines()[-1], cmd="git push origin main", reviewer="hard-rule",
+                         verdict="REFUSED", reason="hard rule: push to main (matched /%s/)" % PUSH_MAIN_RE,
+                         exit=5)
+
+
 class RenderedPrompt(Base):
     """The reviewer must judge the command as written. Substituting it into the
     template with bash's ${var//pat/rep} turned every `&` into the matched token
     (bash 5.2 patsub_replacement): `a && b` reached the reviewer as `a {{CMD}}{{CMD}} b`."""
 
-    TEMPLATE = (HERE / "references" / "boss-run-review.md").read_text(encoding="utf-8")
+    def template(self):
+        return (HERE / "references" / "boss-run-review.md").read_text(encoding="utf-8")
 
     def prompt_for(self, why, *cmd):
         self.sb.stub("codex", answer=approve())
@@ -455,7 +530,7 @@ class RenderedPrompt(Base):
         why = "tidy up the A&B && C \\ branch"
         cmd = "git branch -d a&b && echo 2>&1"
         prompt = self.prompt_for(why, cmd)
-        expected = (self.TEMPLATE.rstrip("\n").replace("{{WHY}}", why)
+        expected = (self.template().rstrip("\n").replace("{{WHY}}", why)
                     .replace("{{CWD}}", str(self.sb.work)).replace("{{CMD}}", cmd))
         self.assertEqual(prompt, expected)
 
@@ -532,9 +607,20 @@ class FailClosed(Base):
             ("reason not text", {"parsed": {"word": "APPROVE", "reason": 7}}),
         ]:
             with self.subTest(name):
-                kw = {k: v for k, v in over.items() if k in ("reviewer", "word")}
-                extra = {k: v for k, v in over.items() if k == "parsed"}
-                self.chain_says(**kw, **extra)
+                self.chain_says(**over)
+                self.check_nothing_ran(self.live("touch must-not-run.flag"))
+                (self.sb.cfg / "pm" / "boss-run.log").unlink()
+
+    def test_more_than_one_json_value_on_stdout_is_not_one_answer(self):
+        # `jq -e` alone judges only the last value, so a refusal followed by an approval would pass.
+        none = '{"reviewer":"none","output":"","parsed":null,"attempts":[]}'
+        ok = '{"reviewer":"codex","output":"","parsed":{"word":"APPROVE","reason":"x"},"attempts":[]}'
+        for name, text in [("refusal then approval", none + "\n" + ok),
+                           ("two approvals", ok + "\n" + ok),
+                           ("approval then garbage", ok + "\n{"),
+                           ("garbage then approval", "{\n" + ok)]:
+            with self.subTest(name):
+                self.sb.stub("python3", out=text)
                 self.check_nothing_ran(self.live("touch must-not-run.flag"))
                 (self.sb.cfg / "pm" / "boss-run.log").unlink()
 
