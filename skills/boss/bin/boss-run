@@ -238,7 +238,10 @@ FLAT="$*"                     # unescaped, for pattern matching only
 
 check_hard_rules || finish 5
 
-PROMPT=$(render_prompt) || finish 2
+# The command is the template's last text, and $(...) strips trailing newlines: the reviewer
+# must see the bytes bash -lc will run, so a sentinel keeps them.
+PROMPT=$(render_prompt && printf .) || finish 2
+PROMPT=${PROMPT%.}
 if ! run_reviewer "$PROMPT"; then
   REVIEWER="none"; VERDICT=""; REASON="no reviewer answered"
   printf 'boss-run: no reviewer answered (codex and %s both silent or absent).\n' "$HAIKU_MODEL" >&2

@@ -27,6 +27,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple
@@ -131,29 +132,41 @@ def _check_words(words: tuple[str, ...]) -> None:
 _SPACE = r"[ \t\r\f\v]*"   # what grep's [[:space:]]* matches within one line
 
 
-def _verdict_line(words: tuple[str, ...]) -> re.Pattern:
-    """`VERDICT: <word>` at the start of a line, longest word first.
+def _verdict_line(words: tuple[str, ...]):
+    """A matcher for `VERDICT: <word>` at the start of a line: line -> the word, or None.
 
-    Under the token rule the word must end at a boundary: any letter or digit
-    (Unicode too) and a hyphen continue a token, so GO-AHEAD is not GO, NO-GOING
-    is not NO-GO and GO\u00e9 is not GO.
+    Words are tried longest first. Under the token rule the word must end at a
+    boundary: any letter or digit (Unicode too), a hyphen, or a combining mark or
+    variation selector continues a token, so GO-AHEAD is not GO, NO-GOING is not
+    NO-GO, GO\u00e9 is not GO and GO + U+0301 is not GO.
     """
     alternatives = "|".join(re.escape(w.upper()) for w in sorted(words, key=len, reverse=True))
     rule = words.match if isinstance(words, Words) else _default_rule(words)
-    end = "" if rule == "prefix" else r"(?![\w-])"
-    return re.compile(r"%sVERDICT:%s(%s)%s" % (_SPACE, _SPACE, alternatives, end), re.IGNORECASE)
+    token = rule != "prefix"
+    pattern = re.compile(r"%sVERDICT:%s(%s)%s" % (_SPACE, _SPACE, alternatives, r"(?![\w-])" if token else ""),
+                         re.IGNORECASE)
+
+    def match(line: str) -> str | None:
+        m = pattern.match(line)
+        if m is None:
+            return None
+        after = line[m.end(1):m.end(1) + 1]
+        if token and after and unicodedata.category(after).startswith("M"):
+            return None
+        return m.group(1).upper()
+    return match
 
 
 def _parse(output: str, words: tuple[str, ...], strict: bool = False) -> Verdict | None:
     """The first usable VERDICT line, or None. Under `strict`, two usable lines that
     disagree are no verdict at all."""
-    line_re = _verdict_line(words)
+    match = _verdict_line(words)
     lines = output.split("\n")          # as grep splits: on \n only
     found = []
     for line in lines:
-        m = line_re.match(line)
-        if m:
-            found.append(m.group(1).upper())
+        word = match(line)
+        if word:
+            found.append(word)
             if not strict:
                 break
     if not found or len(set(found)) > 1:
@@ -253,7 +266,10 @@ def _codex(prompt, effort, timeout, words, strict) -> _Turn:
         os.close(fd)
         run = _run(["codex", "exec", "-s", "read-only", "--skip-git-repo-check",
                     "-c", 'model_reasoning_effort="%s"' % effort, "-o", last, prompt], timeout)
-        output = Path(last).read_bytes().decode("utf-8", "replace")
+        try:
+            output = Path(last).read_bytes().decode("utf-8", "replace")
+        except OSError:            # the answer file was removed: no answer, as `cat 2>/dev/null` saw it
+            output = ""
         return _turn("codex", None, output, run, words, strict)
     finally:
         Path(last).unlink(missing_ok=True)
@@ -338,7 +354,7 @@ def main(argv: list[str] | None = None) -> int:
                                 args.fallback_tools, **extra)
         # surrogateescape, so that bytes that are not UTF-8 come back out of argv as the same bytes:
         # the reviewer must be shown the command that will run, not a lossy copy of it.
-        prompt = Path(args.prompt_file).read_bytes().decode("utf-8", "surrogateescape")
+        prompt = os.fsdecode(Path(args.prompt_file).read_bytes())
     except (ValueError, OSError) as exc:
         ap.error(str(exc))
     result = run_chain(prompt, words=words, effort=args.effort, codex_timeout=args.codex_timeout,
