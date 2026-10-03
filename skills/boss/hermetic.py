@@ -28,11 +28,24 @@ BOSS_RUN = HERE / "bin" / "boss-run"
 
 # The real binaries a boss-run needs, and nothing else.
 TOOLS = ("bash sh env jq date mkdir mktemp cat grep sed tr head tail rm timeout "
-         "dirname sleep touch wc python3 sort cut").split()
+         "dirname sleep touch wc python3 sort cut setsid").split()
 # Names that must never resolve to a real binary inside the sandbox.
 FORBIDDEN = ("codex", "claude", "gh", "tmux")
 
 Call = namedtuple("Call", "argv stdin")
+
+
+def alive(pid):
+    """True while `pid` is a live process (a zombie is not)."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    try:
+        state = Path("/proc/%d/stat" % pid).read_text().rsplit(")", 1)[1].split()[0]
+    except OSError:
+        return False
+    return state != "Z"
 
 
 class Sandbox:
@@ -81,7 +94,8 @@ class Sandbox:
                 raise AssertionError("%s resolves outside the sandbox: %s" % (name, found))
 
     # ------------------------------------------------------------------ stubs ----
-    def stub(self, name, *, answer=None, out="", err="", rc=0, hang=False, child=False):
+    def stub(self, name, *, answer=None, out="", err="", rc=0, hang=False, child=False,
+             delay=0, hang_after=False, ignore_term=False, detached=False):
         """Write stubs/<name>, a bash script that logs its call, then behaves.
 
         answer  the reviewer's reply: written to the file after `-o` for codex,
@@ -90,6 +104,12 @@ class Sandbox:
         rc      exit status
         hang    sleep 300 after logging
         child   start `sleep 300 &`, record its pid in <root>/child.pid, then wait
+        delay   sleep this many seconds after logging, before answering
+        hang_after  answer first, then sleep 300 (a reviewer that wrote its answer
+                and never exited)
+        ignore_term  ignore SIGTERM, so only SIGKILL stops it (children inherit this)
+        detached  leave a `setsid sleep 300` behind in a session of its own that
+                keeps the stub's stdout and stderr open
         """
         files = {}
         for key, text in (("answer", answer), ("out", out), ("err", err)):
@@ -105,12 +125,18 @@ class Sandbox:
             'else : > "$R/calls/$ID.argv"; fi',
             'cat > "$R/calls/$ID.stdin"',
         ]
+        if ignore_term:
+            lines.append("trap '' TERM")
+        if detached:
+            lines.append("setsid sleep 300 &")
         if child:
             lines.append('sleep 300 & echo $! > "$R/child.pid"')
         if hang:
             lines.append("sleep 300")
         elif child:
             lines.append("wait")
+        if delay:
+            lines.append("sleep %s" % delay)
         if "out" in files:
             lines.append("cat %s" % files["out"])
         if "err" in files:
@@ -122,6 +148,8 @@ class Sandbox:
                           '[ -n "$dest" ] && cat %s > "$dest"' % files["answer"]]
             else:
                 lines.append("cat %s" % files["answer"])
+        if hang_after:
+            lines.append("sleep 300")
         lines.append("exit %d" % rc)
         path = self.stubs / name
         path.write_text("\n".join(lines) + "\n", encoding="utf-8")
