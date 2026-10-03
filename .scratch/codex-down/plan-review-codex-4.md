@@ -95,3 +95,5 @@ in part (4, 7) and two (8, 9) are right and become entries in the residual risks
 | 9 | Right | R21 is "mitigated by design": one Codex per config dir, so a streak counts across repos and an answer anywhere ends it. Three failed attempts in a row from unrelated causes with no answer between them still raise a false blocker, which costs one owner question. Residual row added |
 | 10 | Real | 03, 04 and 11 now list a logging stub for each of `codex`, `claude` and `gh` (plus `boss-alert` where used), with the log empty for a tool the ticket never calls; coverage R25 says so. The tickets that already listed all three are unchanged |
 | 11 | Real | 10: a merged entry is reviewed with `head_sha=<the entry's head=>`, an open entry without `head_sha`, both with `allow_fallback=False` and `track=T` |
+
+Fix commit: 17be14e (tickets 02, 03, 04, 08, 10, 11, plan.md, coverage.md; frontier.py output unchanged and checked).
