@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The reviewer chain: Codex first, an optional fallback model next, else nobody.
 
-One place decides which reviewer answers, so `boss-run` and the PR review command
+One place decides which reviewer answers, so `boss-run` and every other caller
 cannot drift apart. Standard library only.
 
     run_chain(prompt, words=..., fallback=HAIKU) -> Result
@@ -29,6 +29,7 @@ import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+from typing import NamedTuple
 
 
 class Words(tuple):
@@ -36,16 +37,22 @@ class Words(tuple):
 
     "prefix": the word must follow `VERDICT:` and may run on (APPROVED is APPROVE),
     as boss-run has always matched. "token": the word must be a whole token, longest
-    word first (NO-GO is never GO, GOOD is no verdict). A plain tuple is "token".
+    word first (NO-GO is never GO, GOOD is no verdict). Left unsaid, the rule is
+    "prefix" for APPROVE/REJECT, wherever those two words are named (a plain tuple
+    of them, `--words APPROVE,REJECT`), and "token" for any other vocabulary.
     """
     match: str
 
-    def __new__(cls, words, match="token"):
-        if match not in ("prefix", "token"):
+    def __new__(cls, words, match=None):
+        if match not in (None, "prefix", "token"):
             raise ValueError("match must be 'prefix' or 'token', not %r" % (match,))
         self = super().__new__(cls, (w.upper() for w in words))
-        self.match = match
+        self.match = match or _default_rule(self)
         return self
+
+
+def _default_rule(words) -> str:
+    return "prefix" if {w.upper() for w in words} == {"APPROVE", "REJECT"} else "token"
 
 
 APPROVE_REJECT = Words(("APPROVE", "REJECT"), match="prefix")
@@ -126,7 +133,8 @@ def _verdict_line(words: tuple[str, ...]) -> re.Pattern:
     a token, so GO-AHEAD is not GO and NO-GOING is not NO-GO.
     """
     alternatives = "|".join(re.escape(w.upper()) for w in sorted(words, key=len, reverse=True))
-    end = "" if getattr(words, "match", "token") == "prefix" else r"(?![A-Za-z0-9_-])"
+    rule = words.match if isinstance(words, Words) else _default_rule(words)
+    end = "" if rule == "prefix" else r"(?![A-Za-z0-9_-])"
     return re.compile(r"%sVERDICT:%s(%s)%s" % (_SPACE, _SPACE, alternatives, end), re.IGNORECASE)
 
 
@@ -169,11 +177,22 @@ def _stop(proc: subprocess.Popen) -> None:
     proc.wait()
 
 
-def _run(argv: list[str], timeout: int) -> tuple[int | None, str, str, bool]:
-    """Run one reviewer with a closed stdin: (exit code, stdout, stderr, timed out).
+class _Run(NamedTuple):
+    code: int | None     # None after a timeout, and when the reviewer could not be started
+    out: str
+    err: str
+    timed_out: bool
 
-    The exit code is None after a timeout and when the reviewer could not be
-    started (then stderr says why). Output is read even after a timeout, because
+
+class _Turn(NamedTuple):
+    attempt: Attempt
+    verdict: Verdict | None
+
+
+def _run(argv: list[str], timeout: int) -> _Run:
+    """Run one reviewer with a closed stdin.
+
+    When the reviewer could not be started, `err` says why. Output is read even after a timeout, because
     a reviewer may have answered before it hung. The drain after the kill is
     bounded too: a descendant that left the group and still holds the pipe must
     not hold the chain with it.
@@ -182,7 +201,7 @@ def _run(argv: list[str], timeout: int) -> tuple[int | None, str, str, bool]:
         proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE, start_new_session=True)
     except OSError as exc:
-        return None, "", str(exc), False
+        return _Run(None, "", str(exc), False)
     code: int | None
     timed_out = False
     try:
@@ -200,46 +219,45 @@ def _run(argv: list[str], timeout: int) -> tuple[int | None, str, str, bool]:
     except BaseException:
         _stop(proc)
         raise
-    return code, out.decode("utf-8", "replace"), err.decode("utf-8", "replace"), timed_out
+    return _Run(code, out.decode("utf-8", "replace"), err.decode("utf-8", "replace"), timed_out)
 
 
-def _attempt(reviewer, model, output, run, words, strict) -> tuple[Attempt, Verdict | None]:
+def _turn(reviewer, model, output, run: _Run, words, strict) -> _Turn:
     """Decide the reason: a usable verdict beats everything, then timeout, error, noverdict."""
-    code, _, err, timed_out = run
     verdict = _parse(output, words, strict)
     if verdict:
         reason = "answered"
-    elif timed_out:
+    elif run.timed_out:
         reason = "timeout"
-    elif code != 0:
+    elif run.code != 0:
         reason = "error"
     else:
         reason = "noverdict"
-    return Attempt(reviewer, reason, output, code, err[-STDERR_TAIL:], model), verdict
+    return _Turn(Attempt(reviewer, reason, output, run.code, run.err[-STDERR_TAIL:], model), verdict)
 
 
-def _codex(prompt, effort, timeout, words, strict) -> tuple[Attempt, Verdict | None]:
+def _codex(prompt, effort, timeout, words, strict) -> _Turn:
     if shutil.which("codex") is None:
-        return Attempt("codex", "absent", "", None, "", None), None
+        return _Turn(Attempt("codex", "absent", "", None, "", None), None)
     fd, last = tempfile.mkstemp(prefix="reviewer-chain-")
     try:
         os.close(fd)
         run = _run(["codex", "exec", "-s", "read-only", "--skip-git-repo-check",
                     "-c", 'model_reasoning_effort="%s"' % effort, "-o", last, prompt], timeout)
         output = Path(last).read_bytes().decode("utf-8", "replace")
-        return _attempt("codex", None, output, run, words, strict)
+        return _turn("codex", None, output, run, words, strict)
     finally:
         Path(last).unlink(missing_ok=True)
 
 
-def _claude(prompt, fb: Fallback, words, strict) -> tuple[Attempt, Verdict | None]:
+def _claude(prompt, fb: Fallback, words, strict) -> _Turn:
     if shutil.which("claude") is None:
-        return Attempt(fb.name, "absent", "", None, "", fb.model), None
+        return _Turn(Attempt(fb.name, "absent", "", None, "", fb.model), None)
     # --allowedTools takes a variable number of values, so it goes ahead of -p:
     # after it, the prompt would be read as one more tool name.
     tools = ["--allowedTools", ",".join(fb.allowed_tools)] if fb.allowed_tools else []
     run = _run(["claude", *tools, "-p", "--model", fb.model, prompt], fb.timeout)
-    return _attempt(fb.name, fb.model, run[1], run, words, strict)
+    return _turn(fb.name, fb.model, run.out, run, words, strict)
 
 
 def run_chain(prompt: str, *, words: tuple[str, ...], effort: str = "medium",
@@ -251,12 +269,12 @@ def run_chain(prompt: str, *, words: tuple[str, ...], effort: str = "medium",
     """
     _check_words(words)
     tried = [_codex(prompt, effort, codex_timeout, words, strict)]
-    if fallback is not None and tried[0][0].reason in fallback.when:
+    if fallback is not None and tried[0].attempt.reason in fallback.when:
         tried.append(_claude(prompt, fallback, words, strict))
-    attempts = tuple(attempt for attempt, _ in tried)
-    for attempt, verdict in tried:
-        if verdict:
-            return Result(attempt.reviewer, attempt.output, verdict, attempts)
+    attempts = tuple(turn.attempt for turn in tried)
+    for turn in tried:
+        if turn.verdict:
+            return Result(turn.attempt.reviewer, turn.attempt.output, turn.verdict, attempts)
     return Result("none", "", None, attempts)
 
 
@@ -271,8 +289,9 @@ def _parser() -> argparse.ArgumentParser:
                     "object (the Result) to stdout. Exit 0: a reviewer answered. 1: none did. 2: usage.")
     ap.add_argument("--prompt-file", required=True, help="the prompt, passed to the reviewers as is")
     ap.add_argument("--words", required=True, type=_csv, help="verdict words, e.g. APPROVE,REJECT")
-    ap.add_argument("--match", choices=("prefix", "token"), default="token",
-                    help="prefix: APPROVED is APPROVE (boss-run). token: whole words (default)")
+    ap.add_argument("--match", choices=("prefix", "token"),
+                    help="prefix: APPROVED is APPROVE (boss-run). token: whole words. "
+                         "Default: prefix for APPROVE,REJECT, token for any other words")
     ap.add_argument("--effort", default="medium", help="Codex model_reasoning_effort")
     ap.add_argument("--codex-timeout", type=int, default=120, metavar="SECONDS")
     ap.add_argument("--fallback-name", help="what the result calls the fallback, e.g. haiku")

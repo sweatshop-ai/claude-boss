@@ -10,6 +10,7 @@ Two seams are tested: `run_chain` in-process, and the command line.
 """
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -117,12 +118,9 @@ class Reasons(Base):
     def test_the_stderr_tail_is_kept_whole_at_2048_characters_and_cut_at_2049(self):
         for body_len, expect_dropped in ((2047, False), (2048, True)):
             with self.subTest(total=body_len + 1):
-                sb = Sandbox()
-                self.addCleanup(sb.cleanup)
                 body = "S" + "x" * (body_len - 1)
-                sb.stub("codex", rc=1, err=body)
-                with mock.patch.dict(os.environ, sb.env, clear=True):
-                    tail = self.chain().attempts[0].stderr_tail
+                self.sb.stub("codex", rc=1, err=body)
+                tail = self.chain().attempts[0].stderr_tail
                 self.assertEqual(len(tail), 2048)
                 self.assertEqual(tail, (body[1:] if expect_dropped else body) + "\n")
 
@@ -259,6 +257,12 @@ class Matching(Base):
 
     def test_a_plain_tuple_of_words_is_matched_as_whole_tokens(self):
         self.check([("VERDICT: NO-GO", "NO-GO"), ("VERDICT: GOOD", None)], words=("GO", "NO-GO"))
+
+    def test_the_approve_reject_vocabulary_is_matched_as_a_prefix_even_as_a_plain_tuple(self):
+        # boss-run's vocabulary keeps today's rule wherever its words are named.
+        self.check([("VERDICT: APPROVED", "APPROVE"), ("VERDICT: REJECTED", "REJECT")],
+                   words=("APPROVE", "REJECT"))
+        self.check([("VERDICT: approved", "APPROVE")], words=("approve", "reject"))
 
     def test_an_unknown_match_rule_is_refused(self):
         with self.assertRaises(ValueError):
@@ -458,6 +462,15 @@ class Cli(Base):
         self.assertEqual(self.sb.calls_of("codex")[0].argv[5], 'model_reasoning_effort="high"')
         self.assertEqual(json.loads(r.stdout)["attempts"][0]["reason"], "timeout")
 
+    def test_words_alone_give_boss_runs_rule_for_approve_reject_and_whole_tokens_otherwise(self):
+        for words, answer, expected in [("APPROVE,REJECT", "VERDICT: APPROVED", 0),
+                                        ("GO,NO-GO", "VERDICT: GOOD", 1)]:
+            with self.subTest(words):
+                self.sb.stub("codex", answer=answer)
+                self.assertEqual(self.cli("--words", words).returncode, expected)
+        self.sb.stub("codex", answer="VERDICT: APPROVED")
+        self.assertEqual(self.cli("--words", "APPROVE,REJECT", "--match", "token").returncode, 1)
+
     def test_the_fallback_flags_become_a_fallback_spec(self):
         self.sb.stub("codex", answer=RAMBLE)
         self.sb.stub("claude", answer=approve("by the fallback"))
@@ -491,6 +504,21 @@ class Cli(Base):
         r = self.cli("--words", "GO,NO-GO", "--strict")
         self.assertEqual(r.returncode, 1)
         self.assertEqual(json.loads(r.stdout)["attempts"][0]["reason"], "noverdict")
+
+
+class Prose(unittest.TestCase):
+    """The reasons are quoted in prose; the code is the source and these keep the quotes true."""
+
+    REASONS = set(rc.CODEX_FAILURES) | {"answered"}
+
+    def test_the_module_docstring_lists_exactly_the_reasons_the_chain_uses(self):
+        listed = set(re.findall(r"^    (\w+)  +\S", rc.__doc__, re.MULTILINE))
+        self.assertEqual(listed, self.REASONS)
+
+    def test_context_md_lists_exactly_the_reasons_the_chain_uses(self):
+        text = (HERE.parent.parent / "CONTEXT.md").read_text(encoding="utf-8")
+        paragraph = text.split("**Attempt reason**", 1)[1].split("\n\n", 1)[0]
+        self.assertEqual(set(re.findall(r"`(\w+)`", paragraph)), self.REASONS)
 
 
 if __name__ == "__main__":
