@@ -61,6 +61,7 @@ GO_NOGO = Words(("GO", "NO-GO"), match="token")
 
 CODEX_FAILURES = frozenset(("absent", "timeout", "error", "noverdict"))
 DEFAULT_TIMEOUT = 120   # seconds, per reviewer
+RESERVED_NAMES = frozenset(("codex", "none"))   # a Result already says these; a fallback cannot be one
 
 
 @dataclass(frozen=True)
@@ -72,6 +73,9 @@ class Fallback:
     when: tuple[str, ...] = ("absent", "timeout", "error", "noverdict")
 
     def __post_init__(self):
+        if not self.name.strip() or self.name.strip().lower() in RESERVED_NAMES:
+            raise ValueError("a fallback cannot be named %r: Result.reviewer already uses %s"
+                             % (self.name, " and ".join(sorted(RESERVED_NAMES))))
         if self.allowed_tools is not None and not self.allowed_tools:
             raise ValueError("allowed_tools=() would read as no restriction; use None for that")
         unknown = set(self.when) - CODEX_FAILURES

@@ -353,6 +353,12 @@ class FallbackSpec(Base):
         self.assertEqual(call.argv, ["--allowedTools", "Read,Grep", "-p", "--model", HAIKU_ID,
                                      "PROMPT TEXT"])
 
+    def test_a_name_the_result_already_uses_for_something_else_is_refused(self):
+        # "none" would make an answering fallback look like no answer; "codex" would be mistaken for Codex.
+        for name in ("codex", "CODEX", "none", "None", "", "  "):
+            with self.subTest(name=name), self.assertRaises(ValueError):
+                rc.Fallback(name, HAIKU_ID)
+
     def test_an_empty_tool_list_is_refused_because_it_would_read_as_no_restriction(self):
         with self.assertRaises(ValueError):
             rc.Fallback("haiku", HAIKU_ID, allowed_tools=())
@@ -462,6 +468,8 @@ class Cli(Base):
             ("empty tool list", good + ["--fallback-name", "h", "--fallback-model", "m",
                                         "--fallback-tools", ""], {}),
             ("empty words", ["--words", ""], {}),
+            ("fallback named none", good + ["--fallback-name", "none", "--fallback-model", "m"], {}),
+            ("fallback named codex", good + ["--fallback-name", "codex", "--fallback-model", "m"], {}),
             ("tools without a fallback", good + ["--fallback-tools", "Read"], {}),
             ("when without a fallback", good + ["--fallback-when", "absent"], {}),
             ("timeout without a fallback", good + ["--fallback-timeout", "5"], {}),
