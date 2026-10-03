@@ -189,37 +189,40 @@ class _Turn(NamedTuple):
     verdict: Verdict | None
 
 
+def _read(f, tail: int | None = None) -> str:
+    """What a reviewer wrote to a temporary file: all of it, or only its last `tail` bytes."""
+    f.seek(0, os.SEEK_END)
+    size = f.tell()
+    f.seek(0 if tail is None else max(0, size - tail))
+    return f.read().decode("utf-8", "replace")
+
+
 def _run(argv: list[str], timeout: int) -> _Run:
     """Run one reviewer with a closed stdin.
 
-    When the reviewer could not be started, `err` says why. Output is read even after a timeout, because
-    a reviewer may have answered before it hung. The drain after the kill is
-    bounded too: a descendant that left the group and still holds the pipe must
-    not hold the chain with it.
+    Its output goes to anonymous temporary files, not pipes, so the wait is on the
+    reviewer alone: a descendant that left the process group and kept the output
+    open can neither stall the chain nor turn an exit into a timeout. Output is
+    read even after a timeout, because a reviewer may have answered before it hung.
+    When the reviewer could not be started, `err` says why.
     """
-    try:
-        proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE, start_new_session=True)
-    except OSError as exc:
-        return _Run(None, "", str(exc), False)
-    code: int | None
-    timed_out = False
-    try:
-        out, err = proc.communicate(timeout=timeout)
-        code = proc.returncode
-    except subprocess.TimeoutExpired:
-        _stop(proc)
+    with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
         try:
-            out, err = proc.communicate(timeout=TERM_GRACE)
-        except subprocess.TimeoutExpired as late:
-            out, err = late.stdout or b"", late.stderr or b""
-            proc.stdout.close()
-            proc.stderr.close()
-        code, timed_out = None, True
-    except BaseException:
-        _stop(proc)
-        raise
-    return _Run(code, out.decode("utf-8", "replace"), err.decode("utf-8", "replace"), timed_out)
+            proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=out, stderr=err,
+                                    start_new_session=True)
+        except OSError as exc:
+            return _Run(None, "", str(exc), False)
+        code: int | None = None
+        timed_out = False
+        try:
+            code = proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            _stop(proc)
+            timed_out = True
+        except BaseException:
+            _stop(proc)
+            raise
+        return _Run(code, _read(out), _read(err, tail=4 * STDERR_TAIL), timed_out)
 
 
 def _turn(reviewer, model, output, run: _Run, words, strict) -> _Turn:
