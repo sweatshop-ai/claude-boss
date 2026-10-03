@@ -532,6 +532,14 @@ class RenderedPrompt(Base):
         prompt = self.prompt_for(WHY, cmd)
         self.assertTrue(prompt.endswith("\nCOMMAND: " + cmd), repr(prompt[-60:]))
 
+    def test_trailing_newlines_of_a_command_reach_the_reviewer(self):
+        # The command is the template's last content, so $(...) used to strip them: the reviewer
+        # saw `rm -rf x\\` while bash -lc ran the continuation. What is approved must be what runs.
+        for cmd in ("echo a\\\n", "true\n\n"):
+            with self.subTest(cmd=cmd):
+                prompt = self.prompt_for(WHY, cmd)
+                self.assertTrue(prompt.endswith("\nCOMMAND: " + cmd), repr(prompt[-40:]))
+
     def test_the_whole_prompt_is_the_template_with_the_three_values_in_literally(self):
         why = "tidy up the A&B && C \\ branch"
         cmd = "git branch -d a&b && echo 2>&1"

@@ -140,6 +140,18 @@ class Reasons(Base):
         self.assertEqual((codex.reason, codex.exit_code, codex.output), ("noverdict", 0, RAMBLE))
         self.assertEqual(result.reviewer, "haiku")
 
+    def test_a_codex_answer_file_that_is_gone_is_an_empty_answer_and_the_chain_goes_on(self):
+        # boss-run's old `cat "$last" 2>/dev/null` carried on to Haiku; an exception would not.
+        gone = self.sb.stubs / "codex"
+        gone.write_text('#!/bin/bash\nprev=""; dest=""\nfor a in "$@"; do [ "$prev" = "-o" ] && dest=$a; prev=$a; done\n'
+                        'rm -f "$dest"\n')
+        gone.chmod(0o755)
+        self.sb.stub("claude", answer=approve("fallback"))
+        result = self.chain(fallback=rc.HAIKU)
+        codex = result.attempts[0]
+        self.assertEqual((codex.reason, codex.output, codex.exit_code), ("noverdict", "", 0))
+        self.assertEqual(result.reviewer, "haiku")
+
     def test_an_empty_answer_with_exit_zero_is_noverdict(self):
         self.sb.stub("codex")
         (codex,) = self.chain().attempts
@@ -283,6 +295,12 @@ class Matching(Base):
         self.check([
             ("VERDICT: GO\u00e9", None), ("VERDICT: GO\uff11", None), ("VERDICT: NO-GO\u65e5\u672c", None),
             ("VERDICT: GO \u2014 fine", "GO"), ("VERDICT: GO\u2026", "GO"), ("VERDICT: NO-GO\u3002", "NO-GO"),
+        ], words=rc.GO_NOGO)
+
+    def test_a_combining_mark_or_variation_selector_continues_a_token_too(self):
+        self.check([
+            ("VERDICT: GO\u0301", None), ("VERDICT: GO\ufe0f", None), ("VERDICT: NO-GO\u0301", None),
+            ("VERDICT: GO \u0301", "GO"),
         ], words=rc.GO_NOGO)
 
     def test_a_plain_tuple_of_words_is_matched_as_whole_tokens(self):
@@ -435,7 +453,7 @@ class Unrunnable(Base):
 class Cli(Base):
     """`python3 reviewer_chain.py ...`, as boss-run calls it."""
 
-    def cli(self, *args, prompt="the prompt", prompt_file=True, prompt_bytes=None):
+    def cli(self, *args, prompt="the prompt", prompt_file=True, prompt_bytes=None, env_extra=None):
         argv = [sys.executable, str(HERE / "reviewer_chain.py")]
         if prompt_file:
             path = self.sb.work / "prompt.txt"
@@ -444,7 +462,8 @@ class Cli(Base):
             else:
                 path.write_bytes(prompt_bytes)
             argv += ["--prompt-file", str(path)]
-        return subprocess.run([*argv, *args], capture_output=True, text=True, env=self.sb.env,
+        return subprocess.run([*argv, *args], capture_output=True, text=True,
+                              env=dict(self.sb.env, **(env_extra or {})),
                               cwd=str(self.sb.work), stdin=subprocess.DEVNULL, timeout=60)
 
     def test_an_answer_is_one_json_object_on_stdout_and_exit_zero(self):
@@ -516,6 +535,16 @@ class Cli(Base):
         self.cli("--words", "APPROVE,REJECT", prompt_bytes=raw)
         sent = self.sb.calls_of("codex")[0].argv[-1]
         self.assertEqual(sent.encode("utf-8", "surrogateescape"), raw)
+
+    def test_prompt_bytes_survive_a_filesystem_encoding_that_is_not_utf8(self):
+        # Python encodes argv with the filesystem encoding (here ascii + surrogateescape), so the
+        # prompt has to be decoded with the same codec, not with UTF-8.
+        raw = b"COMMAND: echo caf\xc3\xa9 \xff\n"
+        self.sb.stub("codex", answer=approve())
+        r = self.cli("--words", "APPROVE,REJECT", prompt_bytes=raw,
+                     env_extra={"LC_ALL": "C", "PYTHONUTF8": "0", "PYTHONCOERCECLOCALE": "0"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.sb.calls_of("codex")[0].argv[-1].encode("utf-8", "surrogateescape"), raw)
 
     def test_effort_and_the_codex_timeout_are_carried(self):
         self.sb.stub("codex", hang=True)
