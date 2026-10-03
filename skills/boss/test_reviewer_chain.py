@@ -264,6 +264,13 @@ class Matching(Base):
         with self.assertRaises(ValueError):
             rc.Words(("GO",), match="fuzzy")
 
+    def test_a_vocabulary_that_would_match_any_verdict_line_is_refused_before_anyone_is_asked(self):
+        self.sb.stub("codex", answer="VERDICT: whatever")
+        for words in ((), ("",), ("GO", " "), rc.Words(())):
+            with self.subTest(words=tuple(words)), self.assertRaises(ValueError):
+                self.chain(words=words)
+        self.assertNotCalled("codex")
+
     def test_the_first_usable_line_wins_and_a_malformed_one_before_it_is_skipped(self):
         self.check([
             ("VERDICT: maybe\nVERDICT: REJECT", "REJECT"),
@@ -426,6 +433,7 @@ class Cli(Base):
             ("timeout not a number", good + ["--codex-timeout", "soon"], {}),
             ("empty tool list", good + ["--fallback-name", "h", "--fallback-model", "m",
                                         "--fallback-tools", ""], {}),
+            ("empty words", ["--words", ""], {}),
             ("when names an impossible reason", good + ["--fallback-name", "h", "--fallback-model", "m",
                                                         "--fallback-when", "answered"], {}),
         ]:
