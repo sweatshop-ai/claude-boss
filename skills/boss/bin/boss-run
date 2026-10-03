@@ -35,7 +35,7 @@ LOG="${PM}/boss-run.log"
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 PROMPT_FILE="${HERE}/../references/boss-run-review.md"
 HAIKU_MODEL="claude-haiku-4-5-20251001"
-TIMEOUT=120
+TIMEOUT="${BOSS_RUN_REVIEW_TIMEOUT:-120}"
 
 WHY="" ; CWD="$PWD" ; DRY=0 ; CMD="" ; FLAT=""
 REVIEWER="none" ; VERDICT="" ; REASON=""
