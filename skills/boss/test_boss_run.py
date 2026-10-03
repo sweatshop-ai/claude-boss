@@ -13,7 +13,9 @@ Nothing here touches a real codex, claude, gh or tmux: every run goes through
 hermetic.Sandbox, which builds the child's environment from scratch and puts
 only stubs and a whitelist of coreutils on PATH. Each test gets its own sandbox.
 """
+import json
 import os
+import shutil
 import sys
 import time
 import unittest
@@ -438,6 +440,142 @@ class SandboxSeal(Base):
         self.assertEqual(r.returncode, 0, r.stderr)
         found = (self.sb.work / "found.txt").read_text().split()
         self.assertEqual(found, [str(self.sb.stubs / "codex"), str(self.sb.stubs / "claude")])
+
+
+class RenderedPrompt(Base):
+    """The reviewer must judge the command as written. Substituting it into the
+    template with bash's ${var//pat/rep} turned every `&` into the matched token
+    (bash 5.2 patsub_replacement): `a && b` reached the reviewer as `a {{CMD}}{{CMD}} b`."""
+
+    TEMPLATE = (HERE / "references" / "boss-run-review.md").read_text(encoding="utf-8")
+
+    def prompt_for(self, why, *cmd):
+        self.sb.stub("codex", answer=approve())
+        r = self.dry(*cmd, why=why)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return self.sb.calls_of("codex")[-1].argv[-1]
+
+    def test_a_command_with_ampersands_and_other_special_characters_reaches_the_reviewer_verbatim(self):
+        for cmd in ["echo a & echo b", "true && echo done", "ls 2>&1 | head -1",
+                    "echo 'https://example.test/x?a=1&b=2'", "echo \\& \\\\ \\n",
+                    "echo $HOME `date` $(id) %s %d ${x//a/&}", "echo '{{WHY}} {{CWD}}'"]:
+            with self.subTest(cmd=cmd):
+                prompt = self.prompt_for(WHY, cmd)
+                self.assertTrue(prompt.endswith("\nCOMMAND: " + cmd), prompt[-200:])
+
+    def test_the_whole_prompt_is_the_template_with_the_three_values_in_literally(self):
+        why = "tidy up the A&B && C \\ branch"
+        cmd = "git branch -d a&b && echo 2>&1"
+        prompt = self.prompt_for(why, cmd)
+        expected = (self.TEMPLATE.rstrip("\n").replace("{{WHY}}", why)
+                    .replace("{{CWD}}", str(self.sb.work)).replace("{{CMD}}", cmd))
+        self.assertEqual(prompt, expected)
+
+    def test_a_placeholder_written_inside_a_value_is_not_expanded_again(self):
+        prompt = self.prompt_for("explain {{CMD}} and {{CWD}}", "echo hi")
+        self.assertIn("INTENT: explain {{CMD}} and {{CWD}}\n", prompt)
+        self.assertEqual(prompt.count("COMMAND: echo hi"), 1)
+
+
+class FailClosed(Base):
+    """boss-run runs the command only on a whole answer from the chain: exit 0, one JSON
+    object, a reviewer's name, APPROVE or REJECT. Anything else is "no reviewer answered".
+    Here `python3` is a stub, so the chain says whatever the test wants; a real approving
+    codex is on PATH to prove the refusal does not come from a missing reviewer."""
+
+    EXPECTED = NoReviewer.EXPECTED
+    check_nothing_ran = NoReviewer.check_nothing_ran
+
+    def setUp(self):
+        super().setUp()
+        self.sb.stub("codex", answer=approve())
+
+    def chain_says(self, reviewer="codex", word="APPROVE", reason="chain reason", rc=0, **over):
+        answer = {"reviewer": reviewer, "output": "", "attempts": [],
+                  "parsed": {"word": word, "reason": reason}}
+        answer.update(over)
+        self.sb.stub("python3", out=json.dumps(answer), rc=rc)
+
+    def raw_stub(self, name, body):
+        path = self.sb.stubs / name
+        path.write_text("#!%s\n%s\n" % (shutil.which("bash"), body), encoding="utf-8")
+        path.chmod(0o755)
+
+    def test_an_approving_chain_runs_the_command_and_boss_run_logs_what_the_chain_said(self):
+        self.chain_says(reviewer="haiku", reason="by the chain")
+        r = self.live("touch ran.flag")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue((self.sb.work / "ran.flag").exists())
+        self.assertTrue(r.stdout.startswith("boss-run: APPROVE (reviewer: haiku) — by the chain\n"))
+        entry = self.only_log()
+        self.assertEqual((entry["reviewer"], entry["verdict"], entry["reason"], entry["exit"]),
+                         ("haiku", "APPROVE", "by the chain", 0))
+
+    def test_a_rejecting_chain_exits_3_and_nothing_runs(self):
+        self.chain_says(reviewer="codex", word="REJECT", reason="too wide")
+        r = self.live("touch must-not-run.flag")
+        self.assertEqual(r.returncode, 3)
+        self.assertEqual(r.stderr.splitlines()[0], "boss-run: REJECTED by codex — too wide")
+        self.assertFalse((self.sb.work / "must-not-run.flag").exists())
+
+    def test_a_crashing_chain_means_nothing_runs(self):
+        self.sb.stub("python3", rc=1, err="Traceback (most recent call last): boom")
+        self.check_nothing_ran(self.live("touch must-not-run.flag"))
+
+    def test_a_chain_that_dies_by_a_signal_means_nothing_runs(self):
+        self.raw_stub("python3", "kill -KILL $$")
+        self.check_nothing_ran(self.live("touch must-not-run.flag"))
+
+    def test_garbage_on_stdout_means_nothing_runs(self):
+        for garbage in ("not json at all", "", "{", "[]", "null", '"APPROVE"',
+                        'VERDICT: APPROVE\nREASON: sneaky'):
+            with self.subTest(garbage=garbage):
+                self.sb.stub("python3", out=garbage)
+                self.check_nothing_ran(self.live("touch must-not-run.flag"))
+                (self.sb.cfg / "pm" / "boss-run.log").unlink()
+
+    def test_json_that_does_not_name_a_reviewer_and_a_verdict_means_nothing_runs(self):
+        for name, over in [
+            ("reviewer none", {"reviewer": "none"}), ("empty reviewer", {"reviewer": ""}),
+            ("no reviewer", {"reviewer": None}), ("odd verdict", {"word": "MAYBE"}),
+            ("lower-case verdict", {"word": "approve"}), ("go is not approve", {"word": "GO"}),
+            ("no parsed", {"parsed": None}), ("parsed without a word", {"parsed": {"reason": "x"}}),
+            ("parsed without a reason", {"parsed": {"word": "APPROVE"}}),
+            ("reason not text", {"parsed": {"word": "APPROVE", "reason": 7}}),
+        ]:
+            with self.subTest(name):
+                kw = {k: v for k, v in over.items() if k in ("reviewer", "word")}
+                extra = {k: v for k, v in over.items() if k == "parsed"}
+                self.chain_says(**kw, **extra)
+                self.check_nothing_ran(self.live("touch must-not-run.flag"))
+                (self.sb.cfg / "pm" / "boss-run.log").unlink()
+
+    def test_a_non_zero_exit_beats_json_that_looks_like_an_approval(self):
+        self.chain_says(rc=1)
+        self.check_nothing_ran(self.live("touch must-not-run.flag"))
+
+    def test_boss_run_calls_the_chain_with_boss_runs_vocabulary_models_and_timeouts(self):
+        self.chain_says()
+        self.sb.boss_run("--why", WHY, "--dry-run", "--", CMD,
+                         extra_env={"BOSS_RUN_REVIEW_TIMEOUT": "17"})
+        (call,) = self.sb.calls_of("python3")
+        argv = call.argv
+        self.assertEqual(Path(argv[0]).resolve(), HERE / "reviewer_chain.py")
+        flags = dict(zip(argv[3::2], argv[4::2]))
+        self.assertEqual(argv[1], "--prompt-file")
+        self.assertEqual(flags, {"--words": "APPROVE,REJECT", "--match": "prefix", "--effort": "medium",
+                                 "--codex-timeout": "17", "--fallback-name": "haiku",
+                                 "--fallback-model": HAIKU, "--fallback-timeout": "17"})
+        self.assertEqual(call.stdin, "")
+
+    def test_no_temporary_prompt_file_is_left_behind(self):
+        for name, setup in [("approve", lambda: self.chain_says()),
+                            ("reject", lambda: self.chain_says(word="REJECT")),
+                            ("crash", lambda: self.sb.stub("python3", rc=1))]:
+            with self.subTest(name):
+                setup()
+                self.live("true")
+                self.assertEqual(list(self.sb.tmp.iterdir()), [])
 
 
 if __name__ == "__main__":
