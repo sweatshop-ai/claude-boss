@@ -1,38 +1,53 @@
 # Coverage: premortem risks and Codex findings, by ticket box
 
-Written 2026-10-04 by Birgit for task #100, after tickets 03 to 06 were drafted. Each box is named by its first words in the ticket file under `.scratch/codex-down/issues/`. R-numbers are the owner-accepted premortem (25 risks); "finding N" is Codex review 1 of the plan (`plan-review-codex-1.md`). 01 is Anouk's and is only referred to here, never edited.
+Written 2026-10-04 by Birgit for task #100, after tickets 03 to 06 were drafted, and re-mapped the same day after Codex review 3 split the six tickets into eleven (02 into 02 and 07; 03 into 03 and 08; 05 into 05 and 09; 04 into 04 and 11; 06 into 06 and 10). Each box is named by its first words in the ticket file under `.scratch/codex-down/issues/`. R-numbers are the owner-accepted premortem (25 risks); "finding N" is Codex review 1 of the plan (`plan-review-codex-1.md`); the dispositions of review 3's 23 findings are in `plan-review-codex-3.md`. 01 is Anouk's and is only referred to here, never edited.
 
-| Item | Ticket and box |
-|---|---|
-| R1 gate unreachable during the outage | No ticket box. The goal file's "Pause when" line holds it: the track stops if Codex is down before 03 lands |
-| R2 `boss-run` semantics change | 01: "Characterization tests pin", "A reviewer that hangs", "`boss-run` fails closed" |
-| R3 sequential timeouts stall | 01: "The timeout is per reviewer"; 03: "Codex and the fallback have separate timeout constants" (a sleeping Codex stub moves on to the fallback) |
-| R4 prompt injection into the verdict | 02: "The brief puts the PR title, body and diff inside a fence" |
-| R5 stale SHA posted | 02: "The head SHA is read once with `gh pr view`" |
-| R6 round number collision | 02: "The round number is the next free `round<NN>.json`" |
-| R7 wrong repo | 02: "`--repo` is required and never inferred"; 04: "`boss_merge.py --repo OWNER/REPO`" |
-| R8 leakage in the PR comment | 02: "The comment holds ..." (redaction); 03: the stderr tail goes through that redaction |
-| R9 review files readable by others | 02: "Per round, under `$CLAUDE_CONFIG_DIR/pm/reviews/`" (0700/0600, name check) |
-| R10 same-family blind spots | 03: "The comment's first line is `Fallback review ...`" (label and the last line); 06: "The recheck" (Codex re-reviews every provisional head) |
-| R11 NO-GO read as GO | 01: "Verdict words match as the section above says" |
-| R12 Codex error taken for an outage | 01: the closed reason set; 03: "The fallback is passed to 01's chain with `when=...`" (reason carried to the record and the comment) |
-| R13 wrong model labelled Opus | 01: `Attempt.model`; 03: "The label's model name comes from 01's `Result.attempts`" |
-| R14 deploy check fails open | 04: "The repo holds `.boss/deploy.json`" (allowlist, fail closed, read from the base branch) |
-| R15 merge by hand | 04: "`skills/boss/bin/boss-run` gains a built-in hard rule" and "`skills/boss/SKILL.md`: the merge order names `boss_merge.py`" (the limit stated) |
-| R16 release on a provisional merge | 06: "`skills/boss/SKILL.md` says: run `boss_recheck.py`" (wrap-up and release stop, `--list` exit codes) |
-| R17 re-review of the wrong commit | 06: "02's `boss_review.review(...)` gains two optional parameters" and "`boss_recheck.py --track T --repo ...`" (detached worktree at the SHA) |
-| R18 only the first PR re-reviewed | 06: "`boss_recheck.py` ..." (one entry at a time, none stops another) and the three-entry test |
-| R19 state in session memory | 06: "When `boss_review.py` records a provisional GO it first writes one line" (tracker section, cross-process test) |
-| R20 post-merge NO-GO goes nowhere | 06: "A Codex NO-GO on a merged PR (R20) writes an open blocker first" |
-| R21 counts mix or reset | 05: "`skills/boss/codex_health.py` derives the state from `pm/reviews/attempts.jsonl`" (all repos, persistent, two-process test) |
-| R22 one success clears | 05: "`policy.py` gains `CODEX_DOWN_AFTER = 3` ... `CODEX_UP_AFTER = 2`", the `codex_health` table tests, and the clearing box |
-| R23 duplicate blockers, lost edits | 05: "`tracker.py` gains `update` and `add_line`" (eight processes, one line) and "`boss_review.py --track T` runs `codex_health`" (check and add in one locked update) |
-| R24 marker malformed or misplaced | 05: "After the write a test runs `tracker.scan_marker` and `tracker.validate`" (inside `blockers_range`, ladder picks it up at rung 5); 06: the same test for the `fx` blocker |
-| R25 tests reach real tools | 02: "Tests use 01's stub-directory harness"; 03, 04, 05, 06: each ticket's closing "Tests use ..." box (PATH guard, call logs asserted) |
-| Finding 1 optional fallback | 01: "The fallback is optional"; 02: "It calls 01's chain with Codex only" |
-| Finding 2 structured result | 01: "The result is structured as above", "Every attempt keeps its own raw `output`" |
-| Finding 3 read-only named and tested | 03: the four "Fallback spec" boxes (flags as `policy.py` constants, `extra_args`, the argv test, `--check-fallback`) |
-| Finding 4 replace the absolute sentences | 03: "In `skills/boss/SKILL.md` the sentence ... are replaced by one rule with three cases" (text test: old sentence gone, new wording once) |
-| Finding 5 an executable enforcement point | 04: "`boss_merge.py ...` is the one merge path", "The record is the highest-numbered `status: posted` round", "The repo holds `.boss/deploy.json`", the `boss-run` hard rule |
-| Finding 6 `boss-run` compatibility | 01: "Characterization tests pin" |
-| Finding 7 dependency, counter, scope of "tests alone" | 05: blocked by 02 and 03; "`skills/boss/codex_health.py`" (Codex attempts counted even when the fallback answered); "`boss_review.py --waive ...`" (needs an open blocker, the owner's recorded choice and passing tests); 04: the decision-table row for `waived` and its end-to-end test |
+**Status** says how far the box goes: *covered* means a test in the box can fail if the risk is not handled; *bounded* means the box limits the damage and says what stays; *mitigated* means the box lowers the risk and names what it cannot remove; *residual, owner decision pending* means a risk that Codex review 3 showed no box can close and that the owner is deciding whether to accept (see "Residual risks" below). Nothing here claims zero risk.
+
+| Item | Ticket and box | Status |
+|---|---|---|
+| R1 gate unreachable during the outage | No ticket box. The goal file's "Pause when" line holds it: the track stops if Codex is down before the fallback exists (08 builds the fallback run; the goal file's line still says 03) | covered by the pause, not by a box |
+| R2 `boss-run` semantics change | 01: "Characterization tests pin", "A reviewer that hangs", "`boss-run` fails closed" | covered |
+| R3 sequential timeouts stall | 01: "The timeout is per reviewer"; 02: "The chain call is 01's, Codex only" (`REVIEW_CODEX_TIMEOUT` and `REVIEW_FALLBACK_TIMEOUT`, 600 s each); 03: "Codex and the fallback have separate timeout constants" (a sleeping Codex stub moves on to the fallback, elapsed time asserted) | bounded, not removed: a hung Codex costs one timeout per review; an absent or failing Codex costs nothing |
+| R4 prompt injection into the verdict | 07: "The brief puts the PR title, body and diff inside a fence" | residual, owner decision pending |
+| R5 stale SHA posted | 02: "Identity and head come from one read" and "The review runs first; the round is claimed at the end of the run" (the head is re-read under the lock, just before the post) | covered |
+| R6 round number collision | 02: "The review runs first; the round is claimed at the end of the run" (claim at completion under a per-PR lock; the order test) | covered |
+| R7 wrong repo | 02: "`boss_review.py --repo OWNER/REPO --pr N --checkout DIR --author NAME`. Exit codes" and "Identity and head come from one read"; 04: "`boss_merge.py --repo OWNER/REPO --pr N [--dry-run]` is the one merge path" | covered |
+| R8 leakage in the PR comment | 07: "The comment grows from 02's fixed lines" and "`redact(text)` is one public function"; 08: "`review()` calls the chain with `fallback_spec()`" (the stderr tail goes through `redact`) | residual, owner decision pending |
+| R9 review files readable by others | 02: "Per round, under `$CLAUDE_CONFIG_DIR/pm/reviews/<owner>/<repo>/pr<N>/`" (0700/0600, name check) and the command box (names match `^[A-Za-z0-9._-]+$`) | covered |
+| R10 same-family blind spots | 08: "The comment's first line is `Fallback review" (label and last line); 10: "`skills/boss/boss_recheck.py --track T --repo OWNER/REPO --checkout DIR [--author NAME]`" (Codex re-reviews every provisional head) | mitigated |
+| R11 NO-GO read as GO | 01: "Verdict words match as the section above says" | covered |
+| R12 Codex error taken for an outage | 01: the closed reason set; 08: "`review()` calls the chain with `fallback_spec()`" (reason, exit code and redacted stderr tail in the record and the comment) | residual, owner decision pending |
+| R13 wrong model labelled Opus | 01: `Attempt.model`; 08: "The label's model name comes from 01's `Result.attempts`" (the rejected-model test) | covered |
+| R14 deploy check fails open | 04: "The repo holds `.boss/deploy.json`" (allowlist, fail closed, read from the base branch, `test_paths` schema); 11: "`skills/boss/SKILL.md`, where the boss orders a merge" (states the stale-config limit) | covered for missing, malformed, not listed and PR-edited files; stale: residual, owner decision pending |
+| R15 merge by hand | 11: "`skills/boss/bin/boss-run` gains a built-in hard rule" and "`skills/boss/SKILL.md`, where the boss orders a merge" (the limit stated); 04: the command | bounded: a hand-typed merge in a shell stays outside the gate; only branch protection closes it |
+| R16 release on a provisional merge | 10: "`skills/boss/SKILL.md` says: run `boss_recheck.py`" (wrap-up and release stop, `--list` exit codes) | covered |
+| R17 re-review of the wrong commit | 10: "`boss_review.review(...)` gains two optional parameters" and "`skills/boss/boss_recheck.py ...`" (detached worktree at the SHA) | covered |
+| R18 only the first PR re-reviewed | 10: "`skills/boss/boss_recheck.py ...`" (one entry at a time, none stops another) and the three-entry test | covered |
+| R19 state in session memory | 06: "When `boss_review.py` records a provisional GO it first writes one line" (tracker section, cross-process test, written before the post), "**No track, no provisional review:**" and "A function `prune_provisional(track, repo)`" (removal) | covered |
+| R20 post-merge NO-GO goes nowhere | 10: "A Codex NO-GO on a merged PR (R20) writes an open blocker first" | covered |
+| R21 counts mix or reset | 05: "`skills/boss/codex_health.py` derives the state from `pm/reviews/attempts.jsonl`" (all repos, persistent, two-process test) | covered |
+| R22 one success clears | 05: "`policy.py` gains `CODEX_DOWN_AFTER = 3` ... `CODEX_UP_AFTER = 2`", the `codex_health` table tests and "Clearing: when `codex_health` says up" | covered |
+| R23 duplicate blockers, lost edits | 05: "`tracker.py` gains `update(path, fn, deadline)` and `add_line(...)`" (return contract, eight processes, one line), "`review(..., track: str \| None = None)` is the function's signature" and "When the state is down and no `Codex down` blocker is open" (check and add in one locked update; two outages in one minute give two ids) | covered |
+| R24 marker malformed or misplaced | 05: "After the write a test runs `tracker.scan_marker` and `tracker.validate`" (inside `blockers_range`, the ladder picks it up at rung 5); 10: the same tests for the `fx` blocker, in its closing box | covered |
+| R25 tests reach real tools | Every ticket's closing "Tests use ..." box, 02 to 11 (stub directory first on PATH, PATH guard failing the test if `codex`, `claude` or `gh` resolves outside it, stub call logs asserted, and `BOSS_TYPESAFE_ENV` pointing at a missing file). No ticket here calls TypeSafe: `boss-jev.py` is the only module that reads that key, so a stray call finds none; 05 moves `tracker_add`'s body to `tracker.add_line` and `test_boss_jev.py` passes unchanged | covered |
+| Finding 1 optional fallback | 01: "The fallback is optional"; 02: "The chain call is 01's, Codex only" | covered |
+| Finding 2 structured result | 01: "The result is structured as above", "Every attempt keeps its own raw `output`" | covered |
+| Finding 3 read-only named and tested | 03: "The fallback is the `claude` call", "01's `Fallback` carries `allowed_tools`", "The `claude` stub records its argv", "`boss_review.py --check-fallback` runs the fallback call" (fixtures, not a real call) | covered |
+| Finding 4 replace the absolute sentences | 08: "In `skills/boss/SKILL.md` the sentence ..." (text test: old sentence gone, new wording once); 09: "`skills/boss/SKILL.md` says: when a `Codex down` blocker is open" (the same wording still once, tests-alone case named) | covered |
+| Finding 5 an executable enforcement point | 04: "`boss_merge.py --repo OWNER/REPO --pr N [--dry-run]` is the one merge path", "The gate walks the PR's `round<NN>.json` files from the highest number down", "The repo holds `.boss/deploy.json`"; 11: "`skills/boss/bin/boss-run` gains a built-in hard rule" | covered |
+| Finding 6 `boss-run` compatibility | 01: "Characterization tests pin" | covered |
+| Finding 7 dependency, counter, scope of "tests alone" | 05: blocked by 02 and 08; "`skills/boss/codex_health.py` derives the state ..." (Codex attempts counted even when the fallback answered); 09: "`boss_review.py --waive --repo ...`" (needs an open blocker, the owner's recorded choice and passing tests); 04: "The gate walks the PR's `round<NN>.json` files from the highest number down" (the `waived` rows and the end-to-end test) | covered |
+
+## Residual risks
+
+Codex review 3 (findings 12 and 17 to 21) showed that six of the rows above cannot be fully closed by a ticket box. They are written down here so the owner sees them as acceptances, not as zeros. R3 and R15 are bounded and need no decision. R4, R8, R12 and R14 (its stale-configuration part) are "residual, owner decision pending": the owner is deciding now whether to accept each, and this file is adjusted if the answer differs.
+
+| Risk | What stays after the tickets | What lowers it |
+|---|---|---|
+| R3 sequential timeouts | A hung Codex costs one `REVIEW_CODEX_TIMEOUT` (600 s) per review before the fallback starts; an absent or failing Codex costs nothing | 03's elapsed-time test with 1-second values; the two constants are separate |
+| R4 prompt injection | No parser can prove a reviewer was not talked into a GO by fenced PR text | The fence with a per-run delimiter, the last-message rule (07), and Codex's later re-review of every provisional head (10) |
+| R8 leakage | Free-text `FINDING:` lines can carry client or proprietary wording that no pattern catches (hostnames, client names, snippets); only IPv4, token shapes, e-mail, home paths and the site hard-rules patterns are redacted. Findings are published after the redaction pass and the 20 × 300 cap. The owner may choose to publish no findings at all | The redaction function and the cap (07); the full answer stays in the private `round<NN>.out` |
+| R12 error taken for an outage | Plan decision 1 runs the fallback whenever Codex does not answer, so authentication, quota and CLI errors also run it | Every such run is labelled with the Codex reason, the exit code and a redacted stderr tail (08), and 05 counts them as failed Codex attempts, so a persistent non-outage still reaches the owner as a blocker |
+| R14 stale configuration | A branch listed in `.boss/deploy.json` that later starts to deploy is outside what a file in the repo can know | Missing, malformed, not-listed and PR-edited files all fail closed (04); the skill states the limit (11) |
+| R15 merge by hand | A hand-typed merge in a shell is outside the gate, and a base retargeted inside the window between the check and the merge is detected after the fact (exit 5, `base-changed`, `boss-alert 0`), not prevented | The `boss-run` hard rule (11); the post-merge read (04); only branch protection on the repo closes the rest |

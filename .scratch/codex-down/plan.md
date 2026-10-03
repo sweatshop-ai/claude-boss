@@ -45,16 +45,11 @@ Prefactor first: the reviewer chain moves out of `boss-run` into one shared modu
 the PR review becomes a command, so an outage passes through one place that can see and
 count it. The fallback, the merge gate, the re-run and the blocker build on that.
 
-Build order: 01, 02, 03, 05 (blocked by 03 because the owner's option "accept the fallback
-review" does not exist before it), then 04 (the gate, which tests against 03's and 05's
-real records) and 06 (the provisional list and the recovery re-review, which needs 03 and 05
-but not 04's code) side by side.
+Build order: 01, 02, then 07 (the brief and the comment) and 03 (the fallback's confinement) side by side, 08 (the fallback review; it needs both), 05 (the health state, the tracker writer and the blocker; blocked by 02 and 08 because the owner's option "accept the fallback review" does not exist before 08), then 09 (the owner's choice and the waiver) and 06 (the provisional list) side by side, then 04 (the gate, which tests against 08's and 09's real records) and 10 (the recheck and the release stop) side by side, and last 11 (the test-only exception, the `boss-run` hard rule and the skill text). In ticket numbers: 01, 02, {07, 03}, 08, 05, {09, 06}, {04, 10}, 11.
 
 ## Out of scope
 
 - Adding another model family (Gemini, OpenCode). Revisit if one gets installed.
 - Sandcastle-style batch merging by a merger agent. Discussed, not decided.
 
-Tickets: `.scratch/codex-down/issues/` (01–06). The old
-ticket 04 was split on 2026-10-04: 04 is the merge gate, 06 the provisional list and the
-recovery.
+Tickets: `.scratch/codex-down/issues/` (01-11). The old ticket 04 was split on 2026-10-04: 04 is the merge gate, 06 the provisional list and the recovery. After Codex review 3 of the plan the same day, 02, 03, 04, 05 and 06 were split again into 07 (the review brief and the comment), 08 (the fallback review), 11 (the gate's test-only exception, hard rule and skill text), 09 (the owner's choice and the waiver) and 10 (the recheck and the release stop). `coverage.md` maps every premortem risk and the findings that matter to a ticket box and lists the residual risks.

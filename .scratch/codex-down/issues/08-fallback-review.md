@@ -1,0 +1,27 @@
+# 08: The fallback review, labelled and provisional
+
+**What to build:** when Codex does not answer, `boss_review.py` runs the fallback reviewer that 03 confined, and records its verdict as a **provisional** GO or NO-GO. The comment says it is a fallback review and why Codex was not there. A provisional GO lets a merge go ahead only on a branch the repo marks non-deploying; 04 enforces that. This ticket also replaces the skill's two absolute merge sentences with one rule that covers every kind of GO the track can now produce.
+
+**Scope:** new on 2026-10-04, split out of the original 03 after Codex review 3 of the plan (findings 2, 3, 20, 23), with the owner-accepted premortem (R10, R11, R12, R13, R25). 08 adds the `provisional` value to the round record's `kind` (02 writes `codex`; 09 adds `waived`). The fallback is passed to 01's chain with 03's `fallback_spec()`, so brief, fence, findings and redaction are 07's. Plan decision 1 says the fallback runs when Codex does not answer; `coverage.md` lists the consequence for R12 as a residual risk (authentication, quota and CLI errors also run it, and are labelled, not prevented). 06 later adds one precondition (no track, no fallback); until 06 lands, provisional GOs exist that no list knows about, and nothing in this track is released.
+
+**Blocked by:** 03 (The fallback reviewer is confined to read-only), 07 (The review brief, the findings in the comment, and the skill text)
+
+**Status:** ready-for-agent
+
+When it runs, and what it is called (R12, R13, finding 2):
+
+- [ ] `review()` calls the chain with `fallback_spec()`: the fallback runs when Codex's attempt reason is `absent`, `timeout` or `error`. On Codex `noverdict` Codex answered: no fallback, exit 4 as in 02, and the `claude` stub's call log stays empty. The round record, the comment and the attempts line carry the Codex reason; for `error` the round record also keeps the exit code and the stderr tail (last 2048 characters), and the comment carries them through 07's `redact`, so a Codex that fails on auth or quota reads differently from one that is down. To the gate they are the same outage; to the owner they are not
+- [ ] The label's model name comes from 01's `Result.attempts` (the model id the fallback actually ran with), never from a constant string. A `claude` stub that rejects the model id gives no verdict: exit 4, nothing posted, a round that is `no-verdict` with verdict null and top-level `reviewer` `none`. Nothing posted and no top-level `reviewer` or `model` field of the round names Opus or a model id (a fallback that did not answer is not "Opus"); the id the stub rejected stays only in the private `attempts` of `round<NN>.json` (01's `Attempt.model`), and an `attempts.jsonl` line holds a reviewer name, never a model id [R13, finding 2]
+
+Verdict and record:
+
+- [ ] A fallback GO is written as `kind: provisional` in `round<NN>.json`, `reviewer` `opus`, `model` the id it ran with. A fallback NO-GO is `kind: provisional`, verdict `NO-GO`: it blocks like any NO-GO. `kind` is `codex` for a Codex answer or a Codex-only run and `provisional` once the fallback ran, a run where both reviewers gave nothing included. Exit codes stay 0 GO posted, 3 NO-GO posted. When both reviewers give nothing: exit 4, nothing posted, the round is `no-verdict`, both attempts are in `attempts.jsonl`
+- [ ] The comment's first line is `Fallback review (Codex unavailable: <reason>) - provisional GO` (or `... - NO-GO`), then the head SHA, the model id from the answering attempt and the findings in 07's format. It is never headed "Codex review". Its last line says: same model family as the workers, so Codex re-reviews this head before any deploy [R10]
+
+SKILL.md, the merge rule (replace, not add; findings 3 and 4 of reviews 1 and 3):
+
+- [ ] In `skills/boss/SKILL.md` the sentence "every PR gets a Codex review on the head that merges, before you merge it" and the sentence "No PR merges without a GO on record" are replaced by one rule: a Codex GO on the head that merges may merge; a GO that is not Codex's (a provisional fallback review, or the owner's merge on tests alone) may merge only on a branch the repo marks non-deploying, which `boss_merge.py` decides; anything else does not merge. The wording names the tests-alone case now so that 09 needs no second edit; 04 builds the command it names. The sentence about merges "after Codex GO where nothing deploys" (in the paragraph on production steps) is reworded to match. The line "no merge order is given on a GO that exists only in a message" stays. A text test fails if `No PR merges without a GO on record` is still in the skill and checks that the new rule's wording appears exactly once
+
+Tests:
+
+- [ ] Tests use 01's stub-directory harness with its PATH guard (`codex`, `claude` and `gh` stubs, a temp `HOME` and `CLAUDE_CONFIG_DIR`, `BOSS_TYPESAFE_ENV` pointing at a missing file): each test asserts its stub call logs and fails if `codex`, `claude` or `gh` resolves outside the stub directory [R25]. Cases: Codex absent + fallback GO, Codex timeout + fallback GO, Codex error + fallback NO-GO (exit code and stderr tail in the record, token in the stderr redacted in the comment), both down, Codex `noverdict` (`claude` log empty), model rejected, and the skill text test
