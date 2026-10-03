@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.9.1 — 2026-10-03
+
+The `boss` and `team` skill descriptions are shorter.
+
+- **`boss` 241 → 147 characters, `team` 278 → 127.** Claude Code lists every
+  skill's description in every session, so each character is paid on every turn.
+  Each description now leads with its triggers, one per case. `boss`: "be the
+  boss" / "you're /boss", "dispatch this", worker status or task-board report,
+  wrap-up. `team`: "tell X…", "ask @y…", "tell everyone…" and a peer's
+  cross-session message. "manage the team" is dropped as another way of saying
+  "be the boss".
+- Read against past model-started runs: 8 of 11 `boss` starts were a role
+  assignment ("you're /boss now", "become /boss", "taking over as boss"), so
+  that phrase is now named; `team` starts were "tell X", "pass it to X" and
+  "ask the active workers", all still named.
+
 ## 0.9.0 — 2026-10-02
 
 One module knows the formats of a track's files, and the ladder no longer
