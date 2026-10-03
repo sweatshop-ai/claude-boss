@@ -653,7 +653,7 @@ class FailClosed(Base):
     def test_more_than_one_json_value_on_stdout_is_not_one_answer(self):
         # `jq -e` alone judges only the last value, so a refusal followed by an approval would pass.
         none = '{"reviewer":"none","output":"","parsed":null,"attempts":[]}'
-        ok = '{"reviewer":"codex","output":"","parsed":{"word":"APPROVE","reason":"x"},"attempts":[]}'
+        ok = json.dumps(self.whole_result())   # on its own, this one is accepted and runs the command
         for name, text in [("refusal then approval", none + "\n" + ok),
                            ("two approvals", ok + "\n" + ok),
                            ("approval then garbage", ok + "\n{"),

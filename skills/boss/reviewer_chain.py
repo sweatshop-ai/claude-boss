@@ -60,13 +60,14 @@ GO_NOGO = Words(("GO", "NO-GO"), match="token")
 
 
 CODEX_FAILURES = frozenset(("absent", "timeout", "error", "noverdict"))
+DEFAULT_TIMEOUT = 120   # seconds, per reviewer
 
 
 @dataclass(frozen=True)
 class Fallback:
     name: str
     model: str
-    timeout: int = 120
+    timeout: int = DEFAULT_TIMEOUT
     allowed_tools: tuple[str, ...] | None = None
     when: tuple[str, ...] = ("absent", "timeout", "error", "noverdict")
 
@@ -264,7 +265,7 @@ def _claude(prompt, fb: Fallback, words, strict) -> _Turn:
 
 
 def run_chain(prompt: str, *, words: tuple[str, ...], effort: str = "medium",
-              codex_timeout: int = 120, fallback: Fallback | None = None,
+              codex_timeout: int = DEFAULT_TIMEOUT, fallback: Fallback | None = None,
               strict: bool = False) -> Result:
     """Ask Codex, then the fallback if one is given and Codex's reason is in its `when`.
 
@@ -296,10 +297,11 @@ def _parser() -> argparse.ArgumentParser:
                     help="prefix: APPROVED is APPROVE (boss-run). token: whole words. "
                          "Default: prefix for APPROVE,REJECT, token for any other words")
     ap.add_argument("--effort", default="medium", help="Codex model_reasoning_effort")
-    ap.add_argument("--codex-timeout", type=int, default=120, metavar="SECONDS")
+    ap.add_argument("--codex-timeout", type=int, default=DEFAULT_TIMEOUT, metavar="SECONDS")
     ap.add_argument("--fallback-name", help="what the result calls the fallback, e.g. haiku")
     ap.add_argument("--fallback-model", help="exact model id for `claude --model`")
-    ap.add_argument("--fallback-timeout", type=int, default=120, metavar="SECONDS")
+    ap.add_argument("--fallback-timeout", type=int, metavar="SECONDS",
+                    help="default %d" % DEFAULT_TIMEOUT)
     ap.add_argument("--fallback-tools", type=_csv, help="comma list for `claude --allowedTools`")
     ap.add_argument("--fallback-when", type=_csv, metavar="REASONS",
                     help="Codex reasons that let the fallback run (default: all four)")
@@ -312,16 +314,22 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     ap = _parser()
     args = ap.parse_args(argv)
-    given = [args.fallback_name, args.fallback_model]
-    if args.no_fallback and any(given) or bool(args.fallback_name) != bool(args.fallback_model):
-        ap.error("--fallback-name and --fallback-model go together, and not with --no-fallback")
+    options = {"--fallback-name": args.fallback_name, "--fallback-model": args.fallback_model,
+               "--fallback-timeout": args.fallback_timeout, "--fallback-tools": args.fallback_tools,
+               "--fallback-when": args.fallback_when}
+    given = [flag for flag, value in options.items() if value is not None]
+    if args.no_fallback and given:
+        ap.error("--no-fallback conflicts with %s" % ", ".join(given))
+    if given and not (args.fallback_name and args.fallback_model):
+        ap.error("%s need both --fallback-name and --fallback-model" % ", ".join(given))
     try:
         words = Words(args.words, match=args.match)
         _check_words(words)
         fallback = None
         if args.fallback_name:
             extra = {} if args.fallback_when is None else {"when": args.fallback_when}
-            fallback = Fallback(args.fallback_name, args.fallback_model, args.fallback_timeout,
+            fallback = Fallback(args.fallback_name, args.fallback_model,
+                                DEFAULT_TIMEOUT if args.fallback_timeout is None else args.fallback_timeout,
                                 args.fallback_tools, **extra)
         prompt = Path(args.prompt_file).read_bytes().decode("utf-8", "replace")
     except (ValueError, OSError) as exc:
