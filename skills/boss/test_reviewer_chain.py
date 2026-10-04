@@ -504,6 +504,45 @@ class FallbackSpec(Base):
         self.assertEqual(call.argv, ["--allowedTools", "Read,Grep", "-p", "--model", HAIKU_ID,
                                      "PROMPT TEXT"])
 
+    def test_extra_args_go_ahead_of_print_so_no_variadic_option_can_swallow_the_prompt(self):
+        # `-p` ends `--tools <tools...>`: `claude --tools Read -p ok` is a prompt, `claude -p --tools Read ok` is not.
+        self.sb.stub("claude", answer=approve())
+        fb = rc.Fallback("haiku", HAIKU_ID, extra_args=("--tools", "Read"))
+        self.chain("PROMPT TEXT", fallback=fb)
+        (call,) = self.sb.calls_of("claude")
+        self.assertEqual(call.argv, ["--tools", "Read", "-p", "--model", HAIKU_ID, "PROMPT TEXT"])
+
+    def test_allowed_tools_come_first_then_the_extras_then_print(self):
+        self.sb.stub("claude", answer=approve())
+        fb = rc.Fallback("haiku", HAIKU_ID, allowed_tools=("Read", "Grep"),
+                         extra_args=("--tools", "Read", "--strict-mcp-config"))
+        self.chain("PROMPT TEXT", fallback=fb)
+        (call,) = self.sb.calls_of("claude")
+        self.assertEqual(call.argv, ["--allowedTools", "Read,Grep", "--tools", "Read", "--strict-mcp-config",
+                                     "-p", "--model", HAIKU_ID, "PROMPT TEXT"])
+
+    def test_a_fallback_without_extra_args_is_called_as_before(self):
+        self.sb.stub("claude", answer=approve())
+        self.assertEqual(rc.HAIKU.extra_args, ())
+        self.chain("PROMPT TEXT", fallback=rc.HAIKU)
+        (call,) = self.sb.calls_of("claude")
+        self.assertEqual(call.argv, ["-p", "--model", HAIKU_ID, "PROMPT TEXT"])
+
+    def test_claude_argv_is_the_one_builder_and_the_stub_receives_what_it_built(self):
+        self.sb.stub("claude", answer=approve())
+        fb = rc.Fallback("haiku", HAIKU_ID, allowed_tools=("Read",), extra_args=("--permission-mode", "dontAsk"))
+        expected = ["claude", "--allowedTools", "Read", "--permission-mode", "dontAsk",
+                    "-p", "--model", HAIKU_ID, "PROMPT TEXT"]
+        self.assertEqual(rc.claude_argv(fb, "PROMPT TEXT"), expected)
+        self.chain("PROMPT TEXT", fallback=fb)
+        self.assertEqual(self.sb.calls_of("claude")[0].argv, expected[1:])
+
+    def test_extra_args_that_would_end_option_parsing_or_are_not_strings_are_refused(self):
+        # a bare `--` ahead of `-p` would turn `-p --model M PROMPT` into operands of the prompt
+        for bad in (("--",), ("--tools", "Read", "--"), ["--tools", "Read"], "--tools", ("--tools", 3), None):
+            with self.subTest(extra_args=bad), self.assertRaises(ValueError):
+                rc.Fallback("haiku", HAIKU_ID, extra_args=bad)
+
     def test_a_name_the_result_already_uses_for_something_else_is_refused(self):
         # "none" would make an answering fallback look like no answer; "codex" would be mistaken for Codex.
         for name in ("codex", "CODEX", "none", "None", "", "  "):
@@ -566,6 +605,40 @@ class Unrunnable(Base):
         self.assertEqual((codex.reason, codex.exit_code), ("error", None))
         self.assertIn("No such file or directory", codex.stderr_tail)   # the OSError, as Python words it
         self.assertEqual(result.reviewer, "haiku")
+
+
+class FlagsRoundTrip(Base):
+    """`fallback_flags` is how a caller that starts the chain as a child process hands it a whole
+    `Fallback`: the command line must rebuild exactly the spec that was rendered, field by field."""
+
+    def rebuilt(self, fb):
+        path = self.sb.work / "prompt.txt"
+        path.write_text("the prompt", encoding="utf-8")
+        seen = {}
+
+        def fake_chain(prompt, **kw):
+            seen.update(kw)
+            return rc.Result("none", "", None, ())
+
+        with mock.patch.object(rc, "run_chain", fake_chain), mock.patch("sys.stdout", io.StringIO()):
+            rc.main(["--prompt-file", str(path), "--words", "GO,NO-GO", *rc.fallback_flags(fb)])
+        return seen["fallback"]
+
+    def test_every_field_comes_back_equal(self):
+        specs = [rc.HAIKU,
+                 rc.Fallback("opus", "claude-opus-5-5", timeout=7, allowed_tools=("Read", "Grep"),
+                             when=("absent", "error"),
+                             extra_args=("--tools", "Read", "--permission-mode", "dontAsk")),
+                 rc.Fallback("x", "m", timeout=1, when=(), extra_args=("--a", "", "b c", '"q"'))]
+        for fb in specs:
+            with self.subTest(fb=fb):
+                self.assertEqual(self.rebuilt(fb), fb)
+
+    def test_a_tool_list_the_command_line_cannot_carry_is_refused_not_changed(self):
+        # --fallback-tools is one comma list: a tool with a comma in it would come back as two
+        for tools in (("Read,Grep",), ("Read", " Grep"), ("",)):
+            with self.subTest(tools=tools), self.assertRaises(ValueError):
+                rc.fallback_flags(rc.Fallback("h", "m", allowed_tools=tools))
 
 
 class Cli(Base):
@@ -694,6 +767,40 @@ class Cli(Base):
         self.assertEqual(data["attempts"][1]["model"], "claude-sonnet-5-5")
         self.assertEqual(self.sb.calls_of("claude")[0].argv,
                          ["--allowedTools", "Read,Grep", "-p", "--model", "claude-sonnet-5-5", "the prompt"])
+
+    def test_fallback_extra_args_become_the_flags_ahead_of_print(self):
+        self.sb.stub("codex", answer=RAMBLE)
+        self.sb.stub("claude", answer=approve())
+        r = self.cli("--words", "APPROVE,REJECT", "--fallback-name", "sonnet",
+                     "--fallback-model", "claude-sonnet-5-5",
+                     "--fallback-extra-args", '["--tools", "Read,Grep", "--strict-mcp-config"]')
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.sb.calls_of("claude")[0].argv,
+                         ["--tools", "Read,Grep", "--strict-mcp-config", "-p", "--model",
+                          "claude-sonnet-5-5", "the prompt"])
+
+    def test_extra_args_that_are_not_a_json_list_of_strings_are_a_usage_error(self):
+        base = ["--words", "GO,NO-GO", "--fallback-name", "h", "--fallback-model", "m"]
+        for name, args in [
+            ("not json", base + ["--fallback-extra-args", "--tools Read"]),
+            ("a string", base + ["--fallback-extra-args", '"--tools"']),
+            ("an object", base + ["--fallback-extra-args", '{"a": "b"}']),
+            ("a number in the list", base + ["--fallback-extra-args", '["--tools", 3]']),
+            ("a bare --", base + ["--fallback-extra-args", '["--tools", "Read", "--"]']),
+            ("nested past the parser's depth", base + ["--fallback-extra-args", "[" * 100000]),
+            ("without a fallback", ["--words", "GO,NO-GO", "--fallback-extra-args", '["--x"]']),
+            ("with no-fallback", ["--words", "GO,NO-GO", "--no-fallback", "--fallback-extra-args", '["--x"]']),
+            ("without a model", ["--words", "GO,NO-GO", "--fallback-name", "h",
+                                 "--fallback-extra-args", '["--x"]']),
+        ]:
+            with self.subTest(name):
+                r = self.cli(*args)
+                self.assertEqual(r.returncode, 2, r.stderr)
+                self.assertEqual(r.stdout, "")
+                # exit 2 is also what an option argparse does not know gets: the reason must be ours
+                self.assertNotIn("unrecognized", r.stderr)
+                self.assertRegex(r.stderr, r"extra[-_]args")
+        self.assertNotCalled("codex", "claude")
 
     def test_fallback_when_keeps_the_fallback_out_after_a_noverdict(self):
         self.sb.stub("codex", answer=RAMBLE)
