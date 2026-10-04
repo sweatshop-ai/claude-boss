@@ -7,6 +7,7 @@ Every threshold a boss or a worker acts on lives here, and only here:
   cost lines      when cost per turn calls for action
   escalation      the rungs at which a blocker on the owner is re-raised
   review waits    how long a PR review waits on Codex, on the fallback, on gh and on its lock
+  fallback call   the model, the tools and the permission mode of the read-only fallback reviewer
 
     flag_for(ctx, cost, role) -> list of flags, e.g. ["CTX-SPLIT"]
     heavy(ctx, cost, role)    -> True past the first context or recycle line
@@ -49,6 +50,13 @@ REVIEW_CODEX_TIMEOUT = 600
 REVIEW_FALLBACK_TIMEOUT = 600
 REVIEW_IO_TIMEOUT = 60
 REVIEW_CHAIN_SLACK = 30
+
+# The fallback reviewer, `claude` in read-only mode (boss_review.fallback_spec). The model is passed by
+# its exact id, so no CLI default is ever accepted; the tools are the built-in set it may use, and
+# `--strict-mcp-config` (with no `--mcp-config`) keeps every MCP server out, which `--tools` alone does not.
+REVIEW_FALLBACK_MODEL = "claude-opus-5-5"
+REVIEW_FALLBACK_TOOLS = ("Read", "Grep", "Glob")
+REVIEW_FALLBACK_PERMISSION_MODE = "dontAsk"
 
 
 def flag_for(ctx, cost, role):
