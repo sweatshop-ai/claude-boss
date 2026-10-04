@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Review one PR head with Codex, keep the round on disk, post a minimal comment.
+"""Review one PR head with Codex, keep the round on disk, post the verdict and the findings.
 
     review(repo, pr, checkout, author) -> ReviewResult      the logic
     boss_review.py --repo OWNER/REPO --pr N --checkout DIR --author NAME   the command
@@ -12,10 +12,11 @@ Exit codes (5 belongs to a later ticket and is never used here):
       read for the brief (then nothing was claimed): nothing posted
     7 infrastructure: gh, the chain or a write failed
 
-The order: read the PR, ask Codex (01's chain, Codex only, in a child process started in the
-checkout), then under the PR's lock read the PR again, claim the next round, append the attempts,
-write the answer, post, and replace the claimed file by the full record. A failure before the
-claim leaves nothing; one after it leaves the claimed file empty. Rounds live under
+The order: read the PR and its diff, read the PR again (it must not have moved), ask Codex (01's
+chain, Codex only, in a child process started in the checkout) with a brief that fences the PR's text,
+make the findings safe to publish, then under the PR's lock read the PR again, claim the next round,
+append the attempts, write the answer, post, and replace the claimed file by the full record. A
+failure before the claim leaves nothing; one after it leaves the claimed file empty. Rounds live under
 $CLAUDE_CONFIG_DIR/pm/reviews/<owner>/<repo>/pr<N>/ (round<NN>.json and .out), never in the
 checkout; the record, not the comment, is what a gate reads. Standard library only.
 """
@@ -267,28 +268,34 @@ _SHA = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
 
 
 _FIELDS = "number,url,headRefOid,baseRefName,title,body"
-BASE_MAX = 255                                  # bytes: the longest branch name that goes into a brief
-_NOT_IN_A_NAME = frozenset(("Cc", "Cf", "Cs", "Zl", "Zp", "Zs"))
+_HIDING = frozenset(("Cc", "Cf", "Zl", "Zp"))     # control, format, line and paragraph separators
+_NOT_IN_A_NAME = _HIDING | {"Cs", "Zs"}           # and a lone surrogate, and a space
 
 
 def _plain_name(name: str) -> bool:
     """A branch name that can go into a brief and a shell command line: no control, format, separator
-    or space character, no lone surrogate, at most BASE_MAX bytes."""
+    or space character, no lone surrogate, no longer than policy.REVIEW_BASE_MAX bytes."""
     try:
         size = len(name.encode("utf-8"))
     except UnicodeEncodeError:
         return False
-    return size <= BASE_MAX and not any(unicodedata.category(c) in _NOT_IN_A_NAME for c in name)
+    return size <= policy.REVIEW_BASE_MAX and not any(unicodedata.category(c) in _NOT_IN_A_NAME for c in name)
+
+
+def _gh_pr(job: _Job, what: str, *args: str) -> bytes:
+    """What `gh pr <what> N --repo R <args>` printed. A gh that is slow or fails is _Infra."""
+    run = _spawn(["gh", "pr", what, str(job.pr), "--repo", job.repo, *args], job.io_timeout)
+    if run.timed_out:
+        raise _Infra("gh pr %s ran past %ss" % (what, job.io_timeout))
+    if run.code != 0:
+        raise _Infra("gh pr %s failed (%s): %s" % (what, run.code, run.err.strip()[-300:]))
+    return run.out
 
 
 def _read_pr(job: _Job) -> _Pr:
-    run = _spawn(["gh", "pr", "view", str(job.pr), "--repo", job.repo, "--json", _FIELDS], job.io_timeout)
-    if run.timed_out:
-        raise _Infra("gh pr view ran past %ss" % job.io_timeout)
-    if run.code != 0:
-        raise _Infra("gh pr view failed (%s): %s" % (run.code, run.err.strip()[-300:]))
+    out = _gh_pr(job, "view", "--json", _FIELDS)
     try:
-        data = json.loads(run.out.decode("utf-8"))
+        data = json.loads(out.decode("utf-8"))
         number, url, head, base, title, body = (data[k] for k in _FIELDS.split(","))
     except (ValueError, KeyError, TypeError) as exc:
         raise _Infra("gh pr view gave no PR I can read: %s: %s" % (type(exc).__name__, exc))
@@ -308,12 +315,7 @@ def _read_pr(job: _Job) -> _Pr:
 
 def _pr_diff(job: _Job) -> str:
     """The PR's diff as GitHub gives it, its bytes read as UTF-8 with replacement."""
-    run = _spawn(["gh", "pr", "diff", str(job.pr), "--repo", job.repo, "--color", "never"], job.io_timeout)
-    if run.timed_out:
-        raise _Infra("gh pr diff ran past %ss" % job.io_timeout)
-    if run.code != 0:
-        raise _Infra("gh pr diff failed (%s): %s" % (run.code, run.err.strip()[-300:]))
-    return run.out.decode("utf-8", "replace")
+    return _gh_pr(job, "diff", "--color", "never").decode("utf-8", "replace")
 
 
 def _is_the_pr(seen: _Pr, job: _Job) -> bool:
@@ -350,16 +352,13 @@ def new_delimiter() -> str:
     return "PRTEXT-" + secrets.token_hex(16)
 
 
-DRAWS = 20
-
-
 def _clean(text: str) -> str:
     """`text` that can be written to a file and passed as an argument: a NUL (a ValueError in Popen)
     becomes U+FFFD, a lone surrogate (a UnicodeEncodeError on write) becomes `?`."""
     return text.replace("\0", "\ufffd").encode("utf-8", "replace").decode("utf-8")
 
 
-def _cut(text: str, limit: int) -> tuple[str, int | None]:
+def _cut_bytes(text: str, limit: int) -> tuple[str, int | None]:
     """`text` cut to `limit` UTF-8 bytes, never inside a character, and its size in bytes when it was cut."""
     raw = text.encode("utf-8")
     if len(raw) <= limit:
@@ -371,21 +370,24 @@ def build_brief(head_sha: str, base: str, title: str, body: str, diff: str) -> s
     """The brief: the head and base, the PR's own text inside a fence with a delimiter drawn for this
     brief, and what to answer. The fenced text is data: the brief says so, and the delimiter occurs
     nowhere but on the two boundary lines (a candidate is drawn again until it does not). The pieces are
-    cleaned and cut so that the whole stays under REVIEW_BRIEF_MAX bytes, since the prompt travels as
-    one argument; a cut piece is said so after the fence. _Infra when no delimiter fits in DRAWS draws."""
+    cleaned and cut so that the whole stays under the brief's limit in policy, since the prompt travels
+    as one argument; a cut piece is said so after the fence. _Infra when the whole is over that limit
+    all the same, or when no delimiter fits in the draws policy allows."""
     revision = shlex.quote("origin/%s...HEAD" % base)       # one argument, never an option, never a command
     pieces, notices = [], []
-    for name, text, limit in (("title", title, policy.REVIEW_TITLE_MAX), ("body", body, policy.REVIEW_BODY_MAX),
+    for name, text, limit in (("title", title, policy.REVIEW_TITLE_MAX),
+                              ("body", body, policy.REVIEW_BODY_MAX),
                               ("diff", diff, policy.REVIEW_DIFF_MAX)):
-        text, whole = _cut(_clean(text), limit)
+        text, whole = _cut_bytes(_clean(text), limit)
         pieces.append(text)
         if whole is not None:
-            notice = "The %s in the fence is cut: it shows %d of %d bytes." % (name, len(text.encode("utf-8")), whole)
+            shown = len(text.encode("utf-8"))
+            notice = "The %s in the fence is cut: it shows %d of %d bytes." % (name, shown, whole)
             if name == "diff":
                 notice += " The whole diff is `git diff %s` in this checkout: read the rest there." % revision
             notices.append(notice)
     fenced = "\n\n".join(pieces)
-    for _ in range(DRAWS):
+    for _ in range(policy.REVIEW_DELIMITER_DRAWS):
         delimiter = new_delimiter()
         brief = (
             "You are reviewing a pull request. Read only: change nothing in this checkout and run "
@@ -406,8 +408,11 @@ def build_brief(head_sha: str, base: str, title: str, body: str, diff: str) -> s
             "when any finding must be fixed before the merge, GO otherwise.\n"
             % (head_sha, base, delimiter, fenced, delimiter, "".join(n + "\n" for n in notices), revision))
         if brief.count(delimiter) == 2:
+            if len(brief.encode("utf-8")) >= policy.REVIEW_BRIEF_MAX:
+                raise _Infra("the brief is over %d bytes: it cannot go to codex as one argument"
+                             % policy.REVIEW_BRIEF_MAX)
             return brief
-    raise _Infra("no delimiter that is absent from the PR text in %d draws" % DRAWS)
+    raise _Infra("no delimiter that is absent from the PR text in %d draws" % policy.REVIEW_DELIMITER_DRAWS)
 
 
 _ATTEMPT_KEYS = ("reviewer", "reason", "output", "exit_code", "stderr_tail", "model")
@@ -623,15 +628,16 @@ def _rules_file() -> Path:
 
 def _site_rules() -> list[tuple[str, str]]:
     """(name, pattern) of each line of the hard-rules file, split as `read` with IFS=$'\\t' splits it in
-    `boss-run`: a run of tabs separates the fields, tabs at either end of the line go, the pattern is
-    the rest. No file is no rules; a file that is there and cannot be read is OSError, never no rules.
-    A line with no name is skipped (an empty pattern is kept: `redact` names it when it skips it)."""
+    `boss-run`: a NUL is dropped, a run of tabs separates the fields, tabs at either end of the line
+    go, the pattern is the rest. No file is no rules; a file that is there and cannot be read is
+    OSError, never no rules. A line with no name is skipped (an empty pattern is kept: `redact` names
+    it when it skips it)."""
     try:
         data = _rules_file().read_bytes()
     except FileNotFoundError:
         return []
     rules = []
-    for raw in data.decode("utf-8", "surrogateescape").split("\n"):
+    for raw in data.replace(b"\0", b"").decode("utf-8", "surrogateescape").split("\n"):   # `read` drops a NUL
         line = raw.strip("\t")
         if line:
             name, _, rest = line.partition("\t")
@@ -675,18 +681,31 @@ def _site_hits(lines: list[str], rules: list[tuple[str, str]]) -> list[bool]:
             f.write("".join(line + "\n" for line in lines).encode("utf-8", "surrogateescape"))
         run = _spawn(["bash", "-c", _BASH_MATCH, "boss_review", path, *(p for _, p in rules)],
                      policy.REVIEW_IO_TIMEOUT)
+    except ValueError as exc:                   # an argument or a text that the system will not take
+        raise OSError("bash could not be given the hard-rules patterns: %s" % exc)
     finally:
         Path(path).unlink(missing_ok=True)
     words = run.out.decode("utf-8", "replace").split("\n")[:-1]
-    if run.timed_out or run.code != 0 or len(words) != len(rules) + len(lines):
+    taken, flags = words[:len(rules)], words[len(rules):]
+    if run.timed_out:
+        raise OSError("bash could not match the hard-rules patterns: ran past %ss" % policy.REVIEW_IO_TIMEOUT)
+    if run.code != 0:
         raise OSError("bash could not match the hard-rules patterns: %s"
-                      % ("ran past %ss" % policy.REVIEW_IO_TIMEOUT if run.timed_out
-                         else run.err.strip()[-300:] or "exit %s" % run.code))
-    for (name, _), word in zip(rules, words):
+                      % (run.err.strip()[-300:] or "exit %s" % run.code))
+    if (len(flags) != len(lines) or not all(w in ("ok", "empty", "bad") for w in taken)
+            or not all(w in ("0", "1") for w in flags)):
+        raise OSError("bash answered the hard-rules patterns with words that are not its own")
+    for (name, _), word in zip(rules, taken):
         if word != "ok":
             _say('hard-rules pattern "%s" skipped: %s'
                  % (name, "not a valid ERE" if word == "bad" else "matches the empty string"))
-    return [flag == "1" for flag in words[len(rules):]]
+    return [flag == "1" for flag in flags]
+
+
+def _clean_surrogates(text: str) -> str:
+    """`text` with each lone surrogate that is not an escaped byte written `?`: a file cannot hold it.
+    An escaped byte (U+DC80 to U+DCFF) is how a byte that is not UTF-8 gets through, and stays."""
+    return re.sub("[\ud800-\udc7f\udd00-\udfff]", "?", text)
 
 
 def redact(text: str) -> str:
@@ -694,7 +713,7 @@ def redact(text: str) -> str:
     that a pattern of the site's hard-rules file matches becomes `[redacted]` whole (the extent of a
     site pattern is the site's, and whole is the safe side); the built-in classes replace what they
     match. OSError when the file or the bash that reads it cannot be used: never "no rules"."""
-    lines = text.replace("\0", "").split("\n")
+    lines = _clean_surrogates(text.replace("\0", "")).split("\n")
     rules = _site_rules()
     hits = _site_hits(lines, rules) if rules else [False] * len(lines)
     out = []
@@ -715,9 +734,6 @@ def finding_lines(text: str) -> list[str]:
     return [line for line in text.split("\n") if line.startswith("FINDING:")]
 
 
-_HIDING = frozenset(("Cc", "Cf", "Zl", "Zp"))     # control, format, line and paragraph separators
-
-
 def _written_out(line: str) -> str:
     """`line` with each control, format, line-separator or paragraph-separator character written as an
     escape (a tab as a space), so that it cannot start a new markdown line or hide text, and a finding
@@ -733,9 +749,9 @@ def _written_out(line: str) -> str:
     return "".join(out)
 
 
-def _limited(line: str) -> tuple[str, bool]:
-    """The first REVIEW_FINDING_READ characters of `line` and whether it was cut: a line without end
-    cannot stall the matching. A last chunk that the limit split goes too (at its last space), so that
+def _first_chars(line: str) -> tuple[str, bool]:
+    """The first characters of `line` that policy lets be read, and whether it was cut: a line without
+    end cannot stall the matching. A last chunk that the limit split goes too (at its last space), so that
     no half token is left."""
     if len(line) <= policy.REVIEW_FINDING_READ:
         return line, False
@@ -746,16 +762,18 @@ def _limited(line: str) -> tuple[str, bool]:
 def findings_block(text: str) -> str:
     """What is published of the reviewer's findings: an indented code block (a comment is rendered
     markdown, and an @mention, an image or a link in reviewer text is not to be live), or "" when there
-    is no finding. Every `FINDING:` line is counted but only the first 20 are worked on. Each is
-    limited, redacted on its own, its hiding characters written out, and cut to 300 code points counting
-    its `FINDING:`: the pass comes first, so a cut cannot leave half of a secret."""
+    is no finding. Every `FINDING:` line is counted but only as many as policy allows are worked on.
+    Each is limited, redacted (one `redact` call, which works line by line), its hiding characters
+    written out, and cut to the length policy gives counting its `FINDING:`: the pass comes first,
+    so a cut cannot leave half of a secret."""
     found = finding_lines(text)
     if not found:
         return ""
-    worked = [_limited(line) for line in found[:policy.REVIEW_FINDINGS_MAX]]
+    limited = [_first_chars(line) for line in found[:policy.REVIEW_FINDINGS_MAX]]
     shown = []
-    for (_, was_cut), line in zip(worked, redact("\n".join(text for text, _ in worked)).split("\n")):
-        line = _written_out(line) + ("\u2026" if was_cut else "")      # after the matching: a path would swallow it
+    for (_, was_cut), line in zip(limited, redact("\n".join(text for text, _ in limited)).split("\n")):
+        # the ellipsis goes on after the matching: a home path there would swallow it
+        line = _written_out(line) + ("\u2026" if was_cut else "")
         if len(line) > policy.REVIEW_FINDING_CHARS:
             line = line[:policy.REVIEW_FINDING_CHARS - 1] + "\u2026"
         shown.append("    " + line)
@@ -814,7 +832,7 @@ def _post(job: _Job, body: str) -> bool:
     return run.code == 0
 
 
-def _keep_and_post(job: _Job, seen: _Pr, chain: dict, findings: str = "") -> ReviewResult:
+def _keep_and_post(job: _Job, seen: _Pr, chain: dict, findings: str) -> ReviewResult:
     """Under the PR's lock: look at the PR and the checkout again, claim the next round, keep what
     the review said, post, and make the claimed file the full record."""
     reviews = _reviews_dir()
@@ -875,13 +893,14 @@ def review(repo: str, pr: int, checkout: str, author: str, *,
     if isinstance(seen, ReviewResult):
         return seen
     try:
-        _site_rules()           # the hard-rules file is read here too: a review that cannot be published is not asked for
+        _site_rules()     # a review that could not be published is not asked for
     except OSError as exc:
         return _failed("the hard-rules file cannot be read: %s" % exc)
     try:
         diff = _pr_diff(job)
-        again = _read_pr(job)   # the diff is not pinned to the head that was read: the PR must still be that one
-        if (again.head, again.base) != (seen.head, seen.base):
+        # the diff is not pinned to the head that was read: the PR must still be that one
+        recheck = _read_pr(job)
+        if (recheck.head, recheck.base) != (seen.head, seen.base):
             _say("the PR moved while its text was read: nothing reviewed")
             return _nothing(EXIT_MOVED)
         chain = _ask_codex(checkout, build_brief(seen.head, seen.base, seen.title, seen.body, diff),

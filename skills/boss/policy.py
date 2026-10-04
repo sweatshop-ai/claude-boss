@@ -7,6 +7,7 @@ Every threshold a boss or a worker acts on lives here, and only here:
   cost lines      when cost per turn calls for action
   escalation      the rungs at which a blocker on the owner is re-raised
   review waits    how long a PR review waits on Codex, on the fallback, on gh and on its lock
+  review text     how much of a PR's text goes into the brief, and how much of the findings into the comment
 
     flag_for(ctx, cost, role) -> list of flags, e.g. ["CTX-SPLIT"]
     heavy(ctx, cost, role)    -> True past the first context or recycle line
@@ -19,7 +20,9 @@ checks that every quote still matches; change a number here and that test
 names each file to update.
 
 Units are tokens for context and priced cost-units for cost (see transcript.py
-for the weights), minutes for rungs, seconds for review waits.
+for the weights), minutes for rungs, seconds for review waits, UTF-8 bytes for
+the PR text in a brief, characters for a published finding, counts elsewhere in
+a review.
 """
 
 WORKER, BOSS = "worker", "boss"
@@ -54,7 +57,9 @@ REVIEW_CHAIN_SLACK = 30
 # this many characters (the prefix counts).
 REVIEW_FINDINGS_MAX = 20
 REVIEW_FINDING_CHARS = 300
-REVIEW_FINDING_READ = 4000     # a line is limited to this many characters before the matching, so one without end cannot stall it
+# A finding line is limited to REVIEW_FINDING_READ characters before the matching, so that one
+# without an end cannot stall it.
+REVIEW_FINDING_READ = 4000
 
 # The PR text in the brief. The prompt reaches `codex` as one argv element and Linux refuses one of
 # 131072 bytes, so the title, body and diff are cut (by UTF-8 bytes) and the whole brief stays under
@@ -63,6 +68,8 @@ REVIEW_TITLE_MAX = 1_000
 REVIEW_BODY_MAX = 20_000
 REVIEW_DIFF_MAX = 80_000
 REVIEW_BRIEF_MAX = 120_000
+REVIEW_BASE_MAX = 255            # the longest base branch name the brief takes, in bytes
+REVIEW_DELIMITER_DRAWS = 20      # how many delimiters are drawn before the PR text is given up as unfenceable
 
 
 def flag_for(ctx, cost, role):

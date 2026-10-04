@@ -530,12 +530,11 @@ infrastructure. A plan is reviewed by hand: `codex exec -s read-only ... < /dev/
 briefed to read and not execute, output checked in the first minute; posted on the
 plan's PR as "Codex review N (run by <name>)" with every citation marked VERIFIED or
 NOT FOUND. In both, the author replies per finding, fixes the real ones, and reruns
-until GO. A verdict on an
-older head is not a verdict on the head you merge: fixes after the last GO get one
-more run unless they are test-only and the reviewed production code is byte-identical
-(say so in the PR). No PR merges without a GO on record; no plan is dispatched from
-without one. A reviewer that fabricates citations can still be right on substance:
-check the citations, then judge the finding.
+until GO. A verdict on an older head is not a verdict on the head you merge: fixes
+after the last GO get one more run unless they are test-only and the reviewed
+production code is byte-identical (say so in the PR). No PR merges without a GO on
+record; no plan is dispatched from without one. A reviewer that fabricates citations
+can still be right on substance: check the citations, then judge the finding.
 
 **Close every dispatch with the reporting contract, verbatim.** Workers default
 to answering whoever spoke last, and the owner talks to them in their own panes all
