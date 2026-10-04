@@ -8,6 +8,7 @@ Every threshold a boss or a worker acts on lives here, and only here:
   escalation      the rungs at which a blocker on the owner is re-raised
   review waits    how long a PR review waits on Codex, on the fallback, on gh and on its lock
   review text     how much of a PR's text goes into the brief, and how much of the findings into the comment
+  fallback call   the model, the tools and the permission mode of the read-only fallback reviewer
 
     flag_for(ctx, cost, role) -> list of flags, e.g. ["CTX-SPLIT"]
     heavy(ctx, cost, role)    -> True past the first context or recycle line
@@ -79,6 +80,13 @@ REVIEW_DIFF_MAX = 80_000
 REVIEW_BRIEF_MAX = 120_000
 REVIEW_BASE_MAX = 255            # the longest base branch name the brief takes, in bytes
 REVIEW_DELIMITER_DRAWS = 20      # how many delimiters are drawn before the PR text is given up as unfenceable
+
+# The fallback reviewer, `claude` in read-only mode (boss_review.fallback_spec). The model is passed by
+# its exact id, so no CLI default is ever accepted; the tools are the built-in set it may use, and
+# `--strict-mcp-config` (with no `--mcp-config`) keeps every MCP server out, which `--tools` alone does not.
+REVIEW_FALLBACK_MODEL = "claude-opus-5-5"
+REVIEW_FALLBACK_TOOLS = ("Read", "Grep", "Glob")
+REVIEW_FALLBACK_PERMISSION_MODE = "dontAsk"
 
 
 def flag_for(ctx, cost, role):
