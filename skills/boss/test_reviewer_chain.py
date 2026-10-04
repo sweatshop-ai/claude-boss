@@ -8,6 +8,7 @@ reports which one answered. Every test goes through hermetic.Sandbox, so `codex`
 and `claude` are stubs that log their argv and stdin, and nothing real is called.
 Two seams are tested: `run_chain` in-process, and the command line.
 """
+import io
 import json
 import os
 import re
@@ -139,6 +140,15 @@ class Reasons(Base):
         codex = result.attempts[0]
         self.assertEqual((codex.reason, codex.exit_code, codex.output), ("noverdict", 0, RAMBLE))
         self.assertEqual(result.reviewer, "haiku")
+
+    def test_codexs_stdout_goes_to_dev_null_as_it_did_before_the_move(self):
+        # It is not an answer channel, so nothing is kept, and a child that floods it fills nothing.
+        mark = self.sb.root / "stdout-was-dev-null"
+        stub = self.sb.stubs / "codex"
+        stub.write_text('#!/bin/bash\n[ /proc/self/fd/1 -ef /dev/null ] && : > "%s"\n' % mark)
+        stub.chmod(0o755)
+        self.chain()
+        self.assertTrue(mark.exists())
 
     def test_a_codex_answer_file_that_is_gone_is_an_empty_answer_and_the_chain_goes_on(self):
         # boss-run's old `cat "$last" 2>/dev/null` carried on to Haiku; an exception would not.
@@ -303,6 +313,15 @@ class Matching(Base):
             ("VERDICT: GO \u0301", "GO"),
         ], words=rc.GO_NOGO)
 
+    def test_any_dash_or_connector_after_the_word_continues_a_token_like_a_hyphen(self):
+        # An ASCII hyphen continues a token (GO-AHEAD is not GO); so do the look-alikes: Unicode
+        # dashes (hyphen, non-breaking hyphen, fullwidth hyphen-minus, en and em dash) and connectors.
+        self.check([
+            ("VERDICT: GO\u2010AHEAD", None), ("VERDICT: GO\u2011", None), ("VERDICT: NO-GO\uff0d", None),
+            ("VERDICT: GO\u2014now", None), ("VERDICT: GO\u203f", None), ("VERDICT: GO\u2013", None),
+            ("VERDICT: GO \u2014 fine", "GO"), ("VERDICT: NO-GO. Sorry", "NO-GO"),
+        ], words=rc.GO_NOGO)
+
     def test_an_invisible_character_after_the_word_continues_a_token_too(self):
         # Marks and every control or format character (zero-width joiner and space, soft hyphen,
         # BOM, C0 controls that are not whitespace) continue a token; separators and punctuation end it.
@@ -408,6 +427,27 @@ class Matching(Base):
         for words in (("GO", "NO-GO"), ("NO-GO", "GO"), rc.GO_NOGO):
             with self.subTest(words=tuple(words)):
                 self.assertEqual(self.parsed("VERDICT: NO-GO", words), "NO-GO")
+
+
+class GrowingFile(io.BytesIO):
+    """A reviewer's output file while a descendant is still writing to it: an unbounded read finds more."""
+
+    def read(self, size=-1):
+        if size is None or size < 0:
+            here = self.tell()
+            self.seek(0, io.SEEK_END)
+            self.write(b" late" * 1000)
+            self.seek(here)
+        return super().read(size)
+
+
+class Snapshot(unittest.TestCase):
+    def test_a_read_stops_at_what_the_reviewer_had_written_when_it_exited(self):
+        # The reviewer's own wait is bounded by its timeout; reading what it left must be bounded too,
+        # or a background child that keeps writing holds the chain in the read for good.
+        for tail, expected in ((None, "the answer"), (6, "answer")):
+            with self.subTest(tail=tail):
+                self.assertEqual(rc._read(GrowingFile(b"the answer"), tail=tail), expected)
 
 
 class RawPrompt(Base):

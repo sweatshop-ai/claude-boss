@@ -143,10 +143,11 @@ def _verdict_line(words: tuple[str, ...]):
     """A matcher for `VERDICT: <word>` at the start of a line: line -> the word, or None.
 
     Words are tried longest first. Under the token rule the word must end at a
-    boundary: a letter or digit (Unicode too), a hyphen, a combining mark, or an
-    invisible character (control or format: zero-width joiner, soft hyphen) continues
-    a token, so GO-AHEAD is not GO, NO-GOING is not NO-GO, GO\u00e9 is not GO and
-    GO + U+0301 is not GO. Whitespace and punctuation end it.
+    boundary: a letter or digit (Unicode too), a hyphen or any other dash or connector
+    punctuation, a combining mark, or an invisible character (control or format:
+    zero-width joiner, soft hyphen) continues a token, so GO-AHEAD is not GO, NO-GOING is
+    not NO-GO, GO\u00e9 is not GO and GO + U+0301 is not GO. Whitespace and other
+    punctuation end it.
     """
     alternatives = "|".join(re.escape(w.upper()) for w in sorted(words, key=len, reverse=True))
     rule = words.match if isinstance(words, Words) else _default_rule(words)
@@ -159,7 +160,8 @@ def _verdict_line(words: tuple[str, ...]):
         if m is None:
             return None
         after = line[m.end(1):m.end(1) + 1]
-        if token and after and unicodedata.category(after)[0] in "MC" and not _is_space(after):
+        kind = unicodedata.category(after) if after else ""
+        if token and (kind in ("Pd", "Pc") or (kind[:1] in ("M", "C") and not _is_space(after))):
             return None
         return m.group(1).upper()
     return match
@@ -217,23 +219,28 @@ class _Turn(NamedTuple):
 
 
 def _read(f, tail: int | None = None) -> str:
-    """What a reviewer wrote to a temporary file: all of it, or only its last `tail` bytes."""
+    """What a reviewer had written to a temporary file when it exited: all of it, or only its
+    last `tail` bytes. Never more: a descendant may still be writing, and a read to end of file
+    would then have no end."""
     f.seek(0, os.SEEK_END)
     size = f.tell()
-    f.seek(0 if tail is None else max(0, size - tail))
-    return f.read().decode("utf-8", "replace")
+    start = 0 if tail is None else max(0, size - tail)
+    f.seek(start)
+    return f.read(size - start).decode("utf-8", "replace")
 
 
-def _run(argv: list[str], timeout: int) -> _Run:
+def _run(argv: list[str], timeout: int, keep_stdout: bool = True) -> _Run:
     """Run one reviewer with a closed stdin.
 
     Its output goes to anonymous temporary files, not pipes, so the wait is on the
     reviewer alone: a descendant that left the process group and kept the output
     open can neither stall the chain nor turn an exit into a timeout. Output is
     read even after a timeout, because a reviewer may have answered before it hung.
+    Stdout goes to /dev/null when it is not an answer channel (`keep_stdout` false).
     When the reviewer could not be started, `err` says why.
     """
-    with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
+    with tempfile.TemporaryFile() as err, \
+            (tempfile.TemporaryFile() if keep_stdout else open(os.devnull, "wb")) as out:
         try:
             proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=out, stderr=err,
                                     start_new_session=True)
@@ -249,7 +256,7 @@ def _run(argv: list[str], timeout: int) -> _Run:
         except BaseException:
             _stop(proc)
             raise
-        return _Run(code, _read(out), _read(err, tail=4 * STDERR_TAIL), timed_out)
+        return _Run(code, _read(out) if keep_stdout else "", _read(err, tail=4 * STDERR_TAIL), timed_out)
 
 
 def _turn(reviewer, model, output, run: _Run, words, strict) -> _Turn:
@@ -273,7 +280,8 @@ def _codex(prompt, effort, timeout, words, strict) -> _Turn:
     try:
         os.close(fd)
         run = _run(["codex", "exec", "-s", "read-only", "--skip-git-repo-check",
-                    "-c", 'model_reasoning_effort="%s"' % effort, "-o", last, prompt], timeout)
+                    "-c", 'model_reasoning_effort="%s"' % effort, "-o", last, prompt], timeout,
+                   keep_stdout=False)
         try:
             output = Path(last).read_bytes().decode("utf-8", "replace")
         except OSError:            # the answer file was removed: no answer, as `cat 2>/dev/null` saw it
