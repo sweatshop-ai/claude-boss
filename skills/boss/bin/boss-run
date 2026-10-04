@@ -9,8 +9,9 @@
 # Two gates, in order:
 #   1. Hard rules. Pattern matches on the command text. No reviewer can override
 #      them and there is no flag to skip them.
-#   2. The reviewer. Codex first, Haiku if Codex is missing or silent. If neither
-#      answers, nothing runs — a gate that fails open is not a gate.
+#   2. The reviewer (reviewer_chain.py). Codex first, Haiku if Codex is missing or
+#      silent. If neither answers, nothing runs — a gate that fails open is not a
+#      gate.
 #
 # Usage:
 #   boss-run --why "<intent>" [--cwd DIR] [--dry-run] -- <command ...>
@@ -35,7 +36,9 @@ LOG="${PM}/boss-run.log"
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 PROMPT_FILE="${HERE}/../references/boss-run-review.md"
 HAIKU_MODEL="claude-haiku-4-5-20251001"
-TIMEOUT=120
+FALLBACK_NAME="haiku"      # what the log and the chain call the Haiku reviewer
+# Seconds each reviewer gets, whole numbers. Tests set it short so a hung reviewer is cut off at once.
+TIMEOUT="${BOSS_RUN_REVIEW_TIMEOUT:-120}"
 
 WHY="" ; CWD="$PWD" ; DRY=0 ; CMD="" ; FLAT=""
 REVIEWER="none" ; VERDICT="" ; REASON=""
@@ -114,52 +117,69 @@ check_hard_rules() {
 }
 
 # ---------------------------------------------------------------- reviewer ----
+# Which reviewer answers -- Codex, then Haiku, otherwise nobody -- is decided by
+# reviewer_chain.py. boss-run renders the prompt, calls it, and acts on its answer
+# only when the answer is whole: exit 0, one JSON object, a reviewer's name, and
+# APPROVE or REJECT. A crash, garbage, a signal or a missing python3 is "no
+# reviewer answered", and nothing runs.
+CHAIN="${HERE}/../reviewer_chain.py"
+PROMPT_TMP=""
+trap '[[ -z "$PROMPT_TMP" ]] || rm -f -- "$PROMPT_TMP"' EXIT
+
+# Fills {{WHY}}, {{CWD}} and {{CMD}} in one pass, copying the values in as they
+# are. (${t//pat/$v} treats an `&` in $v as "the matched text", so `a && b` once
+# reached the reviewer as `a {{CMD}}{{CMD}} b`.)
 render_prompt() {
-  local t
+  local rest out=""
   [[ -f "$PROMPT_FILE" ]] || die "missing reviewer prompt: $PROMPT_FILE"
-  t="$(cat "$PROMPT_FILE")"
-  t="${t//\{\{WHY\}\}/$WHY}"
-  t="${t//\{\{CWD\}\}/$CWD}"
-  t="${t//\{\{CMD\}\}/$CMD}"
-  printf '%s' "$t"
+  rest="$(cat "$PROMPT_FILE")"
+  while [[ $rest == *'{{'* ]]; do
+    out+=${rest%%'{{'*}
+    rest=${rest#*'{{'}
+    case $rest in
+      'WHY}}'*) out+=$WHY; rest=${rest#'WHY}}'} ;;
+      'CWD}}'*) out+=$CWD; rest=${rest#'CWD}}'} ;;
+      'CMD}}'*) out+=$CMD; rest=${rest#'CMD}}'} ;;
+      *)        out+='{{' ;;
+    esac
+  done
+  printf '%s' "$out$rest"
 }
 
-# Sets VERDICT and REASON from a reviewer's answer. Returns 1 if there is no
-# usable VERDICT line — a reviewer that rambles has not answered.
-parse_verdict() {
-  local out=$1 v r
-  v=$(printf '%s\n' "$out" | grep -aiEo '^[[:space:]]*VERDICT:[[:space:]]*(APPROVE|REJECT)' | head -1)
-  [[ -n "$v" ]] || return 1
-  VERDICT=$(printf '%s' "$v" | grep -oiE '(APPROVE|REJECT)' | tr '[:lower:]' '[:upper:]')
-  r=$(printf '%s\n' "$out" | grep -aiE '^[[:space:]]*REASON:' | head -1 | sed 's/^[[:space:]]*[Rr][Ee][Aa][Ss][Oo][Nn]:[[:space:]]*//')
-  REASON=${r:-"(no reason given)"}
-  return 0
+# Takes the chain's JSON; sets REVIEWER, VERDICT and REASON from it. Returns 1
+# unless it is exactly one JSON value that is a whole Result: a reviewer boss-run
+# asked for (codex or the fallback), a verdict that is APPROVE or REJECT with its
+# reason, the raw output, and an attempt by that reviewer that answered. (Slurped:
+# `jq -e` alone judges only the last value, so a refusal followed by an approval
+# would have passed. The real chain never breaks these invariants; this gate does
+# not rely on that.)
+adopt_answer() {
+  local json=$1
+  jq -es --arg fb "$FALLBACK_NAME" 'length == 1 and (.[0] | . as $r
+          | ($r.reviewer | IN("codex", $fb))
+          and ($r.output | type == "string")
+          and ($r.parsed.word | IN("APPROVE", "REJECT"))
+          and ($r.parsed.reason | type == "string")
+          and ($r.attempts | type == "array"
+               and any(.[]; .reviewer == $r.reviewer and .reason == "answered")))' \
+    <<<"$json" >/dev/null 2>&1 || return 1
+  REVIEWER=$(jq -sr '.[0].reviewer' <<<"$json")
+  VERDICT=$(jq -sr '.[0].parsed.word' <<<"$json")
+  REASON=$(jq -sr '.[0].parsed.reason' <<<"$json")
 }
 
 run_reviewer() {
-  local prompt=$1 last out
-  last=$(mktemp) || return 1
-
-  if command -v codex >/dev/null 2>&1; then
-    timeout "$TIMEOUT" codex exec \
-      -s read-only --skip-git-repo-check \
-      -c 'model_reasoning_effort="medium"' \
-      -o "$last" "$prompt" </dev/null >/dev/null 2>&1
-    out=$(cat "$last" 2>/dev/null)
-    if [[ -n "$out" ]] && parse_verdict "$out"; then
-      REVIEWER="codex"; rm -f "$last"; return 0
-    fi
-  fi
-
-  if command -v claude >/dev/null 2>&1; then
-    out=$(timeout "$TIMEOUT" claude -p --model "$HAIKU_MODEL" "$prompt" </dev/null 2>/dev/null)
-    if [[ -n "$out" ]] && parse_verdict "$out"; then
-      REVIEWER="haiku"; rm -f "$last"; return 0
-    fi
-  fi
-
-  rm -f "$last"
-  return 1
+  local json rc
+  PROMPT_TMP=$(mktemp) || { PROMPT_TMP=""; return 1; }
+  printf '%s' "$1" >"$PROMPT_TMP" || return 1
+  json=$(python3 "$CHAIN" --prompt-file "$PROMPT_TMP" \
+           --words APPROVE,REJECT --match prefix --effort medium \
+           --codex-timeout "$TIMEOUT" \
+           --fallback-name "$FALLBACK_NAME" --fallback-model "$HAIKU_MODEL" --fallback-timeout "$TIMEOUT" \
+           </dev/null 2>/dev/null); rc=$?
+  rm -f -- "$PROMPT_TMP"; PROMPT_TMP=""
+  [[ $rc -eq 0 ]] || return 1
+  adopt_answer "$json"
 }
 
 # ---------------------------------------------------------------- selftest ----
@@ -218,7 +238,10 @@ FLAT="$*"                     # unescaped, for pattern matching only
 
 check_hard_rules || finish 5
 
-PROMPT=$(render_prompt) || finish 2
+# The command is the template's last text, and $(...) strips trailing newlines: the reviewer
+# must see the bytes bash -lc will run, so a sentinel keeps them.
+PROMPT=$(render_prompt && printf .) || finish 2
+PROMPT=${PROMPT%.}
 if ! run_reviewer "$PROMPT"; then
   REVIEWER="none"; VERDICT=""; REASON="no reviewer answered"
   printf 'boss-run: no reviewer answered (codex and %s both silent or absent).\n' "$HAIKU_MODEL" >&2
