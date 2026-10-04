@@ -519,15 +519,22 @@ disk: do it, log it, tell them. Before the change, check that the evidence suppo
 Codex review before a worker builds from it, and every PR gets a Codex review on the
 head that merges, before you merge it. The PR is the unit, not the commit: a commit is
 too small to judge and a merge is too late. The routine, run by the worker who wrote
-the thing: `codex exec -s read-only ... < /dev/null`, briefed to read and not execute,
-output checked in the first minute; posted on the PR (or the plan's PR) as "Codex
-review N (run by <name>)" with every citation marked VERIFIED or NOT FOUND; the
-author replies per finding, fixes the real ones, and reruns until GO. A verdict on an
-older head is not a verdict on the head you merge: fixes after the last GO get one
-more run unless they are test-only and the reviewed production code is byte-identical
-(say so in the PR). No PR merges without a GO on record; no plan is dispatched from
-without one. A reviewer that fabricates citations can still be right on substance:
-check the citations, then judge the finding.
+the thing. For a PR head it is one command, run from the checkout of that head:
+`python3 ${CLAUDE_PLUGIN_ROOT}/skills/boss/boss_review.py --repo OWNER/REPO --pr N --checkout DIR --author NAME`.
+It asks Codex, at high effort and read-only, with the PR's own text fenced as data,
+keeps the full answer in the private round record, and posts "Codex review N (run by
+<name>)" itself, with the head, the verdict and the findings (redacted and cut to a
+cap). Its exit code is the verdict: 0 GO posted, 3 NO-GO posted, 4 Codex gave no
+verdict, 6 the head or base moved (nothing posted), 2 usage or wrong checkout, 7
+infrastructure. A plan is reviewed by hand: `codex exec -s read-only ... < /dev/null`,
+briefed to read and not execute, output checked in the first minute; posted on the
+plan's PR as "Codex review N (run by <name>)" with every citation marked VERIFIED or
+NOT FOUND. In both, the author replies per finding, fixes the real ones, and reruns
+until GO. A verdict on an older head is not a verdict on the head you merge: fixes
+after the last GO get one more run unless they are test-only and the reviewed
+production code is byte-identical (say so in the PR). No PR merges without a GO on
+record; no plan is dispatched from without one. A reviewer that fabricates citations
+can still be right on substance: check the citations, then judge the finding.
 
 **Close every dispatch with the reporting contract, verbatim.** Workers default
 to answering whoever spoke last, and the owner talks to them in their own panes all

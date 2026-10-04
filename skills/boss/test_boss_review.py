@@ -40,8 +40,11 @@ REPO = "Owner/Repo"
 PR = 5
 AUTHOR = "worker-a"
 OTHER_SHA = "b" * 40
+TITLE = "Keep the round on disk"
+BODY = "Writes round<NN>.json before it posts.\n\nCloses nothing."
+DIFF = "diff --git a/f.py b/f.py\n--- a/f.py\n+++ b/f.py\n@@ -1 +1 @@\n-old\n+new"
 
-# The `gh` stub. It keeps a PR in side/pr.json and answers `pr view` and `pr comment` from
+# The `gh` stub. It keeps a PR in side/pr.json and answers `pr view`, `pr diff` and `pr comment` from
 # side/gh.json: per kind, a list of per-call entries (the last one repeats) with optional
 # `patch` (fields of the PR changed before answering), `sleep`, `rc`, `raw` (printed instead of
 # the JSON) and `drop` (fields left out). The bash prologue has already logged the call.
@@ -80,6 +83,13 @@ if argv[:2] == ["pr", "view"]:
         fields = argv[argv.index("--json") + 1].split(",")
         sys.stdout.write(json.dumps({f: state[f] for f in fields if f not in e.get("drop", [])}))
     sys.exit(e.get("rc", 0))
+if argv[:2] == ["pr", "diff"]:
+    e = entry("diff")
+    state = patched(e)
+    time.sleep(e.get("sleep", 0))
+    sys.stdout.write(e["raw"] if "raw" in e else state["diff"])
+    sys.stderr.write(e.get("err", ""))
+    sys.exit(e.get("rc", 0))
 if argv[:2] == ["pr", "comment"]:
     e = entry("comment")
     patched(e)
@@ -98,7 +108,7 @@ class Gh:
         self.side = sb.side
         (self.side / "gh_handler.py").write_text(GH_HANDLER, encoding="utf-8")
         self.set_pr(number=pr, url="https://github.com/%s/pull/%d" % (repo, pr),
-                    headRefOid=head, baseRefName=base)
+                    headRefOid=head, baseRefName=base, title=TITLE, body=BODY, diff=DIFF)
         self.configure()
         sb.stub_script("gh", 'exec python3 "$R/side/gh_handler.py" "$R/side" "$@"')
 
@@ -108,8 +118,8 @@ class Gh:
         state.update(fields)
         path.write_text(json.dumps(state), encoding="utf-8")
 
-    def configure(self, view=None, comment=None):
-        (self.side / "gh.json").write_text(json.dumps({"view": view, "comment": comment}),
+    def configure(self, view=None, comment=None, diff=None):
+        (self.side / "gh.json").write_text(json.dumps({"view": view, "comment": comment, "diff": diff}),
                                            encoding="utf-8")
 
 
@@ -215,7 +225,7 @@ class GoPosted(Base):
         self.assertEqual(result, br.ReviewResult(0, 1, "posted", "GO", self.round_file(1)))
         (comment,) = self.comments()
         self.assertEqual(comment.argv, ["pr", "comment", str(PR), "--repo", REPO,
-                                        "--body", self.body(1, "GO")])
+                                        "--body", self.body(1, "GO") + "\n\n    FINDING: none"])
         record = self.record(1)
         self.assertEqual(list(record), KEYS)
         self.assertRegex(record.pop("ts"), TS)
@@ -234,14 +244,13 @@ class GoPosted(Base):
         self.assertEqual(line, {"repo": "owner/repo", "pr": PR, "round": 1, "reviewer": "codex",
                                 "reason": "answered", "exit_code": 0})
 
-    def test_codex_is_asked_to_review_the_head_it_is_standing_on_with_a_fixed_brief(self):
+    def test_codex_is_asked_to_review_the_head_it_is_standing_on_with_the_prs_text_in_the_brief(self):
         self.codex(answer="VERDICT: GO")
         self.review()
         (call,) = self.sb.calls_of("codex")
         self.assertEqual(Path(call.cwd), self.checkout.resolve())
         brief = call.argv[-1]
-        self.assertEqual(brief, br.build_brief(self.head, "main"))
-        for needle in (self.head, "main", "FINDING:", "VERDICT: GO", "VERDICT: NO-GO"):
+        for needle in (self.head, "main", "FINDING:", "VERDICT: GO", "VERDICT: NO-GO", TITLE, BODY, DIFF):
             self.assertIn(needle, brief)
         self.assertEqual(call.argv[:6], ["exec", "-s", "read-only", "--skip-git-repo-check", "-c",
                                          'model_reasoning_effort="%s"' % br.REVIEW_EFFORT])
@@ -256,7 +265,8 @@ class NoGoAndNoVerdict(Base):
         result = self.review()
         self.assertEqual(result, br.ReviewResult(3, 1, "posted", "NO-GO", self.round_file(1)))
         (comment,) = self.comments()
-        self.assertEqual(comment.argv[-1], self.body(1, "NO-GO"))
+        expected = self.body(1, "NO-GO") + "\n\n    FINDING: boss_review.py:10 loses a round"
+        self.assertEqual(comment.argv[-1], expected)
         self.assertEqual((self.record(1)["verdict"], self.record(1)["status"]), ("NO-GO", "posted"))
 
     def test_no_reviewer_answering_posts_nothing_and_keeps_why_for_each_reason(self):
@@ -445,14 +455,16 @@ class Moved(Base):
     def test_the_pr_is_read_before_the_review_and_again_just_before_the_claim_and_post(self):
         self.codex(answer="VERDICT: GO")
         self.review()
-        self.assertEqual(self.sequence(), ["gh pr view", "codex", "gh pr view", "gh pr comment"])
+        expected = ["gh pr view", "gh pr diff", "gh pr view", "codex", "gh pr view",
+                    "gh pr comment"]
+        self.assertEqual(self.sequence(), expected)
 
     def test_a_head_that_moved_during_the_review_posts_nothing_and_is_exit_six(self):
         for verdict, answer in (("GO", "VERDICT: GO"), ("NO-GO", "VERDICT: NO-GO"), (None, RAMBLE)):
             with self.subTest(verdict=verdict):
                 self.setUp_clean()
                 self.codex(answer=answer)
-                self.gh.configure(view=[{}, {"patch": {"headRefOid": OTHER_SHA}}])
+                self.gh.configure(view=[{}, {}, {"patch": {"headRefOid": OTHER_SHA}}])
                 result = self.review()
                 self.assertEqual(result, br.ReviewResult(6, 1, "head-moved", verdict, self.round_file(1)))
                 self.assertEqual(self.comments(), [])
@@ -465,7 +477,7 @@ class Moved(Base):
 
     def test_a_base_that_was_retargeted_during_the_review_is_exit_six_and_the_record_names_the_old_base(self):
         self.codex(answer="VERDICT: GO")
-        self.gh.configure(view=[{}, {"patch": {"baseRefName": "release"}}])
+        self.gh.configure(view=[{}, {}, {"patch": {"baseRefName": "release"}}])
         result = self.review()
         self.assertEqual(result, br.ReviewResult(6, 1, "head-moved", "GO", self.round_file(1)))
         self.assertEqual(self.comments(), [])
@@ -495,7 +507,7 @@ printf 'VERDICT: GO\\n' > "$dest"''')
         self.assertEqual(comment.argv[-1], self.body(1, "GO", sha=self.head))
         self.assertNotIn(OTHER_SHA, comment.argv[-1])
         self.assertEqual(self.record(1)["head_sha"], self.head)
-        self.assertEqual(len(self.views()), 2, "the window after the re-read is not read again")
+        self.assertEqual(len(self.views()), 3, "the window after the re-read is not read again")
         self.assertAttemptsLogged(1)
 
 
@@ -550,7 +562,7 @@ class WriteFailures(Base):
         self.assertEqual(result, INFRA)
         self.assertEqual(self.comments(), [])
         self.assertEqual(len(self.sb.calls_of("codex")), 1, "the review runs first")
-        self.assertEqual(len(self.views()), 1)
+        self.assertEqual(len(self.views()), 2)
         self.assertAttemptsLogged()
 
     def test_a_claim_that_fails_claims_nothing_and_posts_nothing(self):
@@ -566,7 +578,7 @@ class WriteFailures(Base):
 
     def test_a_live_read_that_fails_under_the_lock_claims_nothing_and_posts_nothing(self):
         self.codex(answer="VERDICT: GO")
-        self.gh.configure(view=[{}, {"rc": 1}])
+        self.gh.configure(view=[{}, {}, {"rc": 1}])
         self.assertEqual(self.review(), INFRA)
         self.assertEqual(self.comments(), [])
         self.assertEqual(self.round_names(), [])
@@ -632,7 +644,7 @@ class WriteFailures(Base):
         self.assertLess(elapsed, 15)
         self.assertEqual(self.comments(), [])
         self.assertEqual(self.round_names(), [])
-        self.assertEqual(len(self.views()), 1, "the live read waits for the lock")
+        self.assertEqual(len(self.views()), 2, "the live read waits for the lock")
 
 
 class Numbering(Base):
