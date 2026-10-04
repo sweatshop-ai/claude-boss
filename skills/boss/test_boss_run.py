@@ -459,6 +459,16 @@ class MoreCharacterization(Base):
                 self.assertEqual(r.returncode, code, r.stderr)
                 self.assertEqual(self.sb.log_lines()[-1]["verdict"], verdict)
 
+    def test_a_nul_byte_inside_codexs_verdict_is_dropped_so_its_reject_stands(self):
+        # bash's $(...) dropped NUL bytes from a reviewer's answer: `RE\0JECT` was a REJECT, and Haiku
+        # was never asked. Parsed raw it was no verdict and Haiku's APPROVE would have run the command.
+        self.sb.stub("codex", answer="VERDICT: RE\0JECT\nREASON: nul")
+        self.sb.stub("claude", answer=approve("haiku would approve"))
+        r = self.dry()
+        self.assertEqual(r.returncode, 3, r.stderr)
+        self.assertNotCalled("claude")
+        self.assertEqual(self.sb.log_lines()[-1]["verdict"], "REJECT")
+
     def test_a_usable_verdict_after_a_non_zero_exit_still_counts_for_either_reviewer(self):
         self.sb.stub("codex", answer=approve("codex said so"), rc=3)
         r = self.dry()

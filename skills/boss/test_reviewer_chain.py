@@ -141,6 +141,15 @@ class Reasons(Base):
         self.assertEqual((codex.reason, codex.exit_code, codex.output), ("noverdict", 0, RAMBLE))
         self.assertEqual(result.reviewer, "haiku")
 
+    def test_codexs_answer_file_is_read_with_the_bounded_read_too(self):
+        # A child of Codex may keep appending to the -o file after Codex exits; reading it to end of
+        # file would never end. Every read of a reviewer's output has to go through _read.
+        self.sb.stub("codex", answer=approve())
+        with mock.patch.object(rc, "_read", wraps=rc._read) as read:
+            self.chain()
+        answer_file = self.sb.calls_of("codex")[0].argv[-2]
+        self.assertIn(answer_file, [call.args[0].name for call in read.call_args_list])
+
     def test_codexs_stdout_goes_to_dev_null_as_it_did_before_the_move(self):
         # It is not an answer channel, so nothing is kept, and a child that floods it fills nothing.
         mark = self.sb.root / "stdout-was-dev-null"
@@ -321,6 +330,18 @@ class Matching(Base):
             ("VERDICT: GO\u2014now", None), ("VERDICT: GO\u203f", None), ("VERDICT: GO\u2013", None),
             ("VERDICT: GO \u2014 fine", "GO"), ("VERDICT: NO-GO. Sorry", "NO-GO"),
         ], words=rc.GO_NOGO)
+
+    def test_a_nul_byte_in_the_answer_is_dropped_before_reading_it_as_bash_did(self):
+        # The old script read the answer with $(...), which drops NUL bytes: `RE\0JECT` was REJECT.
+        # Parsed raw it would be no verdict and the chain would go on to ask someone else.
+        self.check([("VERDICT: RE\0JECT", "REJECT"), ("VERD\0ICT: APPROVE", "APPROVE"),
+                    ("VERDICT: AP\0PROVED", "APPROVE"), ("VERDICT: \0", None)])
+        self.assertEqual(self.reason_of_nul(), "fine")
+        self.assertEqual(self.chain().attempts[0].output, "VERDICT: APPROVE\nREASON: fi\0ne")
+
+    def reason_of_nul(self):
+        self.sb.stub("codex", answer="VERDICT: APPROVE\nREASON: fi\0ne")
+        return self.chain().parsed.reason
 
     def test_an_invisible_character_after_the_word_continues_a_token_too(self):
         # Marks and every control or format character (zero-width joiner and space, soft hyphen,
