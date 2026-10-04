@@ -7,7 +7,7 @@ Run in the background; activity confirmed in the first minute; answered after ab
 Reviewed: `issues/07-review-brief-and-comment.md` as it stood when claimed (7 boxes), against `skills/boss/boss_review.py`, `reviewer_chain.py`, `hermetic.py`, `test_boss_review.py`,
 `bin/boss-run` and `SKILL.md` at that head, with tickets 08 and 03 read only for conflicts.
 
-**Verdict: NO-GO**, 10 findings. All ten are right about something and every one holds up against the code; I accepted nine in full and one (finding 2) in the form Codex offered as its alternative.
+**Verdict: NO-GO**, 10 findings. All ten are right about something and every one holds up against the code; I accepted all ten in whole or in part (finding 2 in the alternative form Codex itself offered, finding 9 with my own numbers).
 Nothing in the answer touches the owner's accepted residuals (R4, R8): the findings make the mitigation precise and buildable, none asks to remove it. Codex said nothing on the two last items of the brief
 (which functions 07 and 03 both change; host names and addresses in the ticket text), so those are answered here: 07 changes `build_brief`, `_Pr` and `_read_pr`, the arguments of `_ask_codex`,
 `comment_body`, and `_keep_and_post` and `review()`; 03 changes `main()` (`--check-fallback`), adds `fallback_spec`, adds constants to `policy.py` and `Fallback.extra_args` in `reviewer_chain.py`. The two meet only in

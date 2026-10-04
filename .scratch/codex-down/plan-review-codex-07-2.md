@@ -1,0 +1,70 @@
+# Codex review 2 of ticket 07 (the review brief, the findings in the comment, and the skill text)
+
+Run by Birgit (task #07 of the codex-down track), 2026-10-04 11:17-11:23 (+02:00). Reviewer: Codex (`codex exec -s read-only --skip-git-repo-check -c 'model_reasoning_effort="high"'`,
+v0.147.0, model `gpt-5.6-sol`), stdin closed, working directory the ticket-07 worktree, brief `brief-codex-07-2.md` (round 1's record and fixes, then seven checks: the flow of `review()`,
+the patterns, the bash engine, the findings block, the brief's sizes, the ticket's size, the text). Run in the background; activity confirmed in the first minute; answered after about 6 minutes.
+
+Reviewed: `issues/07-review-brief-and-comment.md` at commit `0afd768` (11 boxes), against `skills/boss/boss_review.py` at `75caada` and the other files of the first round. Codex read the worktree
+while I was starting the build in it, so its line numbers into `boss_review.py` and `test_boss_review.py` are those of `75caada`, which is what the citations below were checked against.
+
+**Verdict: NO-GO**, 10 findings. Codex found the first round's ten fixes in place and did not reopen any of them; its findings are about what the fixes left open: the diff is not pinned to the head that was read (1, 2), the base name goes into
+a brief and a shell command line outside the fence (3, 4, 5), the Bash contract and its failure cases (6), the cost of redaction (7), the patterns (8), what escaping the control characters destroys (9), and the size of the ticket (10).
+Nine are right and are accepted; finding 10 is not accepted. Nothing touches the owner's accepted residuals (R4, R8).
+
+The checkout path prefix is not in the answer below; Codex's text is otherwise unchanged.
+
+## Codex's answer, verbatim
+
+NO-GO
+
+1. `gh pr diff N` is not pinned to the initially read head. If the PR moves between `pr view` and `pr diff`, Codex can receive a diff for another head while standing on the original checkout; an ABA move can evade the later check. Require a diff derived from immutable head/base SHAs, or surround the fetch with identity reads and define movement as exit 6 with nothing claimed. [.scratch/codex-down/issues/07-review-brief-and-comment.md:15](.scratch/codex-down/issues/07-review-brief-and-comment.md:15) [skills/boss/boss_review.py:572](skills/boss/boss_review.py:572)
+
+2. The new diff call invalidates the existing exact order assertion, but the test box never changes its expected sequence. State the finalized sequence explicitly and update the assertion—at minimum to `["gh pr view", "gh pr diff", "codex", "gh pr view", "gh pr comment"]`, with any additional identity read required by finding 1. [.scratch/codex-down/issues/07-review-brief-and-comment.md:34](.scratch/codex-down/issues/07-review-brief-and-comment.md:34) [skills/boss/test_boss_review.py:448](skills/boss/test_boss_review.py:448)
+
+3. The base name remains interpolated into shell commands outside the untrusted-data fence. A valid-looking base such as `topic/$(id)` makes the suggested command execute command substitution if the reviewer runs it. Require shell-safe quoting plus `--end-of-options`, or remove executable command templates; also validate/cap the base and test its maximum multibyte length. [.scratch/codex-down/issues/07-review-brief-and-comment.md:17](.scratch/codex-down/issues/07-review-brief-and-comment.md:17) [skills/boss/boss_review.py:321](skills/boss/boss_review.py:321)
+
+4. Delimiter collision checking covers only title, body and diff, yet the ticket requires the delimiter to occur exactly twice in the complete brief. A base branch equal to a patched delimiter makes it occur in the prose and command examples too. Check every non-boundary portion of the completed brief, including the base and cut notices. [.scratch/codex-down/issues/07-review-brief-and-comment.md:16](.scratch/codex-down/issues/07-review-brief-and-comment.md:16)
+
+5. `gh pr diff` produces bytes, but the ticket never defines how invalid UTF-8 becomes the string that is cleaned and capped. It also cleans only title/body/diff, while `_read_pr` currently accepts any nonempty string as the base; a NUL, surrogate or oversized malformed base can still escape `review()` instead of returning exit 7. Specify decoding and normalization for the diff, validation of the base, and exit 7 with nothing claimed for every conversion failure. [.scratch/codex-down/issues/07-review-brief-and-comment.md:17](.scratch/codex-down/issues/07-review-brief-and-comment.md:17) [skills/boss/boss_review.py:275](skills/boss/boss_review.py:275)
+
+6. The Bash contract still lacks a transport and complete failure contract. It does not say how backslashes, leading/trailing spaces, empty lines, an unterminated final line, malformed file encoding, NUL, or unexpected Bash statuses are handled. Moreover, Bash `read` does not produce an empty `name` for a leading tab as the ticket claims; leading IFS whitespace is discarded. This also conflicts with ticket 08, which sends an arbitrary stderr tail through `redact`. Specify an exact binary-safe or normalized protocol, parsing algorithm, timeout, and that every unexpected child/file failure is exit 7 before claim; add the named fixtures. [.scratch/codex-down/issues/07-review-brief-and-comment.md:25](.scratch/codex-down/issues/07-review-brief-and-comment.md:25) [.scratch/codex-down/issues/08-fallback-review.md:13](.scratch/codex-down/issues/08-fallback-review.md:13)
+
+7. `findings_block` redacts every candidate before retaining 20, while reviewer output has no size or line-count bound. A verbose answer can therefore cause unbounded hard-rules file reads and Bash matches for findings that will never be published. Count all candidates for the omission total, but run redaction only on the first 20; define a bounded transport/timeout for an individual long line. [.scratch/codex-down/issues/07-review-brief-and-comment.md:23](.scratch/codex-down/issues/07-review-brief-and-comment.md:23) [skills/boss/reviewer_chain.py:221](skills/boss/reviewer_chain.py:221)
+
+8. The advertised “exact patterns” remain incorrect or incomplete. The IPv4 regex redacts the prefix of ordinary `1.2.3.4.5`; the `/root` rule redacts `/root.txt`, which is neither `/root` nor its descendant; and token lookbehinds are prose rather than patterns, leaving ASCII-versus-Unicode behavior ambiguous for input such as `éghp_ABCDEFGHIJKLMNOPQRST`. Supply complete regexes with flags and add these fixtures. [.scratch/codex-down/issues/07-review-brief-and-comment.md:26](.scratch/codex-down/issues/07-review-brief-and-comment.md:26)
+
+9. Replacing every `Cf` character with a space destroys legitimate evidence when the defect itself concerns a zero-width joiner, bidi control, BOM, or an identifier/path containing one. Render removed controls as visible escapes such as `\\u202E` instead, then apply the 300-code-point cap, so the finding remains safe and checkable. [.scratch/codex-down/issues/07-review-brief-and-comment.md:23](.scratch/codex-down/issues/07-review-brief-and-comment.md:23)
+
+10. Eleven boxes now combine two substantial implementations: PR acquisition/brief construction and a reusable Bash-backed redaction/comment subsystem, plus the skill edit and a large test matrix. Split at “The comment”: one ticket for lines 13–18, another for lines 20–26, with the skill edit attached to either; make ticket 08 depend on both. [.scratch/codex-down/issues/07-review-brief-and-comment.md:13](.scratch/codex-down/issues/07-review-brief-and-comment.md:13) [.scratch/codex-down/issues/07-review-brief-and-comment.md:20](.scratch/codex-down/issues/07-review-brief-and-comment.md:20)
+
+## Citations
+
+Every `file:line` of the answer, checked against the files. `ticket` = `issues/07-review-brief-and-comment.md` at `0afd768`; `boss_review.py`, `test_boss_review.py` and `reviewer_chain.py` are under `skills/boss/` and were read at `75caada` (`git show 75caada:...`), the commit Codex was shown.
+
+| Finding | Cited | What is there | Result |
+|---|---|---|---|
+| 1 | ticket:15; `boss_review.py`:572 | the sources box; `live = _read_pr(job)`, the one re-read, which comes after the review | VERIFIED |
+| 2 | ticket:34; `test_boss_review.py`:448 | the tests box, which does not state the order of calls; the assertion `["gh pr view", "codex", "gh pr view", "gh pr comment"]` | VERIFIED |
+| 3 | ticket:17; `boss_review.py`:321 | the size box with its `git diff origin/<base>...HEAD`; the brief's own `git diff origin/%s...HEAD` with the base interpolated unquoted | VERIFIED |
+| 4 | ticket:16 | the fence box: the delimiter is checked against title, body and diff only, and "occurs exactly twice in the brief" | VERIFIED |
+| 5 | ticket:17; `boss_review.py`:275 | the cleaning applies to title, body and diff only; `_read_pr` accepts any non-empty string as the base | VERIFIED |
+| 6 | ticket:25; `08-fallback-review.md`:13 | the `redact` box (the empty-name sentence is wrong for `read`, as the run below shows); 08 sends the stderr tail through `redact` | VERIFIED |
+| 7 | ticket:23; `reviewer_chain.py`:221 | the findings box redacts "each line" of all candidates; `_snapshot` reads a reviewer's whole answer | VERIFIED |
+| 8 | ticket:26 | the pattern box: lookbehinds in prose, no flags named, the IPv4 and `/root` rules | VERIFIED |
+| 9 | ticket:23 | the findings box: Cc, Cf, Zl and Zp become a space | VERIFIED |
+| 10 | ticket:13, :20 | the first and the comment sections | VERIFIED |
+
+Facts the answer states without a line, checked by running them: `read` with `IFS=$'\t'` drops a leading tab and gives `name` the first field, as the first round's build of the tests had already shown (`\tsecret-two` is a rule named `secret-two` with an empty pattern); `1.2.3.4.5` is redacted to `[redacted].5` by the round-1 IPv4 pattern; `/root.txt` is redacted to `[redacted].txt` by the round-1 `/root` rule; the round-1 e-mail pattern, started at every position of a long run, costs the square of the run.
+
+## Dispositions (Birgit)
+
+1. **Right, accepted.** Nothing pinned the diff to the head read. I took the lighter of Codex's two ways: the PR is read again after the diff, and a head or base that differs is exit 6 with nothing claimed. A flip of the head to another commit and back inside that second is not caught, which is the same hole 02's final check has and was accepted there. The order of calls is now stated in the ticket (finding 2).
+2. **Right, accepted.** The ticket states the sequence `gh pr view`, `gh pr diff`, `gh pr view`, `codex`, `gh pr view`, `gh pr comment`; the build changes the existing assertion to it.
+3. **Right, accepted, and it reaches 02's own wording.** A base name is a branch a repo writer chose and it was in a command line in the brief since 02: `git diff origin/%s...HEAD`. The base is now validated (no control or space character, 255 bytes at most, else exit 7), the revision is one `shlex.quote`d argument that always starts with `origin/` (so a name cannot be an option), and the bare `git diff <base>...HEAD` form is dropped. I did not add `--end-of-options`, because `origin/` already makes a leading hyphen harmless and I could not confirm every git version `git diff` accepts it.
+4. **Right, accepted.** The check is now the invariant itself: the brief is built with a candidate and the candidate is drawn again until it occurs exactly twice in the whole brief.
+5. **Right, accepted.** The diff's bytes are decoded as UTF-8 with replacement; the base is validated in `_read_pr`; every conversion failure left is exit 7 with nothing claimed.
+6. **Right in substance, accepted with one correction of my own.** The transport and the failure contract were in my build but not in the ticket; they are now: the text in a mode 0600 file read with `IFS= read -r`, the patterns as arguments, one word per pattern and `1`/`0` per line, a wait of `REVIEW_IO_TIMEOUT`, and any other outcome an `OSError`. The empty-name sentence of the first round was wrong about `read` (a leading tab is dropped, not an empty name); the ticket now says what `read` does. Added tests: a rules file with bytes that are not UTF-8, a fake `bash` that exits non-zero, prints the wrong count or outlasts the wait.
+7. **Right, accepted.** `findings_block` already worked on the first 20 only; the ticket now says so and counts the rest. Codex's unbounded line is real beyond that: a line of megabytes would make the e-mail pattern quadratic. Each of the 20 is limited to its first 4,000 characters before redaction (dropping a last chunk split at a space, so the limit leaves no half token), and the e-mail pattern now starts only where a run starts, which makes it linear.
+8. **Right, accepted in full.** Complete patterns are in the ticket, written in ASCII and compiled with no flags. IPv4 is no longer redacted as a prefix of a longer dotted number, `/root.txt` stays, `éghp_...` is redacted (a letter outside ASCII protects nothing), and each of those has its fixture.
+9. **Right, accepted.** A space destroys what a finding about a zero-width joiner or a bidirectional override is about. Cc, Cf, Zl and Zp characters are written as `\uXXXX` escapes (a tab as a space), before the 300-character cut, so the finding is safe and still checkable.
+10. **Not accepted.** Codex says the ticket is two implementations (the brief; the redaction and comment) and would split at "The comment". They are separable, and 08 does use only the second. I keep one ticket for three reasons: the owner and the boss fixed the eleven-ticket structure after round 7 of the plan, and a split moves 08's `Blocked by`, the frontier and every `coverage.md` citation that is made by a box's first words; the two halves share one acceptance test (a PR body that carries a planted secret and a planted verdict goes through the brief and comes back through the comment); and by this round the second half was already built and green when the answer arrived, so a split now buys nothing. The cost is real and I say it: the ticket is eleven boxes and one long session. The boss may split it; I did not.
