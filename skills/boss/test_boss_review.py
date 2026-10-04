@@ -37,7 +37,7 @@ from hermetic import Sandbox, alive  # noqa: E402
 
 REPO = "Owner/Repo"
 PR = 5
-AUTHOR = "Birgit"
+AUTHOR = "worker-a"
 OTHER_SHA = "b" * 40
 
 # The `gh` stub. It keeps a PR in side/pr.json and answers `pr view` and `pr comment` from
@@ -918,6 +918,11 @@ class ChainChild(Base):
             "a verdict for no reviewer": (1, dict(none, parsed={"word": "GO", "reason": "x"})),
             "a reason that is not in the closed set": (0, {"attempt_reason": "fine"}),
             "an answer that is not the attempt's": (0, {"output": "VERDICT: NO-GO"}),
+            "a GO the answer contradicts": (0, {"output": "VERDICT: NO-GO",
+                                                "attempt_output": "VERDICT: NO-GO"}),
+            "a GO the answer does not carry": (0, {"output": "all fine", "attempt_output": "all fine"}),
+            "a GO beside a NO-GO in the answer": (0, {"output": "VERDICT: GO\nVERDICT: NO-GO",
+                                                      "attempt_output": "VERDICT: GO\nVERDICT: NO-GO"}),
             "two attempts": (0, {"attempts": [self.GOOD["attempts"][0]] * 2}),
             "no attempt": (0, {"attempts": []}),
             "a fallback's attempt": (0, {"attempt_reviewer": "haiku", "attempt_model": "claude-haiku"}),
@@ -962,6 +967,19 @@ class ChainChild(Base):
             time.sleep(0.1)
         self.assertFalse(alive(pid), "the reviewer outlived the chain that started it")
 
+    def test_a_reviewer_in_a_session_of_its_own_is_asked_to_stop_before_it_is_killed(self):
+        marker = self.sb.root / "reviewer.asked"
+        kid = ("import signal, sys, time\n"
+               "def asked(*_):\n    open(%r, 'w').write('x')\n    sys.exit(0)\n"
+               "signal.signal(signal.SIGTERM, asked)\n"
+               "while True:\n    time.sleep(0.1)\n" % str(marker))
+        body = ("import subprocess, sys, time\n"
+                "subprocess.Popen([sys.executable, '-c', %r], start_new_session=True)\n"
+                "time.sleep(60)\n" % kid)
+        with self.fake_chain(body), mock.patch.object(policy, "REVIEW_CHAIN_SLACK", 1):
+            self.assertInfraBeforeAnyClaim()
+        self.assertTrue(marker.exists(), "the reviewer was killed without being asked to stop first")
+
     def test_the_chain_is_asked_for_codex_only_whole_word_go_no_go_and_strict(self):
         recorded = self.sb.root / "chain-argv.json"
         body = ("import json, sys\nopen(%r, 'w').write(json.dumps(sys.argv[1:]))\nsys.exit(2)\n"
@@ -976,6 +994,33 @@ class ChainChild(Base):
         self.assertIn("--strict", argv)
         self.assertIn("--no-fallback", argv)
         self.assertFalse([a for a in argv if a.startswith("--fallback-")])
+
+
+class StopBelow(unittest.TestCase):
+    """What the timeout stops is the processes it saw below the chain, each by what it was then:
+    a pid is reused once its process is gone, so a pid alone is not enough to signal."""
+
+    def setUp(self):
+        self.other = subprocess.Popen(["sleep", "300"])
+        self.addCleanup(lambda: (self.other.kill(), self.other.wait()))
+        self.start = br._start_time(self.other.pid)
+
+    def test_below_names_what_a_process_started_with_when_it_started(self):
+        seen = br._below(os.getpid())
+        self.assertIn(br._Seen(self.other.pid, self.start), seen)
+        self.assertNotIn(os.getpid(), [s.pid for s in seen])
+
+    def test_a_process_is_signalled_only_while_it_is_the_one_that_was_seen(self):
+        reused = br._Seen(self.other.pid, str(int(self.start) + 1))     # same pid, another process
+        br._stop_below([reused])
+        self.assertTrue(alive(self.other.pid), "a process that was not the one seen was stopped")
+        br._stop_below([br._Seen(self.other.pid, self.start)])
+        self.assertFalse(alive(self.other.pid))
+
+    def test_a_process_that_is_gone_is_not_an_error(self):
+        gone = subprocess.Popen(["true"])
+        gone.wait()
+        br._stop_below([br._Seen(gone.pid, "1")])
 
 
 class CommandLine(Base):
