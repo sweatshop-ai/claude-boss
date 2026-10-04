@@ -6,7 +6,9 @@
 
 **Blocked by:** 01 (One reviewer chain, shared)
 
-**Status:** ready-for-agent
+**Claimed by:** Birgit 2026-10-04 09:11
+
+**Status:** in-progress
 
 Command and function:
 
