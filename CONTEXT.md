@@ -9,7 +9,8 @@ itself. It holds a marker under `pm/.boss-sessions/` and a track.
 (`pm/<track>.goal.md`).
 
 **Policy**: the steering numbers a boss and its workers act on — context
-bands, cost lines, escalation rungs, review waits, the fallback call. One module,
+bands, cost lines, escalation rungs, review waits, and the exact model and
+tool values of the read-only fallback. One module,
 `skills/boss/policy.py`; the prose quotes it and `test_policy.py` keeps the
 quotes true.
 
@@ -64,11 +65,12 @@ caller that starts the chain as a child process.
 **Read-only fallback**: the PR gate's fallback, `boss_review.fallback_spec()`:
 `claude` on the policy's exact model, `--tools Read,Grep,Glob`,
 `--strict-mcp-config` (without it `--tools` alone leaves every MCP tool in),
-`--disable-slash-commands` and `--permission-mode dontAsk`, in the checkout.
-`boss_review.py --check-fallback --checkout DIR` runs it once with a one-word
-prompt and passes only if the init event shows exactly Glob, Grep and Read, no
-MCP servers and that model id. It is a smoke test on the real CLI; the suite
-checks the argv and the decision on a stub.
+`--disable-slash-commands` and `--permission-mode dontAsk`. The review does not
+run it yet. `boss_review.py --check-fallback --checkout DIR` runs it once from
+DIR with a one-word prompt and passes only if the init event shows exactly
+Glob, Grep and Read, no MCP servers and that model id (it does not read the
+permission mode or the slash commands). It is a smoke test on the real CLI; the
+suite checks the argv and the decision on a stub.
 
 **Review round**: one run of `skills/boss/boss_review.py` on one PR head. The
 review runs first (Codex only, in a child process standing in the checkout);

@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Tests for the confinement of the PR gate's fallback reviewer, hermetically.
 
-Run: python3 skills/boss/test_review_fallback.py
+Run: python3 skills/boss/test_boss_review_fallback.py
 
-When Codex is not there the gate falls back to `claude` in read-only mode. This file proves the
-confinement and nothing else: the exact `claude` call (the argv its stub receives), the spec
-(`boss_review.fallback_spec`), the check (`boss_review.py --check-fallback`, a decision over
-recorded stream-JSON fixtures) and the bound on what a hung Codex costs. Every test goes through
+When Codex is not there the gate falls back to `claude` in read-only mode. This file covers the
+confinement of that fallback and what a hung Codex costs before it runs: the exact `claude` call
+(the argv its stub receives), the spec (`boss_review.fallback_spec`), the check
+(`boss_review.py --check-fallback`, a decision over recorded stream-JSON fixtures) and the bound
+on the wait. Every test goes through
 hermetic.Sandbox: `codex`, `claude` and `gh` are stubs that log their argv, stdin and working
 directory, HOME and CLAUDE_CONFIG_DIR are temporary, TypeSafe has no key to find, and a test fails
 if one of the three names resolves outside the stub directory. The real `claude` is never called.
@@ -90,11 +91,14 @@ class Base(unittest.TestCase):
             patcher.start()
             self.addCleanup(patcher.stop)
         self.sb.stub("gh")                  # nothing here talks to GitHub: its log must stay empty
+        self.expect = {"claude": 0, "codex": 0}      # the calls each of these stubs must have logged by the end
         self.checkout = self.sb.work / "checkout"
         self.checkout.mkdir()
 
     def tearDown(self):
         self.sb.guard()                     # codex, claude and gh still resolve to the stubs, and only those
+        for name, count in self.expect.items():
+            self.assertEqual(len(self.sb.calls_of(name)), count, "calls the %s stub logged" % name)
         self.assertEqual(self.sb.calls_of("gh"), [], "gh was called")
 
     def claude_calls(self):
@@ -120,10 +124,20 @@ class Spec(Base):
         self.assertEqual(br.fallback_spec().timeout, policy.REVIEW_FALLBACK_TIMEOUT)
 
 
+    def test_context_md_quotes_the_call_it_describes(self):
+        text = (HERE.parent.parent / "CONTEXT.md").read_text(encoding="utf-8")
+        paragraph = text.split("**Read-only fallback**", 1)[1].split("\n\n", 1)[0]
+        flat = " ".join(paragraph.split())
+        for quoted in ("--tools " + ",".join(policy.REVIEW_FALLBACK_TOOLS), "--strict-mcp-config",
+                       "--disable-slash-commands", "--permission-mode " + policy.REVIEW_FALLBACK_PERMISSION_MODE):
+            self.assertIn(quoted, flat)
+
+
 # ------------------------------------------------------------------ the call itself ----
 class TheCall(Base):
     def run_fallback(self):
         self.sb.stub("claude", answer=GO)       # no codex stub: Codex is absent, the fallback runs
+        self.expect["claude"] = 1
         return rc.run_chain("PROMPT TEXT", words=rc.GO_NOGO, strict=True, fallback=br.fallback_spec())
 
     def test_claude_receives_exactly_the_confined_call(self):
@@ -132,6 +146,8 @@ class TheCall(Base):
         (call,) = self.claude_calls()
         self.assertEqual(call.argv, [*CALL, "-p", "--model", MODEL, "PROMPT TEXT"])
         self.assertEqual(call.stdin, "")
+        # and the one builder agrees with what the stub received
+        self.assertEqual(rc.claude_argv(br.fallback_spec(), "PROMPT TEXT"), ["claude", *call.argv])
 
     def test_each_flag_and_value_is_there_and_nothing_that_would_widen_it(self):
         self.run_fallback()
@@ -163,6 +179,7 @@ class TheCall(Base):
         prompt = self.sb.work / "prompt.txt"
         prompt.write_text("PROMPT TEXT", encoding="utf-8")
         self.sb.stub("claude", answer=GO)
+        self.expect["claude"] = 1
         r = subprocess.run([sys.executable, str(HERE / "reviewer_chain.py"), "--prompt-file", str(prompt),
                             "--words", "GO,NO-GO", "--match", "token", "--strict",
                             *rc.fallback_flags(br.fallback_spec())],
@@ -171,10 +188,11 @@ class TheCall(Base):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(json.loads(r.stdout)["reviewer"], "opus")
         self.assertEqual(self.claude_calls()[0].argv, [*CALL, "-p", "--model", MODEL, "PROMPT TEXT"])
+        self.assertEqual(self.claude_calls()[0].argv, rc.claude_argv(br.fallback_spec(), "PROMPT TEXT")[1:])
 
 
 # --------------------------------------------------------------------- the decision ----
-class Decision(unittest.TestCase):
+class Decision(Base):
     """`init_problems`: the reasons the events fail the check; none is a pass."""
 
     def test_the_init_event_of_the_confined_call_passes(self):
@@ -209,6 +227,7 @@ class Check(Base):
 
     def check(self, events=PASS, **stub):
         self.sb.stub("claude", answer=events if isinstance(events, str) else stream(*events), **stub)
+        self.expect["claude"] += 1
         return self.cli("--check-fallback", "--checkout", str(self.checkout))
 
     def test_a_confined_claude_passes_with_one_line_on_stdout(self):
@@ -245,6 +264,7 @@ class Check(Base):
 
     def test_a_claude_that_hangs_is_stopped_and_fails(self):
         self.sb.stub("claude", hang=True)
+        self.expect["claude"] = 1
         started = time.monotonic()
         problems = br.check_fallback(str(self.checkout), timeout=1)
         self.assertLess(time.monotonic() - started, 20)
@@ -306,6 +326,7 @@ class ElapsedBound(Base):
         # Codex hangs and ignores SIGTERM, so it is stopped by the KILL that follows TERM_GRACE
         self.sb.stub("codex", hang=True, ignore_term=True)
         self.sb.stub("claude", answer=GO)
+        self.expect.update(codex=1, claude=1)
         started = time.monotonic()
         result = rc.run_chain("PROMPT TEXT", words=rc.GO_NOGO, strict=True, codex_timeout=1,
                               fallback=br.fallback_spec(timeout=1))
@@ -321,6 +342,7 @@ class ElapsedBound(Base):
 
     def test_an_absent_codex_costs_nothing(self):
         self.sb.stub("claude", answer=GO)
+        self.expect["claude"] = 1
         started = time.monotonic()
         result = rc.run_chain("PROMPT TEXT", words=rc.GO_NOGO, strict=True, codex_timeout=1,
                               fallback=br.fallback_spec(timeout=1))

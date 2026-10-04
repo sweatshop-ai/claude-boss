@@ -787,6 +787,7 @@ class Cli(Base):
             ("an object", base + ["--fallback-extra-args", '{"a": "b"}']),
             ("a number in the list", base + ["--fallback-extra-args", '["--tools", 3]']),
             ("a bare --", base + ["--fallback-extra-args", '["--tools", "Read", "--"]']),
+            ("nested past the parser's depth", base + ["--fallback-extra-args", "[" * 100000]),
             ("without a fallback", ["--words", "GO,NO-GO", "--fallback-extra-args", '["--x"]']),
             ("with no-fallback", ["--words", "GO,NO-GO", "--no-fallback", "--fallback-extra-args", '["--x"]']),
             ("without a model", ["--words", "GO,NO-GO", "--fallback-name", "h",

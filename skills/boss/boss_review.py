@@ -13,8 +13,8 @@ Exit codes (5 belongs to a later ticket and is never used here):
     6 the PR's head or base (or the checkout's head) moved during the review: nothing posted
     7 infrastructure: gh, the chain or a write failed
 
---check-fallback uses 0 (the call is confined as specified) and 1 (it is not, or could not be shown to
-be), and 2 for usage; it posts nothing and reads no PR.
+--check-fallback uses 0 (the init event shows the tools, MCP servers and model specified) and 1 (it does
+not, or the call could not be run), and 2 for usage; it posts nothing and reads no PR.
 
 The order: read the PR, ask Codex (01's chain, Codex only, in a child process started in the
 checkout), then under the PR's lock read the PR again, claim the next round, append the attempts,
@@ -56,6 +56,7 @@ REVIEW_EFFORT = "high"     # Codex reasoning effort: a PR review is the gate, no
 
 EXIT_GO, EXIT_USAGE, EXIT_NO_GO, EXIT_NO_VERDICT, EXIT_MOVED, EXIT_INFRA = 0, 2, 3, 4, 6, 7
 EXIT_FOR_VERDICT = {"GO": EXIT_GO, "NO-GO": EXIT_NO_GO}
+EXIT_CHECK_PASSED, EXIT_CHECK_FAILED = 0, 1       # --check-fallback only
 
 
 @dataclass(frozen=True)
@@ -633,7 +634,6 @@ def review(repo: str, pr: int, checkout: str, author: str, *,
 
 
 # ------------------------------------------------------------ the fallback, confined ----
-EXIT_CHECK_FAILED = 1       # --check-fallback only: the call is not shown to be confined
 CHECK_PROMPT = "ok"         # one word: the check reads the init event, not the answer
 CHECK_FLAGS = ("--output-format", "stream-json", "--verbose")   # `claude -p` refuses stream-json without --verbose
 _MISSING = object()
@@ -652,12 +652,13 @@ def fallback_spec(timeout: int = policy.REVIEW_FALLBACK_TIMEOUT) -> Fallback:
                                 "--permission-mode", policy.REVIEW_FALLBACK_PERMISSION_MODE))
 
 
-def _shown(value) -> str:
+def _describe(value) -> str:
     return "absent" if value is _MISSING else json.dumps(value)[:200]
 
 
 def init_problems(events: list[dict]) -> list[str]:
-    """Why the events of a fallback run do not show it confined; [] when they do. Fail-closed: exactly
+    """Why the events of a fallback run do not show the tools, MCP servers and model it was asked for;
+    [] when they do. Fail-closed: exactly
     one init event; its `tools` exactly Glob, Grep and Read (a list of strings, each once, in any
     order); its `mcp_servers` present and an empty list; its `model` the policy's model id, whole."""
     inits = [e for e in events if e.get("type") == "system" and e.get("subtype") == "init"]
@@ -667,15 +668,15 @@ def init_problems(events: list[dict]) -> list[str]:
     tools = init.get("tools", _MISSING)
     wanted = sorted(policy.REVIEW_FALLBACK_TOOLS)
     if not (isinstance(tools, list) and all(isinstance(t, str) for t in tools)):
-        problems.append("the init event's tools are not a list of strings: %s" % _shown(tools))
+        problems.append("the init event's tools are not a list of strings: %s" % _describe(tools))
     elif sorted(tools) != wanted:
         problems.append("the init event lists the tools %s, not exactly %s" % (sorted(tools), wanted))
     servers = init.get("mcp_servers", _MISSING)
     if servers != []:
-        problems.append("the init event's mcp_servers is %s, not an empty list" % _shown(servers))
+        problems.append("the init event's mcp_servers is %s, not an empty list" % _describe(servers))
     model = init.get("model", _MISSING)
     if not isinstance(model, str) or model != policy.REVIEW_FALLBACK_MODEL:
-        problems.append("the init event's model is %s, not %r" % (_shown(model), policy.REVIEW_FALLBACK_MODEL))
+        problems.append("the init event's model is %s, not %r" % (_describe(model), policy.REVIEW_FALLBACK_MODEL))
     return problems
 
 
@@ -699,7 +700,8 @@ def _events(out: bytes) -> tuple[list[dict], list[str]]:
 
 def check_fallback(checkout: str, timeout: int = policy.REVIEW_FALLBACK_TIMEOUT) -> list[str]:
     """Run the fallback call once, from `checkout`, with a one-word prompt in stream-JSON mode, and
-    say why what it printed does not show it confined; [] means it does. The argv is the one a
+    say why what it printed does not show the tools, MCP servers and model it was asked for; [] means
+    it does (the permission mode and slash commands are not read). The argv is the one a
     review sends (`claude_argv` of `fallback_spec`) plus CHECK_FLAGS, so the two cannot drift. A run
     that is stopped, cannot be started or exits non-zero is not a pass, whatever it printed first."""
     spec = fallback_spec(timeout)
@@ -722,9 +724,9 @@ def _check_main(checkout: str) -> int:
         _say("check-fallback: " + problem)
     if problems:
         return EXIT_CHECK_FAILED
-    print("fallback confined: tools %s; no MCP servers; model %s"
+    print("fallback check passed: tools %s; no MCP servers; model %s"
           % (", ".join(sorted(policy.REVIEW_FALLBACK_TOOLS)), policy.REVIEW_FALLBACK_MODEL))
-    return 0
+    return EXIT_CHECK_PASSED
 
 
 def _pr_number(text: str) -> int:
