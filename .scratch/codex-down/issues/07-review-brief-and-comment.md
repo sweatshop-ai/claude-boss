@@ -6,7 +6,9 @@
 
 **Blocked by:** 02 (PR review becomes a command)
 
-**Status:** ready-for-agent
+**Claimed by:** Birgit 2026-10-04 11:00
+
+**Status:** in-progress
 
 The brief (R4):
 
