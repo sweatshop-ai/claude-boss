@@ -18,6 +18,7 @@ import itertools
 import json
 import os
 import re
+import shutil
 import stat
 import subprocess
 import sys
@@ -134,22 +135,22 @@ class Base(unittest.TestCase):
         git(self.sb, self.checkout, "commit", "-q", "--allow-empty", "-m", "the PR head")
         self.head = git(self.sb, self.checkout, "rev-parse", "HEAD")
         self.gh = Gh(self.sb, self.head)
+        self.sb.stub("claude", answer="VERDICT: GO")      # there is no fallback here: it must never run
         self.reviews = self.sb.cfg / "pm" / "reviews"
         self.pr_dir = self.reviews / "owner" / "repo" / ("pr%d" % PR)
 
     def setUp_clean(self):
         """A fresh review directory, PR and call logs inside one test (for subTest loops)."""
-        import shutil
         for d in (self.sb.cfg, self.sb.calls, self.sb.side):
             shutil.rmtree(d)
             d.mkdir()
-        for stub in ("codex", "claude"):
-            (self.sb.stubs / stub).unlink(missing_ok=True)
+        (self.sb.stubs / "codex").unlink(missing_ok=True)
         self.gh = Gh(self.sb, self.head)
+        self.sb.stub("claude", answer="VERDICT: GO")
 
     def tearDown(self):
         self.sb.guard()
-        self.assertEqual(self.sb.calls_of("claude"), [], "no fallback in this ticket")
+        self.assertEqual(self.sb.calls_of("claude"), [], "claude was called: there is no fallback here")
         for call in self.sb.calls_of("gh"):
             self.assertGhCallIsScoped(call.argv)
 
@@ -171,11 +172,17 @@ class Base(unittest.TestCase):
     def codex(self, **kw):
         return self.sb.stub("codex", **kw)
 
+    def assertAttemptsLogged(self, *rounds):
+        self.assertEqual([line["round"] for line in self.attempts_log()], list(rounds))
+
     def comments(self):
         return [c for c in self.sb.calls_of("gh") if c.argv[:2] == ["pr", "comment"]]
 
     def views(self):
         return [c for c in self.sb.calls_of("gh") if c.argv[:2] == ["pr", "view"]]
+
+    def round_names(self):
+        return sorted(p.name for p in self.pr_dir.glob("round*"))
 
     def round_file(self, n, suffix="json"):
         return self.pr_dir / ("round%02d.%s" % (n, suffix))
@@ -271,8 +278,8 @@ class NoGoAndNoVerdict(Base):
                                  ("none", None, "no-verdict", "codex"))
                 (attempt,) = record["attempts"]
                 self.assertEqual(list(attempt), ATTEMPT_KEYS)
-                self.assertEqual((attempt["reviewer"], attempt["reason"], attempt["exit_code"], attempt["model"]),
-                                 ("codex", reason, exit_code, None))
+                self.assertEqual([attempt[k] for k in ("reviewer", "reason", "exit_code", "model")],
+                                 ["codex", reason, exit_code, None])
                 self.assertEqual(self.round_file(1, "out").read_text(encoding="utf-8"),
                                  "--- codex %s ---\n%s" % (reason, raw))
                 (line,) = self.attempts_log()
@@ -288,7 +295,7 @@ class NoGoAndNoVerdict(Base):
                 self.assertEqual(self.comments(), [])
 
 
-NOTHING = br.ReviewResult(2, None, None, None, None)
+REFUSED = br.ReviewResult(2, None, None, None, None)
 INFRA = br.ReviewResult(7, None, None, None, None)
 
 
@@ -356,7 +363,7 @@ class Refused(Base):
         for what, fields in wrong.items():
             with self.subTest(what=what):
                 self.gh.set_pr(**fields)
-                self.assertEqual(self.review(), NOTHING)
+                self.assertEqual(self.review(), REFUSED)
                 self.assertNothingHappened()
                 self.gh.set_pr(number=PR, url="https://github.com/Owner/Repo/pull/5")
 
@@ -367,13 +374,20 @@ class Refused(Base):
 
     def test_a_checkout_whose_head_is_not_the_pr_head_is_exit_two_with_nothing_claimed(self):
         self.gh.set_pr(headRefOid=OTHER_SHA)
-        self.assertEqual(self.review(), NOTHING)
+        self.assertEqual(self.review(), REFUSED)
+        self.assertNothingHappened()
+
+    def test_a_git_that_outlasts_the_io_timeout_is_infrastructure_not_a_wrong_checkout(self):
+        self.sb.stub_script("git", "sleep 60")
+        started = time.monotonic()
+        self.assertEqual(self.review(io_timeout=1), INFRA)
+        self.assertLess(time.monotonic() - started, 15)
         self.assertNothingHappened()
 
     def test_a_directory_that_is_not_a_git_checkout_is_exit_two_too(self):
         elsewhere = self.sb.work / "plain"
         elsewhere.mkdir()
-        self.assertEqual(self.review(checkout=elsewhere), NOTHING)
+        self.assertEqual(self.review(checkout=elsewhere), REFUSED)
         self.assertNothingHappened()
 
 
@@ -454,11 +468,13 @@ class Moved(Base):
         self.assertEqual(result, br.ReviewResult(6, 1, "head-moved", "GO", self.round_file(1)))
         self.assertEqual(self.comments(), [])
         self.assertEqual((self.record(1)["base"], self.record(1)["head_sha"]), ("main", self.head))
+        self.assertAttemptsLogged(1)
 
     def test_a_checkout_that_moved_during_the_review_is_head_moved_too(self):
         # Codex reviewed whatever the checkout held; the comment must not name a head it did not read.
-        env = "GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.invalid GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.invalid"
-        self.sb.stub_script("codex", env + ''' git commit -q --allow-empty -m moved
+        who = ("GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.invalid "
+               "GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.invalid")
+        self.sb.stub_script("codex", who + ''' git commit -q --allow-empty -m moved
 prev=""; dest=""
 for a in "$@"; do [ "$prev" = "-o" ] && dest=$a; prev=$a; done
 printf 'VERDICT: GO\\n' > "$dest"''')
@@ -468,7 +484,7 @@ printf 'VERDICT: GO\\n' > "$dest"''')
         self.assertEqual(self.comments(), [])
         self.assertEqual(self.record(1)["head_sha"], self.head)
 
-    def test_a_head_that_moves_while_the_comment_is_posted_leaves_a_comment_that_names_the_reviewed_head(self):
+    def test_a_head_that_moves_during_the_post_leaves_a_comment_that_names_the_reviewed_head(self):
         self.codex(answer="VERDICT: GO")
         self.gh.configure(comment=[{"patch": {"headRefOid": OTHER_SHA}}])
         result = self.review()
@@ -478,6 +494,7 @@ printf 'VERDICT: GO\\n' > "$dest"''')
         self.assertNotIn(OTHER_SHA, comment.argv[-1])
         self.assertEqual(self.record(1)["head_sha"], self.head)
         self.assertEqual(len(self.views()), 2, "the window after the re-read is not read again")
+        self.assertAttemptsLogged(1)
 
 
 class PostFailures(Base):
@@ -493,6 +510,7 @@ class PostFailures(Base):
                 record = self.record(1)
                 self.assertEqual((record["status"], record["verdict"], record["reviewer"]),
                                  ("post-failed", verdict, "codex"))
+                self.assertAttemptsLogged(1)
 
     def test_a_comment_that_times_out_after_gh_recorded_it_is_post_failed_too(self):
         self.codex(answer="VERDICT: GO")
@@ -503,12 +521,15 @@ class PostFailures(Base):
         self.assertEqual(result, br.ReviewResult(7, 1, "post-failed", "GO", self.round_file(1)))
         self.assertEqual(len(self.comments()), 1, "the stub logged the call before it hung")
         self.assertEqual(self.record(1)["status"], "post-failed")
+        self.assertAttemptsLogged(1)
 
     def test_a_retry_after_a_failed_post_is_a_new_round_with_a_higher_number(self):
         self.codex(answer="VERDICT: GO")
         self.gh.configure(comment=[{"rc": 1}, {}])
         first, second = self.review(), self.review()
-        self.assertEqual((first.round, first.status, second.round, second.status), (1, "post-failed", 2, "posted"))
+        self.assertEqual((first.round, first.status, second.round, second.status),
+                         (1, "post-failed", 2, "posted"))
+        self.assertAttemptsLogged(1, 2)
         self.assertEqual(self.record(1)["status"], "post-failed", "no round file is edited after its write")
 
 
@@ -528,6 +549,7 @@ class WriteFailures(Base):
         self.assertEqual(self.comments(), [])
         self.assertEqual(len(self.sb.calls_of("codex")), 1, "the review runs first")
         self.assertEqual(len(self.views()), 1)
+        self.assertAttemptsLogged()
 
     def test_a_claim_that_fails_claims_nothing_and_posts_nothing(self):
         self.codex(answer="VERDICT: GO")
@@ -536,7 +558,7 @@ class WriteFailures(Base):
         self.assertEqual(result, INFRA)
         self.assertEqual(self.comments(), [])
         self.assertEqual(self.attempts_log(), [])
-        self.assertEqual(sorted(p.name for p in self.pr_dir.glob("round*")), [])
+        self.assertEqual(self.round_names(), [])
         self.assertLockIsFree()
         self.assertEqual(self.record(1)["round"], 1, "the failed run took no number")
 
@@ -545,7 +567,8 @@ class WriteFailures(Base):
         self.gh.configure(view=[{}, {"rc": 1}])
         self.assertEqual(self.review(), INFRA)
         self.assertEqual(self.comments(), [])
-        self.assertEqual(sorted(p.name for p in self.pr_dir.glob("round*")), [])
+        self.assertEqual(self.round_names(), [])
+        self.assertAttemptsLogged()
         self.gh.configure()
         self.assertLockIsFree()
 
@@ -560,6 +583,7 @@ class WriteFailures(Base):
                 self.assertEqual(self.round_file(1).read_bytes(), b"")
                 self.assertEqual(self.comments(), [])
                 self.assertFalse(self.round_file(1, "out").exists())
+                self.assertAttemptsLogged()
                 self.assertLockIsFree()
 
     def test_an_out_file_that_cannot_be_written_leaves_the_claimed_file_empty_and_posts_nothing(self):
@@ -569,6 +593,7 @@ class WriteFailures(Base):
         self.assertEqual(result, br.ReviewResult(7, 1, None, "NO-GO", self.round_file(1)))
         self.assertEqual(self.round_file(1).read_bytes(), b"")
         self.assertEqual(self.comments(), [])
+        self.assertAttemptsLogged(1)
         self.assertLockIsFree()
 
     def test_a_final_write_that_fails_after_the_post_leaves_the_comment_and_an_empty_claimed_file(self):
@@ -578,6 +603,7 @@ class WriteFailures(Base):
         self.assertEqual(result, br.ReviewResult(7, 1, None, "GO", self.round_file(1)))
         self.assertEqual(len(self.comments()), 1)
         self.assertEqual(self.round_file(1).read_bytes(), b"")
+        self.assertAttemptsLogged(1)
         self.assertLockIsFree()
 
     def test_a_real_write_error_while_replacing_the_record_leaves_no_temporary_file(self):
@@ -603,7 +629,7 @@ class WriteFailures(Base):
         self.assertEqual(result, INFRA)
         self.assertLess(elapsed, 15)
         self.assertEqual(self.comments(), [])
-        self.assertEqual(sorted(p.name for p in self.pr_dir.glob("round*")), [])
+        self.assertEqual(self.round_names(), [])
         self.assertEqual(len(self.views()), 1, "the live read waits for the lock")
 
 
@@ -639,15 +665,18 @@ def mode(path):
 
 
 class Privacy(Base):
-    """R9: what a review keeps is for its owner."""
+    """What a review keeps is for its owner alone."""
 
     def setUp(self):
         super().setUp()
         self.addCleanup(os.umask, os.umask(0))      # permissive: only the command can make it private
         self.codex(answer="VERDICT: GO")
 
+    def tree(self):
+        return (self.reviews, self.reviews / "owner", self.reviews / "owner" / "repo", self.pr_dir)
+
     def assertPrivate(self):
-        for d in (self.reviews, self.reviews / "owner", self.reviews / "owner" / "repo", self.pr_dir):
+        for d in self.tree():
             self.assertEqual(oct(mode(d)), oct(0o700), d)
         for f in (self.pr_dir / ".lock", self.round_file(1), self.round_file(1, "out"),
                   self.reviews / "attempts.jsonl"):
@@ -657,9 +686,17 @@ class Privacy(Base):
         self.assertEqual(self.review().exit_code, 0)
         self.assertPrivate()
 
+    def test_a_pm_directory_the_command_had_to_make_is_0700_and_one_that_exists_is_left_alone(self):
+        self.assertFalse((self.sb.cfg / "pm").exists())
+        self.review()
+        self.assertEqual(oct(mode(self.sb.cfg / "pm")), oct(0o700))
+        os.chmod(self.sb.cfg / "pm", 0o755)
+        self.review()
+        self.assertEqual(oct(mode(self.sb.cfg / "pm")), oct(0o755), "pm is not the command's to tighten")
+
     def test_wider_modes_that_already_exist_are_tightened_when_the_command_uses_them(self):
         self.pr_dir.mkdir(parents=True)
-        for d in (self.reviews, self.reviews / "owner", self.reviews / "owner" / "repo", self.pr_dir):
+        for d in self.tree():
             os.chmod(d, 0o755)
         for f in (self.pr_dir / ".lock", self.reviews / "attempts.jsonl"):
             f.touch()
@@ -696,24 +733,28 @@ class Privacy(Base):
 
 
 class Concurrency(Base):
-    def run_in_threads(self, *jobs):
-        """Start each job (a callable returning a ReviewResult) in a thread of its own, in order."""
+    def threads_for(self, *jobs):
+        """A thread for each job (a callable returning a ReviewResult), not started, and the list
+        its results will fill."""
         results = [None] * len(jobs)
 
         def target(i, job):
             results[i] = job()
-        threads = [threading.Thread(target=target, args=(i, job)) for i, job in enumerate(jobs)]
-        return threads, results
+        return [threading.Thread(target=target, args=(i, job)) for i, job in enumerate(jobs)], results
 
-    def test_two_runs_on_one_pr_spelled_differently_share_a_directory_and_get_two_numbers(self):
-        self.codex(answer="VERDICT: GO", delay=0.3)
-        threads, results = self.run_in_threads(
-            lambda: self.review(repo="Owner/Repo", author="Anna"),
-            lambda: self.review(repo="owner/repo", author="Boris"))
+    def run_together(self, *jobs):
+        """Start every job at once, wait for all of them, and return their results."""
+        threads, results = self.threads_for(*jobs)
         for t in threads:
             t.start()
         for t in threads:
             t.join()
+        return results
+
+    def test_two_runs_on_one_pr_spelled_differently_share_a_directory_and_get_two_numbers(self):
+        self.codex(answer="VERDICT: GO", delay=0.3)
+        results = self.run_together(lambda: self.review(repo="Owner/Repo", author="Anna"),
+                                    lambda: self.review(repo="owner/repo", author="Boris"))
         self.assertEqual(sorted(r.round for r in results), [1, 2])
         self.assertEqual({r.status for r in results}, {"posted"})
         self.assertEqual(sorted(p.name for p in self.reviews.iterdir()), ["attempts.jsonl", "owner"])
@@ -729,8 +770,8 @@ class Concurrency(Base):
 
     def test_the_review_that_starts_first_and_finishes_last_gets_the_higher_number_and_posts_last(self):
         self.codex(answer="VERDICT: GO", first_delay=2)       # only the first call is slow
-        threads, results = self.run_in_threads(
-            lambda: self.review(author="Slow"), lambda: self.review(author="Quick"))
+        threads, results = self.threads_for(lambda: self.review(author="Slow"),
+                                            lambda: self.review(author="Quick"))
         threads[0].start()
         deadline = time.monotonic() + 20
         while not self.sb.calls_of("codex") and time.monotonic() < deadline:
@@ -750,38 +791,37 @@ class Concurrency(Base):
         ticks, first = itertools.count(1), []
         real_open_lock = br.open_lock
 
-        def dawdling_open_lock(pr_dir, timeout):
+        def dawdling_open_lock(*args):
             if not first:
                 first.append(True)
                 time.sleep(1)
-            return real_open_lock(pr_dir, timeout)
+            return real_open_lock(*args)
         patches = (mock.patch.object(br, "open_lock", dawdling_open_lock),
                    mock.patch.object(br, "_now", lambda: "2026-10-04T00:00:%02dZ" % next(ticks)))
         for patcher in patches:
             patcher.start()
             self.addCleanup(patcher.stop)
-        threads, results = self.run_in_threads(lambda: self.review(author="Anna"), lambda: self.review(author="Boris"))
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
+        results = self.run_together(lambda: self.review(author="Anna"), lambda: self.review(author="Boris"))
         self.assertEqual(sorted(r.round for r in results), [1, 2])
         self.assertLess(self.record(1)["ts"], self.record(2)["ts"])
-        self.assertEqual([line["ts"] for line in self.attempts_log()], [self.record(1)["ts"], self.record(2)["ts"]])
+        self.assertEqual([line["ts"] for line in self.attempts_log()],
+                         [self.record(1)["ts"], self.record(2)["ts"]])
 
 
 class Contract(Base):
-    def test_the_signature_the_other_tickets_extend(self):
+    def test_the_signature_later_callers_extend_with_keyword_only_parameters(self):
         sig = inspect.signature(br.review)
-        self.assertEqual(list(sig.parameters), ["repo", "pr", "checkout", "author", "codex_timeout", "io_timeout"])
+        self.assertEqual(list(sig.parameters),
+                         ["repo", "pr", "checkout", "author", "codex_timeout", "io_timeout"])
         self.assertEqual([p.kind.name for p in sig.parameters.values()],
                          ["POSITIONAL_OR_KEYWORD"] * 4 + ["KEYWORD_ONLY"] * 2)
         self.assertEqual((sig.parameters["codex_timeout"].default, sig.parameters["io_timeout"].default),
                          (policy.REVIEW_CODEX_TIMEOUT, policy.REVIEW_IO_TIMEOUT))
 
-    def test_the_three_timeouts_are_in_policy_with_the_values_the_ticket_names(self):
-        self.assertEqual((policy.REVIEW_CODEX_TIMEOUT, policy.REVIEW_FALLBACK_TIMEOUT, policy.REVIEW_IO_TIMEOUT),
-                         (600, 600, 60))
+    def test_the_review_waits_are_in_policy_with_their_values(self):
+        self.assertEqual((policy.REVIEW_CODEX_TIMEOUT, policy.REVIEW_FALLBACK_TIMEOUT,
+                          policy.REVIEW_IO_TIMEOUT), (600, 600, 60))
+        self.assertEqual(policy.REVIEW_CHAIN_SLACK, 30)
 
     def test_a_result_is_a_frozen_value_with_the_five_fields_in_order(self):
         result = br.ReviewResult(0, 1, "posted", "GO", Path("x"))
@@ -843,14 +883,16 @@ class ChainChild(Base):
             self.assertInfraBeforeAnyClaim()
 
     def test_a_child_that_outlasts_codexs_timeout_and_its_slack_is_stopped_and_is_exit_seven(self):
-        with self.fake_chain("import time\ntime.sleep(60)\n"), mock.patch.object(br, "CHAIN_SLACK", 1):
+        with self.fake_chain("import time\ntime.sleep(60)\n"), \
+                mock.patch.object(policy, "REVIEW_CHAIN_SLACK", 1):
             started = time.monotonic()
             self.assertInfraBeforeAnyClaim()
             self.assertLess(time.monotonic() - started, 15)
 
     def test_the_chain_is_asked_for_codex_only_whole_word_go_no_go_and_strict(self):
         recorded = self.sb.root / "chain-argv.json"
-        body = ("import json, sys\nopen(%r, 'w').write(json.dumps(sys.argv[1:]))\nsys.exit(2)\n" % str(recorded))
+        body = ("import json, sys\nopen(%r, 'w').write(json.dumps(sys.argv[1:]))\nsys.exit(2)\n"
+                % str(recorded))
         with self.fake_chain(body):
             self.review(codex_timeout=7)
         argv = json.loads(recorded.read_text())
@@ -865,8 +907,9 @@ class ChainChild(Base):
 
 class CommandLine(Base):
     def run_cli(self, *args, cwd=None):
-        return subprocess.run([sys.executable, str(HERE / "boss_review.py"), *args], cwd=str(cwd or self.sb.work),
-                              env=dict(os.environ), capture_output=True, text=True, timeout=120)
+        return subprocess.run([sys.executable, str(HERE / "boss_review.py"), *args],
+                              cwd=str(cwd or self.sb.work), env=dict(os.environ),
+                              capture_output=True, text=True, timeout=120)
 
     def full(self, **over):
         args = {"--repo": REPO, "--pr": str(PR), "--checkout": str(self.checkout), "--author": AUTHOR}
@@ -890,11 +933,11 @@ class CommandLine(Base):
         self.assertIn("gh pr view", r.stderr)
 
     def test_a_usage_mistake_is_exit_two_with_nothing_claimed_posted_or_asked(self):
-        cases = [self.full(**{"--repo": None}), self.full(**{"--pr": None}), self.full(**{"--checkout": None}),
-                 self.full(**{"--author": None}), self.full(**{"--repo": "../x"}), self.full(**{"--repo": "x/.."}),
-                 self.full(**{"--repo": "a/b/c"}), self.full(**{"--author": "a b"}), self.full(**{"--pr": "0"}),
-                 self.full(**{"--pr": "-3"}), self.full(**{"--pr": "abc"}), self.full(**{"--pr": "\u0665"}),
-                 self.full(**{"--checkout": str(self.sb.work / "nope")}), self.full() + ["--waive"]]
+        bad = [{"--repo": None}, {"--pr": None}, {"--checkout": None}, {"--author": None},
+               {"--repo": "../x"}, {"--repo": "x/.."}, {"--repo": "./x"}, {"--repo": "a/b/c"},
+               {"--author": "a b"}, {"--pr": "0"}, {"--pr": "-3"}, {"--pr": "abc"}, {"--pr": "\u0665"},
+               {"--checkout": str(self.sb.work / "nope")}]
+        cases = [self.full(**over) for over in bad] + [self.full() + ["--waive"]]
         for args in cases:
             with self.subTest(args=args):
                 r = self.run_cli(*args)

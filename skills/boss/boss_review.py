@@ -36,16 +36,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import NamedTuple
 
+import boss_store
 import policy
-from reviewer_chain import _snapshot, _stop
+from reviewer_chain import STDERR_TAIL, _snapshot, _stop
 
 HERE = Path(__file__).resolve().parent
 CHAIN = HERE / "reviewer_chain.py"
 
 REVIEW_EFFORT = "high"     # Codex reasoning effort: a PR review is the gate, not a quick check
-CHAIN_SLACK = 30           # seconds past codex_timeout before the chain's own child is given up on
-STDERR_TAIL = 2048
-EXIT_FOR_VERDICT = {"GO": 0, "NO-GO": 3}
+
+EXIT_GO, EXIT_USAGE, EXIT_NO_GO, EXIT_NO_VERDICT, EXIT_MOVED, EXIT_INFRA = 0, 2, 3, 4, 6, 7
+EXIT_FOR_VERDICT = {"GO": EXIT_GO, "NO-GO": EXIT_NO_GO}
 
 
 @dataclass(frozen=True)
@@ -121,6 +122,17 @@ def _spawn(argv: list[str], timeout: float, cwd: str | None = None) -> _Out:
 
 
 # ---------------------------------------------------------------------- the PR (gh) ----
+class _Job(NamedTuple):
+    """What one review is about: the repo as typed, its key, the PR, the checkout, who runs it,
+    and how long gh and git may take."""
+    repo: str
+    key: str
+    pr: int
+    checkout: str
+    author: str
+    io_timeout: float
+
+
 class _Pr(NamedTuple):
     number: int
     url: str
@@ -131,11 +143,11 @@ class _Pr(NamedTuple):
 _SHA = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
 
 
-def _read_pr(repo: str, pr: int, io_timeout: float) -> _Pr:
-    run = _spawn(["gh", "pr", "view", str(pr), "--repo", repo, "--json",
-                  "number,url,headRefOid,baseRefName"], io_timeout)
+def _read_pr(job: _Job) -> _Pr:
+    run = _spawn(["gh", "pr", "view", str(job.pr), "--repo", job.repo, "--json",
+                  "number,url,headRefOid,baseRefName"], job.io_timeout)
     if run.timed_out:
-        raise _Infra("gh pr view ran past %ss" % io_timeout)
+        raise _Infra("gh pr view ran past %ss" % job.io_timeout)
     if run.code != 0:
         raise _Infra("gh pr view failed (%s): %s" % (run.code, run.err.strip()[-300:]))
     try:
@@ -149,14 +161,20 @@ def _read_pr(repo: str, pr: int, io_timeout: float) -> _Pr:
     return _Pr(number, url, head, base)
 
 
-def _is_the_pr(seen: _Pr, key: str, pr: int) -> bool:
+def _is_the_pr(seen: _Pr, job: _Job) -> bool:
     """The PR gh answered with is the one asked for: its number, and a URL path of
     /<owner>/<repo>/pull/<N> (the names compared without case)."""
-    return seen.number == pr and urllib.parse.urlparse(seen.url).path.lower() == "/%s/pull/%d" % (key, pr)
+    path = urllib.parse.urlparse(seen.url).path.lower()
+    return seen.number == job.pr and path == "/%s/pull/%d" % (job.key, job.pr)
 
 
-def _checkout_head(checkout: str, io_timeout: float) -> str | None:
-    run = _spawn(["git", "-C", checkout, "rev-parse", "HEAD"], io_timeout)
+def _checkout_head(job: _Job) -> str | None:
+    """The commit the checkout stands on, or None when it is not a git checkout. A git that cannot
+    be run or outlasts the wait is _Infra: that says nothing about which commit it stands on."""
+    run = _spawn(["git", "-C", job.checkout, "rev-parse", "HEAD"], job.io_timeout)
+    if run.timed_out or run.code is None:
+        raise _Infra("git rev-parse %s" % ("ran past %ss" % job.io_timeout if run.timed_out
+                                           else "could not be run: %s" % run.err.strip()[-300:]))
     return run.out.decode("utf-8", "replace").strip() if run.code == 0 else None
 
 
@@ -209,7 +227,8 @@ def _ask_codex(checkout: str, head: str, base: str, codex_timeout: int) -> dict:
         prompt.write_text(build_brief(head, base), encoding="utf-8")
         run = _spawn([sys.executable, str(CHAIN), "--prompt-file", str(prompt), "--words", "GO,NO-GO",
                       "--match", "token", "--strict", "--no-fallback", "--effort", REVIEW_EFFORT,
-                      "--codex-timeout", str(codex_timeout)], codex_timeout + CHAIN_SLACK, cwd=checkout)
+                      "--codex-timeout", str(codex_timeout)],
+                     codex_timeout + policy.REVIEW_CHAIN_SLACK, cwd=checkout)
     return _chain_result(run)
 
 
@@ -232,12 +251,16 @@ def _private_dir(path: Path) -> None:
         os.chmod(path, 0o700)
 
 
-def open_lock(pr_dir: Path, timeout: float) -> int:
-    """Make the round directory and the three above it private (0700), open its `.lock` (0600) and
-    take it, waiting at most `timeout`. Returns the descriptor that holds the lock."""
-    pr_dir.parents[2].parent.mkdir(parents=True, exist_ok=True)
-    for d in (pr_dir.parents[2], pr_dir.parents[1], pr_dir.parents[0], pr_dir):
-        _private_dir(d)
+def open_lock(reviews: Path, pr_dir: Path, timeout: float) -> int:
+    """Make `reviews` and each directory down to `pr_dir` private (0700), open `pr_dir`'s `.lock`
+    (0600) and take it, waiting at most `timeout`. Returns the descriptor that holds the lock.
+    The `pm` directory above `reviews` is made 0700 if missing, never tightened: it is not ours."""
+    reviews.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    here = reviews
+    _private_dir(here)
+    for part in pr_dir.relative_to(reviews).parts:
+        here = here / part
+        _private_dir(here)
     fd = os.open(pr_dir / ".lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
     try:
         os.fchmod(fd, 0o600)
@@ -319,88 +342,98 @@ def _out_text(chain: dict) -> str:
 
 
 def _reviews_dir() -> Path:
-    return Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude") / "pm" / "reviews"
+    return boss_store.pm_dir() / "reviews"
 
 
 # --------------------------------------------------------------------------- review ----
-def comment_body(n: int, author: str, head_sha: str, verdict: str) -> str:
+def comment_body(number: int, author: str, head_sha: str, verdict: str) -> str:
     """The comment: fixed words, the round, a validated name, the head reviewed and the verdict."""
-    return "Codex review %d (run by %s)\nHead: %s\nVerdict: %s" % (n, author, head_sha, verdict)
+    return "Codex review %d (run by %s)\nHead: %s\nVerdict: %s" % (number, author, head_sha, verdict)
 
 
-def _infra(message: str) -> ReviewResult:
+def _nothing(exit_code: int) -> ReviewResult:
+    """A result with no round: the command ended before it claimed one."""
+    return ReviewResult(exit_code, None, None, None, None)
+
+
+def _failed(message: str) -> ReviewResult:
     _say(message)
-    return ReviewResult(7, None, None, None, None)
+    return _nothing(EXIT_INFRA)
 
 
-def _prepare(repo: str, key: str, pr: int, checkout: str, io_timeout: float) -> _Pr | ReviewResult:
+def _refused(message: str) -> ReviewResult:
+    _say(message)
+    return _nothing(EXIT_USAGE)
+
+
+def _prepare(job: _Job) -> _Pr | ReviewResult:
     """The PR as gh describes it, once it is the PR asked for and the checkout stands on its head;
     else the result that ends the command before anything is claimed."""
     try:
-        seen = _read_pr(repo, pr, io_timeout)
+        seen = _read_pr(job)
+        if not _is_the_pr(seen, job):
+            return _refused("gh answered with %s (number %d), not pull request %d of %s"
+                            % (seen.url, seen.number, job.pr, job.repo))
+        if _checkout_head(job) != seen.head:
+            return _refused("the HEAD of %s is not the head of the PR, %s" % (job.checkout, seen.head))
     except _Infra as exc:
-        return _infra(str(exc))
-    if not _is_the_pr(seen, key, pr):
-        _say("gh answered with %s (number %d), not pull request %d of %s" % (seen.url, seen.number, pr, repo))
-        return ReviewResult(2, None, None, None, None)
-    if _checkout_head(checkout, io_timeout) != seen.head:
-        _say("the HEAD of %s is not the head of the PR, %s" % (checkout, seen.head))
-        return ReviewResult(2, None, None, None, None)
-    if Path(os.path.realpath(_reviews_dir())).is_relative_to(os.path.realpath(checkout)):
-        return _infra("the reviews directory %s is inside the checkout %s" % (_reviews_dir(), checkout))
+        return _failed(str(exc))
+    if Path(os.path.realpath(_reviews_dir())).is_relative_to(os.path.realpath(job.checkout)):
+        return _failed("the reviews directory %s is inside the checkout %s" % (_reviews_dir(), job.checkout))
     return seen
 
 
-def _post(repo: str, pr: int, body: str, io_timeout: float) -> bool:
-    run = _spawn(["gh", "pr", "comment", str(pr), "--repo", repo, "--body", body], io_timeout)
+def _post(job: _Job, body: str) -> bool:
+    run = _spawn(["gh", "pr", "comment", str(job.pr), "--repo", job.repo, "--body", body], job.io_timeout)
     if run.code != 0:
-        _say("gh pr comment %s" % ("ran past %ss" % io_timeout if run.timed_out
+        _say("gh pr comment %s" % ("ran past %ss" % job.io_timeout if run.timed_out
                                    else "failed (%s): %s" % (run.code, run.err.strip()[-300:])))
     return run.code == 0
 
 
-def _keep_and_post(repo: str, key: str, pr: int, checkout: str, author: str, seen: _Pr, chain: dict,
-                   io_timeout: float) -> ReviewResult:
+def _keep_and_post(job: _Job, seen: _Pr, chain: dict) -> ReviewResult:
     """Under the PR's lock: look at the PR and the checkout again, claim the next round, keep what
     the review said, post, and make the claimed file the full record."""
-    pr_dir = _reviews_dir() / key / ("pr%d" % pr)
+    reviews = _reviews_dir()
+    pr_dir = reviews / job.key / ("pr%d" % job.pr)
     try:
-        lock = open_lock(pr_dir, io_timeout)
+        lock = open_lock(reviews, pr_dir, job.io_timeout)
     except OSError as exc:
-        return _infra("cannot take the lock of %s: %s" % (pr_dir, exc))
+        return _failed("cannot take the lock of %s: %s" % (pr_dir, exc))
     try:
         try:
-            live = _read_pr(repo, pr, io_timeout)
-            standing_on = _checkout_head(checkout, io_timeout)
-            n, path = claim_round(pr_dir)
+            live = _read_pr(job)
+            standing_on = _checkout_head(job)
+            number, path = claim_round(pr_dir)
         except (_Infra, OSError) as exc:
-            return _infra("nothing claimed: %s" % exc)
+            return _failed("nothing claimed: %s" % exc)
         ts = _now()           # the claim's time: it rises with the round number, whoever waited for the lock
         attempts = [{k: a[k] for k in ("reviewer", "reason", "exit_code", "stderr_tail", "model")}
                     for a in chain["attempts"]]
         verdict = (chain["parsed"] or {}).get("word")
         try:
-            append_attempts(_reviews_dir() / "attempts.jsonl",
-                            [{"ts": ts, "repo": key, "pr": pr, "round": n, "reviewer": a["reviewer"],
-                              "reason": a["reason"], "exit_code": a["exit_code"]} for a in attempts])
+            append_attempts(reviews / "attempts.jsonl",
+                            [{"ts": ts, "repo": job.key, "pr": job.pr, "round": number,
+                              "reviewer": a["reviewer"], "reason": a["reason"], "exit_code": a["exit_code"]}
+                             for a in attempts])
             write_out(path.with_suffix(".out"), _out_text(chain))
             if (live.head, live.base, standing_on) != (seen.head, seen.base, seen.head):
                 # the PR moved, or the checkout did: either way the head named is not the head read
-                status, exit_code = "head-moved", 6
+                status, exit_code = "head-moved", EXIT_MOVED
             elif verdict is None:
-                status, exit_code = "no-verdict", 4
-            elif _post(repo, pr, comment_body(n, author, seen.head, verdict), io_timeout):
+                status, exit_code = "no-verdict", EXIT_NO_VERDICT
+            elif _post(job, comment_body(number, job.author, seen.head, verdict)):
                 status, exit_code = "posted", EXIT_FOR_VERDICT[verdict]
             else:
-                status, exit_code = "post-failed", 7
+                status, exit_code = "post-failed", EXIT_INFRA
             replace_record(path, {
-                "repo": key, "pr": pr, "round": n, "head_sha": seen.head, "base": seen.base,
+                "repo": job.key, "pr": job.pr, "round": number, "head_sha": seen.head, "base": seen.base,
                 "reviewer": chain["reviewer"], "model": None, "kind": "codex", "verdict": verdict,
-                "status": status, "author": author, "ts": ts, "attempts": attempts})
+                "status": status, "author": job.author, "ts": ts, "attempts": attempts})
         except OSError as exc:
-            _say("round %d is left empty: %s" % (n, exc))
-            return ReviewResult(7, n, None, verdict, path)
-        return ReviewResult(exit_code, n, status, verdict, path)
+            _say("round %d is left empty: %s" % (number, exc))
+            return ReviewResult(EXIT_INFRA, number, None, verdict, path)
+        return ReviewResult(exit_code, number, status, verdict, path)
     finally:
         os.close(lock)
 
@@ -414,14 +447,15 @@ def review(repo: str, pr: int, checkout: str, author: str, *,
         raise ValueError("pr must be a positive integer: %r" % (pr,))
     if not os.path.isdir(checkout):
         raise ValueError("checkout is not a directory: %r" % (checkout,))
-    seen = _prepare(repo, key, pr, checkout, io_timeout)
+    job = _Job(repo, key, pr, checkout, author, io_timeout)
+    seen = _prepare(job)
     if isinstance(seen, ReviewResult):
         return seen
     try:
         chain = _ask_codex(checkout, seen.head, seen.base, codex_timeout)
     except _Infra as exc:
-        return _infra(str(exc))
-    return _keep_and_post(repo, key, pr, checkout, author, seen, chain, io_timeout)
+        return _failed(str(exc))
+    return _keep_and_post(job, seen, chain)
 
 
 def _pr_number(text: str) -> int:
@@ -439,13 +473,14 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--repo", required=True, metavar="OWNER/REPO", help="never inferred from the directory")
     ap.add_argument("--pr", required=True, type=_pr_number, metavar="N")
     ap.add_argument("--checkout", required=True, metavar="DIR", help="a checkout standing on the PR head")
-    ap.add_argument("--author", required=True, metavar="NAME", help="who runs the review, as the comment says")
+    ap.add_argument("--author", required=True, metavar="NAME",
+                    help="who runs the review, as the comment says")
     args = ap.parse_args(argv)
     try:
         result = review(args.repo, args.pr, args.checkout, args.author)
     except ValueError as exc:
         print("boss_review: %s" % exc, file=sys.stderr)
-        return 2
+        return EXIT_USAGE
     if result.round is not None:
         print("Codex review %d: %s (%s) %s" % (result.round, result.verdict or "no verdict",
                                                result.status or "round left empty", result.record))
