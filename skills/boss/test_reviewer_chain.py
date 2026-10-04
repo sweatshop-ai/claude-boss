@@ -346,6 +346,15 @@ class Matching(Base):
                 self.chain(words=words)
         self.assertNotCalled("codex")
 
+    def test_a_word_of_only_no_break_or_control_spaces_is_refused_as_blank_too(self):
+        # Blank is judged more widely than the whitespace a verdict line may carry: refusing a
+        # vocabulary like this is the safe side, and nobody names a verdict with it.
+        self.sb.stub("codex", answer="VERDICT: whatever")
+        for words in (("\u00a0",), ("GO", "\u001f"), ("\u0085", "NO-GO")):
+            with self.subTest(words=words), self.assertRaises(ValueError):
+                self.chain(words=words)
+        self.assertNotCalled("codex")
+
     def test_the_first_usable_line_wins_and_a_malformed_one_before_it_is_skipped(self):
         self.check([
             ("VERDICT: maybe\nVERDICT: REJECT", "REJECT"),
