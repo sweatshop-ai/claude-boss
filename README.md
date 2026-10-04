@@ -169,6 +169,7 @@ uninstall touches it:
 
 ```
 $CLAUDE_CONFIG_DIR/pm/              trackers, objectives, markers
+$CLAUDE_CONFIG_DIR/pm/reviews/      PR review rounds and the attempts log (private)
 $CLAUDE_CONFIG_DIR/routines/        timer state and logs
 ```
 
@@ -196,11 +197,13 @@ for t in skills/boss/test_*.py skills/hand-to-boss/test_*.py; do python3 "$t"; d
 ```
 
 They run each hook the way the harness does — as a process, JSON on stdin,
-against a throwaway `CLAUDE_CONFIG_DIR`. Nothing touches your real state, posts to a channel or moves a tmux pane. The tests of `boss-run`, the
-reviewer chain and `boss_review.py` run them on a sealed `PATH` (`skills/boss/hermetic.py`) where
-`codex`, `claude`, `gh` and `tmux` are stubs that log their calls (the review tests also let a real `git` read a throwaway
-repo), so no real reviewer is asked and nothing is posted. `boss-run --selftest` is not part of this: it calls real
-reviewers.
+against a throwaway `CLAUDE_CONFIG_DIR`. Nothing touches your real state, posts to a
+channel or moves a tmux pane. The tests of `boss-run`, the
+reviewer chain and `boss_review.py` run them on a sealed `PATH`
+(`skills/boss/hermetic.py`) where `codex`, `claude`, `gh` and `tmux` are stubs
+that log their calls (the review tests also let a real `git` read a throwaway
+repo), so no real reviewer is asked and nothing is posted. `boss-run --selftest`
+is not part of this: it calls real reviewers.
 
 ## License
 
