@@ -99,7 +99,7 @@ class Sandbox:
         """Write stubs/<name>, a bash script that logs its call, then behaves.
 
         answer  the reviewer's reply: written to the file after `-o` for codex,
-                printed on stdout for everything else
+                printed on stdout for everything else (bytes are written as they are)
         out/err noise on stdout/stderr, to prove diagnostics never leak
         rc      exit status
         hang    sleep 300 after logging
@@ -115,7 +115,10 @@ class Sandbox:
         for key, text in (("answer", answer), ("out", out), ("err", err)):
             if text:
                 path = self.side / ("%s.%s" % (name, key))
-                path.write_text(text if key == "answer" else text + "\n", encoding="utf-8")
+                if isinstance(text, bytes):      # written as given, for output that is not valid text
+                    path.write_bytes(text)
+                else:
+                    path.write_text(text if key == "answer" else text + "\n", encoding="utf-8")
                 files[key] = shlex.quote(str(path))
         lines = [
             "#!" + self._bash,
