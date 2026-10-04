@@ -111,8 +111,14 @@ class Result:
     attempts: tuple[Attempt, ...]
 
 
+# What `[[:space:]]` matched in the old script's grep and sed under a UTF-8 locale, inside one
+# line (lines split on \n only). It is not Python's `\s`: no no-break spaces, U+0085 or U+001C-1F.
+_SPACE_CLASS = r"[\t\x0b\x0c\r \u1680\u2000-\u2006\u2008-\u200a\u2028\u2029\u205f\u3000]"
+_SPACE = _SPACE_CLASS + "*"
+_is_space = re.compile(_SPACE_CLASS).match
+
 NO_REASON = "(no reason given)"
-_REASON = re.compile(r"[ \t\r\f\v]*REASON:[ \t\r\f\v]*(.*)", re.IGNORECASE)
+_REASON = re.compile(_SPACE + "REASON:" + _SPACE + "(.*)", re.IGNORECASE)
 
 
 def _reason(lines: list[str]) -> str:
@@ -129,16 +135,14 @@ def _check_words(words: tuple[str, ...]) -> None:
         raise ValueError("words must be a non-empty list of non-blank verdict words: %r" % (tuple(words),))
 
 
-_SPACE = r"[ \t\r\f\v]*"   # what grep's [[:space:]]* matches within one line
-
-
 def _verdict_line(words: tuple[str, ...]):
     """A matcher for `VERDICT: <word>` at the start of a line: line -> the word, or None.
 
     Words are tried longest first. Under the token rule the word must end at a
-    boundary: any letter or digit (Unicode too), a hyphen, or a combining mark or
-    variation selector continues a token, so GO-AHEAD is not GO, NO-GOING is not
-    NO-GO, GO\u00e9 is not GO and GO + U+0301 is not GO.
+    boundary: a letter or digit (Unicode too), a hyphen, a combining mark, or an
+    invisible character (control or format: zero-width joiner, soft hyphen) continues
+    a token, so GO-AHEAD is not GO, NO-GOING is not NO-GO, GO\u00e9 is not GO and
+    GO + U+0301 is not GO. Whitespace and punctuation end it.
     """
     alternatives = "|".join(re.escape(w.upper()) for w in sorted(words, key=len, reverse=True))
     rule = words.match if isinstance(words, Words) else _default_rule(words)
@@ -151,7 +155,7 @@ def _verdict_line(words: tuple[str, ...]):
         if m is None:
             return None
         after = line[m.end(1):m.end(1) + 1]
-        if token and after and unicodedata.category(after).startswith("M"):
+        if token and after and unicodedata.category(after)[0] in "MC" and not _is_space(after):
             return None
         return m.group(1).upper()
     return match

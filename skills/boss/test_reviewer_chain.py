@@ -303,6 +303,29 @@ class Matching(Base):
             ("VERDICT: GO \u0301", "GO"),
         ], words=rc.GO_NOGO)
 
+    def test_an_invisible_character_after_the_word_continues_a_token_too(self):
+        # Marks and every control or format character (zero-width joiner and space, soft hyphen,
+        # BOM, C0 controls that are not whitespace) continue a token; separators and punctuation end it.
+        self.check([
+            ("VERDICT: GO\u200dOD", None), ("VERDICT: GO\u200b", None), ("VERDICT: NO-GO\u00ad", None),
+            ("VERDICT: GO\ufeff", None), ("VERDICT: GO\x1f", None),
+            ("VERDICT: GO\tnow", "GO"), ("VERDICT: GO\u2003fine", "GO"), ("VERDICT: NO-GO\u3000", "NO-GO"),
+        ], words=rc.GO_NOGO)
+
+    # "Space" is what the old `grep -E '^[[:space:]]*VERDICT:[[:space:]]*...'` and `sed` took it to be
+    # under a UTF-8 locale. Measured over every code point (GNU grep and sed agree in all four places:
+    # before VERDICT:, after its colon, before REASON:, and what sed strips after REASON:).
+    SPACES = ["\t", "\x0b", "\x0c", "\r", " ", "\u1680", "\u2000", "\u2003", "\u2006", "\u2008",
+              "\u200a", "\u2028", "\u2029", "\u205f", "\u3000"]
+    NOT_SPACES = ["\x1c", "\x1f", "\x85", "\xa0", "\u2007", "\u200b", "\u202f", "\ufeff"]
+
+    def test_whitespace_before_and_after_the_colon_is_what_the_old_grep_called_space(self):
+        for words, word in ((rc.APPROVE_REJECT, "APPROVE"), (rc.GO_NOGO, "GO")):
+            for ch in self.SPACES:
+                self.check([(ch + "VERDICT: " + word, word), ("VERDICT:" + ch + word, word)], words)
+            for ch in self.NOT_SPACES:
+                self.check([(ch + "VERDICT: " + word, None), ("VERDICT:" + ch + word, None)], words)
+
     def test_a_plain_tuple_of_words_is_matched_as_whole_tokens(self):
         self.check([("VERDICT: NO-GO", "NO-GO"), ("VERDICT: GOOD", None)], words=("GO", "NO-GO"))
 
@@ -357,6 +380,17 @@ class Matching(Base):
             ("VERDICT: APPROVE\nREASON:", "(no reason given)"),
             ("VERDICT: APPROVE\nREASON:   ", "(no reason given)"),
             ("VERDICT: APPROVE\nnot a REASON: x", "(no reason given)"),
+        ]:
+            with self.subTest(answer=answer):
+                self.assertEqual(self.reason_of(answer), expected)
+
+    def test_the_reason_line_takes_the_same_whitespace_as_the_verdict_line(self):
+        for answer, expected in [
+            ("VERDICT: APPROVE\n\u2003REASON:\u3000fine", "fine"),
+            ("VERDICT: APPROVE\nREASON:\u2028fine", "fine"),
+            ("VERDICT: APPROVE\nREASON:\u2003", "(no reason given)"),
+            ("VERDICT: APPROVE\n\xa0REASON: x", "(no reason given)"),
+            ("VERDICT: APPROVE\nREASON:\xa0x", "\xa0x"),
         ]:
             with self.subTest(answer=answer):
                 self.assertEqual(self.reason_of(answer), expected)
