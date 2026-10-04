@@ -43,6 +43,13 @@ RUNGS = (5, 15, 30, 60, 120)
 RUNG_EVERY = 120
 STOP_MIN = 24 * 60
 
+# The fallback reviewer, `claude` in read-only mode (boss_review.fallback_spec). The model is passed by
+# its exact id, so no CLI default is ever accepted; the tools are the built-in set it may use, and
+# `--strict-mcp-config` (with no `--mcp-config`) keeps every MCP server out, which `--tools` alone does not.
+REVIEW_FALLBACK_MODEL = "claude-opus-5-5"
+REVIEW_FALLBACK_TOOLS = ("Read", "Grep", "Glob")
+REVIEW_FALLBACK_PERMISSION_MODE = "dontAsk"
+
 # PR review (boss_review.py), seconds. A Codex review of a plan took 8 minutes, so Codex gets 600;
 # the fallback reviewer, once there is one, gets a wait of its own, also 600; a `gh` or `git` call or
 # the wait for a PR's lock gets 60; the review's child process gets 30 past Codex's wait to wind up.
@@ -50,13 +57,6 @@ REVIEW_CODEX_TIMEOUT = 600
 REVIEW_FALLBACK_TIMEOUT = 600
 REVIEW_IO_TIMEOUT = 60
 REVIEW_CHAIN_SLACK = 30
-
-# The fallback reviewer, `claude` in read-only mode (boss_review.fallback_spec). The model is passed by
-# its exact id, so no CLI default is ever accepted; the tools are the built-in set it may use, and
-# `--strict-mcp-config` (with no `--mcp-config`) keeps every MCP server out, which `--tools` alone does not.
-REVIEW_FALLBACK_MODEL = "claude-opus-5-5"
-REVIEW_FALLBACK_TOOLS = ("Read", "Grep", "Glob")
-REVIEW_FALLBACK_PERMISSION_MODE = "dontAsk"
 
 
 def flag_for(ctx, cost, role):

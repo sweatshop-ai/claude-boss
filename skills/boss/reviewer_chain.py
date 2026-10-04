@@ -351,10 +351,11 @@ def _csv(text: str) -> tuple[str, ...]:
 def _json_strings(text: str) -> tuple[str, ...]:
     try:
         value = json.loads(text)
-    except ValueError:
+    except (ValueError, RecursionError):        # nested past the parser's depth: not a list of strings either
         value = None
     if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
-        raise argparse.ArgumentTypeError("must be a JSON list of strings, e.g. '[\"--tools\", \"Read\"]': %r" % text)
+        raise argparse.ArgumentTypeError("must be a JSON list of strings, e.g. '[\"--tools\", \"Read\"]': %r"
+                                         % text[:80])
     return tuple(value)
 
 
