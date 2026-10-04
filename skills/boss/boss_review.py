@@ -156,13 +156,14 @@ def _hold(seen: _Seen) -> int | None:
 
 def _stop_below(seen: list[_Seen]) -> None:
     """TERM, then KILL, each of `seen` that is still the process that was seen."""
-    held = [fd for fd in map(_hold, seen) if fd is not None]
+    opened = [fd for fd in map(_hold, seen) if fd is not None]
+    held = list(opened)                     # those not yet seen to exit
     try:
         for sig in (signal.SIGTERM, signal.SIGKILL):
             for fd in held:
                 try:
                     signal.pidfd_send_signal(fd, sig)
-                except ProcessLookupError:
+                except (ProcessLookupError, PermissionError):     # gone, or not ours to signal
                     pass
             poller = select.poll()
             for fd in held:
@@ -174,7 +175,7 @@ def _stop_below(seen: list[_Seen]) -> None:
                 for fd in gone:
                     poller.unregister(fd)
     finally:
-        for fd in held:
+        for fd in opened:
             os.close(fd)
 
 
