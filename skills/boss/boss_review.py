@@ -25,6 +25,7 @@ import fcntl
 import json
 import os
 import re
+import signal
 import stat
 import subprocess
 import sys
@@ -38,7 +39,7 @@ from typing import NamedTuple
 
 import boss_store
 import policy
-from reviewer_chain import STDERR_TAIL, _snapshot, _stop
+from reviewer_chain import CODEX_FAILURES, STDERR_TAIL, TERM_GRACE, _snapshot, _stop
 
 HERE = Path(__file__).resolve().parent
 CHAIN = HERE / "reviewer_chain.py"
@@ -101,9 +102,56 @@ class _Out(NamedTuple):
     timed_out: bool
 
 
+def _descendants(pid: int) -> list[int]:
+    """Every process below `pid`, read from /proc: the reviewer the chain started lives in a session
+    of its own, so the chain's process group does not reach it. Empty where there is no /proc."""
+    parent_of = {}
+    for entry in os.listdir("/proc") if os.path.isdir("/proc") else ():
+        if entry.isdigit():
+            try:
+                fields = Path("/proc/%s/stat" % entry).read_text().rsplit(")", 1)[1].split()
+                parent_of[int(entry)] = int(fields[1])
+            except (OSError, ValueError, IndexError):
+                continue
+    found, frontier = [], [pid]
+    while frontier:
+        frontier = [p for p, parent in parent_of.items() if parent in frontier]
+        found += frontier
+    return found
+
+
+def _stop_groups(pids: list[int]) -> None:
+    """TERM, then KILL, the process group of each of `pids` (never this program's own)."""
+    groups = set()
+    for pid in pids:
+        try:
+            groups.add(os.getpgid(pid))
+        except ProcessLookupError:
+            pass
+    groups.discard(os.getpgrp())
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        deadline = time.monotonic() + (TERM_GRACE if sig == signal.SIGTERM else 0)
+        while True:
+            groups = {g for g in groups if _signal_group(g, sig if time.monotonic() >= deadline else 0)}
+            if not groups or time.monotonic() >= deadline:
+                break
+            time.sleep(0.05)
+
+
+def _signal_group(group: int, sig: int) -> bool:
+    """Send `sig` to a group; whether it is still there. Signal 0 only asks."""
+    try:
+        os.killpg(group, sig)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return False
+    return True
+
+
 def _spawn(argv: list[str], timeout: float, cwd: str | None = None) -> _Out:
     """Run one program with a closed stdin, its output in temporary files, and stop it and
-    everything it started when it outlasts `timeout` (the same discipline as the chain's)."""
+    everything it started, in whatever session, when it outlasts `timeout`."""
     with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
         try:
             proc = subprocess.Popen(argv, cwd=cwd, stdin=subprocess.DEVNULL, stdout=out, stderr=err,
@@ -113,7 +161,9 @@ def _spawn(argv: list[str], timeout: float, cwd: str | None = None) -> _Out:
         try:
             code, timed_out = proc.wait(timeout=timeout), False
         except subprocess.TimeoutExpired:
+            below = _descendants(proc.pid)       # before the stop: afterwards they belong to init
             _stop(proc)
+            _stop_groups(below)
             code, timed_out = None, True
         except BaseException:
             _stop(proc)
@@ -136,6 +186,7 @@ class _Job(NamedTuple):
 class _Pr(NamedTuple):
     number: int
     url: str
+    path: str        # the url's path, lowercased
     head: str
     base: str
 
@@ -158,24 +209,34 @@ def _read_pr(job: _Job) -> _Pr:
     if (type(number) is not int or not all(isinstance(v, str) for v in (url, head, base))
             or not _SHA.fullmatch(head) or not base):
         raise _Infra("gh pr view gave a field of the wrong kind")
-    return _Pr(number, url, head, base)
+    try:
+        path = urllib.parse.urlparse(url).path.lower()
+    except ValueError as exc:
+        raise _Infra("gh pr view gave a url that does not parse: %s" % exc)
+    return _Pr(number, url, path, head, base)
 
 
 def _is_the_pr(seen: _Pr, job: _Job) -> bool:
     """The PR gh answered with is the one asked for: its number, and a URL path of
     /<owner>/<repo>/pull/<N> (the names compared without case)."""
-    path = urllib.parse.urlparse(seen.url).path.lower()
-    return seen.number == job.pr and path == "/%s/pull/%d" % (job.key, job.pr)
+    return seen.number == job.pr and seen.path == "/%s/pull/%d" % (job.key, job.pr)
 
 
-def _checkout_head(job: _Job) -> str | None:
-    """The commit the checkout stands on, or None when it is not a git checkout. A git that cannot
-    be run or outlasts the wait is _Infra: that says nothing about which commit it stands on."""
-    run = _spawn(["git", "-C", job.checkout, "rev-parse", "HEAD"], job.io_timeout)
+class _Checkout(NamedTuple):
+    head: str
+    root: str        # the top of the worktree: the checkout may be a directory inside it
+
+
+def _checkout_of(job: _Job) -> _Checkout | None:
+    """The commit the checkout stands on and the worktree it is in, or None when it is not a git
+    checkout. A git that cannot be run or outlasts the wait is _Infra: that says nothing about
+    which commit it stands on."""
+    run = _spawn(["git", "-C", job.checkout, "rev-parse", "HEAD", "--show-toplevel"], job.io_timeout)
     if run.timed_out or run.code is None:
         raise _Infra("git rev-parse %s" % ("ran past %ss" % job.io_timeout if run.timed_out
                                            else "could not be run: %s" % run.err.strip()[-300:]))
-    return run.out.decode("utf-8", "replace").strip() if run.code == 0 else None
+    lines = run.out.decode("utf-8", "replace").splitlines()
+    return _Checkout(lines[0], lines[1]) if run.code == 0 and len(lines) == 2 else None
 
 
 def build_brief(head_sha: str, base: str) -> str:
@@ -197,6 +258,28 @@ def build_brief(head_sha: str, base: str) -> str:
 _ATTEMPT_KEYS = ("reviewer", "reason", "output", "exit_code", "stderr_tail", "model")
 
 
+def _sound(data: dict, code: int) -> bool:
+    """Whether the chain's result is plainly a Codex-only one and agrees with its own exit code:
+    one Codex attempt, answered exactly when the result names Codex, with a verdict, and exit 0.
+    A malformed value raises KeyError or TypeError; the caller counts that as unsound."""
+    reviewer, output, parsed, attempts = (data[k] for k in ("reviewer", "output", "parsed", "attempts"))
+    if not (isinstance(attempts, list) and len(attempts) == 1 and isinstance(attempts[0], dict)
+            and all(k in attempts[0] for k in _ATTEMPT_KEYS)):
+        return False
+    a = attempts[0]
+    answered = reviewer == "codex"
+    word = None if parsed is None else parsed["word"]
+    return (reviewer in ("codex", "none")
+            and a["reviewer"] == "codex" and a["model"] is None
+            and isinstance(a["output"], str) and isinstance(a["stderr_tail"], str)
+            and (a["exit_code"] is None or type(a["exit_code"]) is int)
+            and (a["reason"] == "answered") == answered
+            and (answered or a["reason"] in CODEX_FAILURES)
+            and (word in EXIT_FOR_VERDICT) == answered
+            and (code == 0) == answered
+            and output == (a["output"] if answered else ""))
+
+
 def _chain_result(run: _Out) -> dict:
     """The chain's JSON, once it is plainly a Codex-only result; else _Infra. A child that
     crashed, was killed or printed something else says nothing about Codex, so it is no outage."""
@@ -206,16 +289,11 @@ def _chain_result(run: _Out) -> dict:
         raise _Infra("the chain exited %s: %s" % (run.code, run.err.strip()[-300:]))
     try:
         data = json.loads(run.out.decode("utf-8"))
-        reviewer, output, parsed, attempts = (data[k] for k in ("reviewer", "output", "parsed", "attempts"))
-        word = None if parsed is None else parsed["word"]
-        sound = (reviewer in ("codex", "none") and isinstance(output, str)
-                 and (word is None) == (reviewer == "none") and (word is None or word in EXIT_FOR_VERDICT)
-                 and isinstance(attempts, list) and attempts
-                 and all(isinstance(a, dict) and all(k in a for k in _ATTEMPT_KEYS) for a in attempts))
+        sound = _sound(data, run.code)
     except (ValueError, KeyError, TypeError) as exc:
         raise _Infra("the chain printed no result I can read: %s: %s" % (type(exc).__name__, exc))
     if not sound:
-        raise _Infra("the chain printed a result that is not a Codex-only one")
+        raise _Infra("the chain printed a result that is not a consistent Codex-only one")
     return data
 
 
@@ -374,12 +452,14 @@ def _prepare(job: _Job) -> _Pr | ReviewResult:
         if not _is_the_pr(seen, job):
             return _refused("gh answered with %s (number %d), not pull request %d of %s"
                             % (seen.url, seen.number, job.pr, job.repo))
-        if _checkout_head(job) != seen.head:
+        checkout = _checkout_of(job)
+        if checkout is None or checkout.head != seen.head:
             return _refused("the HEAD of %s is not the head of the PR, %s" % (job.checkout, seen.head))
     except _Infra as exc:
         return _failed(str(exc))
-    if Path(os.path.realpath(_reviews_dir())).is_relative_to(os.path.realpath(job.checkout)):
-        return _failed("the reviews directory %s is inside the checkout %s" % (_reviews_dir(), job.checkout))
+    if Path(os.path.realpath(_reviews_dir())).is_relative_to(os.path.realpath(checkout.root)):
+        return _failed("the reviews directory %s is inside the worktree of the checkout, %s"
+                       % (_reviews_dir(), checkout.root))
     return seen
 
 
@@ -403,7 +483,7 @@ def _keep_and_post(job: _Job, seen: _Pr, chain: dict) -> ReviewResult:
     try:
         try:
             live = _read_pr(job)
-            standing_on = _checkout_head(job)
+            checkout = _checkout_of(job)
             number, path = claim_round(pr_dir)
         except (_Infra, OSError) as exc:
             return _failed("nothing claimed: %s" % exc)
@@ -417,7 +497,7 @@ def _keep_and_post(job: _Job, seen: _Pr, chain: dict) -> ReviewResult:
                               "reviewer": a["reviewer"], "reason": a["reason"], "exit_code": a["exit_code"]}
                              for a in attempts])
             write_out(path.with_suffix(".out"), _out_text(chain))
-            if (live.head, live.base, standing_on) != (seen.head, seen.base, seen.head):
+            if (live.head, live.base, checkout and checkout.head) != (seen.head, seen.base, seen.head):
                 # the PR moved, or the checkout did: either way the head named is not the head read
                 status, exit_code = "head-moved", EXIT_MOVED
             elif verdict is None:

@@ -33,7 +33,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import boss_review as br  # noqa: E402
 import policy  # noqa: E402
-from hermetic import Sandbox  # noqa: E402
+from hermetic import Sandbox, alive  # noqa: E402
 
 REPO = "Owner/Repo"
 PR = 5
@@ -405,6 +405,7 @@ class GhFailures(Base):
             "a head that is not a sha": {"patch": {"headRefOid": None}},
             "a base that is not a string": {"patch": {"baseRefName": 7}},
             "a number that is a string": {"patch": {"number": "5"}},
+            "a url that does not parse": {"patch": {"url": "https://[broken"}},
         }
         for what, entry in cases.items():
             with self.subTest(what=what):
@@ -722,6 +723,17 @@ class Privacy(Base):
         self.assertEqual(list(outside.iterdir()), [], "nothing was written through the link")
         self.assertEqual(oct(mode(outside)), oct(0o755), "its mode was not changed")
 
+    def test_a_reviews_directory_in_the_worktree_is_refused_when_the_checkout_is_a_subdirectory(self):
+        sub = self.checkout / "src"
+        sub.mkdir()
+        inside = self.checkout / ".claude-config"
+        inside.mkdir()
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(inside)}):
+            self.assertEqual(self.review(checkout=sub), INFRA)
+        self.assertEqual(self.sb.calls_of("codex"), [])
+        self.assertEqual(self.comments(), [])
+        self.assertEqual(list(inside.iterdir()), [])
+
     def test_a_reviews_directory_inside_the_checkout_is_refused_before_codex_is_asked(self):
         inside = self.checkout / ".claude-config"
         inside.mkdir()
@@ -774,8 +786,8 @@ class Concurrency(Base):
                                             lambda: self.review(author="Quick"))
         threads[0].start()
         deadline = time.monotonic() + 20
-        while not self.sb.calls_of("codex") and time.monotonic() < deadline:
-            time.sleep(0.02)                                   # the slow review has asked Codex
+        while not (self.sb.side / "first-codex").exists() and time.monotonic() < deadline:
+            time.sleep(0.02)                                   # the slow review holds the slow turn
         threads[1].start()
         for t in threads:
             t.join()
@@ -788,12 +800,11 @@ class Concurrency(Base):
     def test_a_rounds_ts_is_when_it_was_claimed_even_when_it_waited_for_the_lock(self):
         # The run that reaches the lock first is made to dawdle, so the other claims round 1 first.
         self.codex(answer="VERDICT: GO")
-        ticks, first = itertools.count(1), []
+        ticks, looks = itertools.count(1), itertools.count()
         real_open_lock = br.open_lock
 
         def dawdling_open_lock(*args):
-            if not first:
-                first.append(True)
+            if next(looks) == 0:                  # next() on a count is atomic: exactly one run dawdles
                 time.sleep(1)
             return real_open_lock(*args)
         patches = (mock.patch.object(br, "open_lock", dawdling_open_lock),
@@ -875,6 +886,54 @@ class ChainChild(Base):
                 with self.fake_chain("import sys\nsys.stdout.write(%r)\n" % out):
                     self.assertInfraBeforeAnyClaim()
 
+    GOOD = {"reviewer": "codex", "output": "VERDICT: GO", "parsed": {"word": "GO", "reason": "ok"},
+            "attempts": [{"reviewer": "codex", "reason": "answered", "output": "VERDICT: GO",
+                          "exit_code": 0, "stderr_tail": "", "model": None}]}
+
+    def stand_in(self, code=0, **over):
+        """A chain that prints GOOD with `over` applied to it, then exits with `code`."""
+        data = json.loads(json.dumps(self.GOOD))
+        for key, value in over.items():
+            if key.startswith("attempt_"):
+                data["attempts"][0][key[len("attempt_"):]] = value
+            else:
+                data[key] = value
+        return self.fake_chain("import sys\nsys.stdout.write(%r)\nsys.exit(%d)\n" % (json.dumps(data), code))
+
+    def test_a_consistent_result_from_a_stand_in_chain_is_accepted(self):
+        self.gh.configure()
+        with self.stand_in():
+            self.assertEqual(self.review().exit_code, 0)
+        self.assertEqual(len(self.comments()), 1)
+
+    def test_a_result_that_contradicts_itself_or_its_exit_code_is_exit_seven_before_any_claim(self):
+        none = {"reviewer": "none", "output": "", "parsed": None, "attempt_reason": "timeout",
+                "attempt_exit_code": None, "attempt_output": ""}
+        cases = {
+            "a GO from a child that exited 1": (1, {}),
+            "no reviewer from a child that exited 0": (0, none),
+            "no reviewer yet an answered attempt": (1, dict(none, attempt_reason="answered")),
+            "a Codex GO whose attempt timed out": (0, {"attempt_reason": "timeout"}),
+            "a Codex GO with no parsed verdict": (0, {"parsed": None}),
+            "a verdict for no reviewer": (1, dict(none, parsed={"word": "GO", "reason": "x"})),
+            "a reason that is not in the closed set": (0, {"attempt_reason": "fine"}),
+            "an answer that is not the attempt's": (0, {"output": "VERDICT: NO-GO"}),
+            "two attempts": (0, {"attempts": [self.GOOD["attempts"][0]] * 2}),
+            "no attempt": (0, {"attempts": []}),
+            "a fallback's attempt": (0, {"attempt_reviewer": "haiku", "attempt_model": "claude-haiku"}),
+            "a model on a Codex attempt": (0, {"attempt_model": "x"}),
+            "an exit code that is a string": (0, {"attempt_exit_code": "0"}),
+            "an exit code that is a bool": (0, {"attempt_exit_code": True}),
+            "a stderr tail that is a number": (0, {"attempt_stderr_tail": 5}),
+            "an attempt output that is a list": (0, {"attempt_output": ["x"]}),
+            "a verdict word that is a list": (0, {"parsed": {"word": ["GO"], "reason": "x"}}),
+        }
+        for what, (code, over) in cases.items():
+            with self.subTest(what=what):
+                self.setUp_clean()
+                with self.stand_in(code, **over):
+                    self.assertInfraBeforeAnyClaim()
+
     def test_a_child_that_exits_with_anything_but_zero_or_one_is_exit_seven(self):
         good = json.dumps({"reviewer": "none", "output": "", "parsed": None, "attempts": [
             {"reviewer": "codex", "reason": "absent", "output": "", "exit_code": None,
@@ -888,6 +947,20 @@ class ChainChild(Base):
             started = time.monotonic()
             self.assertInfraBeforeAnyClaim()
             self.assertLess(time.monotonic() - started, 15)
+
+    def test_a_wedged_chain_takes_a_reviewer_in_a_session_of_its_own_down_with_it(self):
+        pid_file = self.sb.root / "reviewer.pid"
+        body = ("import subprocess, time\n"
+                "kid = subprocess.Popen(['sleep', '300'], start_new_session=True)\n"
+                "open(%r, 'w').write(str(kid.pid))\n"
+                "time.sleep(60)\n" % str(pid_file))
+        with self.fake_chain(body), mock.patch.object(policy, "REVIEW_CHAIN_SLACK", 1):
+            self.assertInfraBeforeAnyClaim()
+        pid = int(pid_file.read_text())
+        deadline = time.monotonic() + 10
+        while alive(pid) and time.monotonic() < deadline:
+            time.sleep(0.1)
+        self.assertFalse(alive(pid), "the reviewer outlived the chain that started it")
 
     def test_the_chain_is_asked_for_codex_only_whole_word_go_no_go_and_strict(self):
         recorded = self.sb.root / "chain-argv.json"
@@ -925,6 +998,11 @@ class CommandLine(Base):
                 self.assertEqual(r.returncode, exit_code, r.stderr)
                 self.assertIn(str(self.round_file(1)), r.stdout)
                 self.assertEqual(r.stdout.count("\n"), 1)
+
+    def test_a_url_that_does_not_parse_is_infrastructure_for_the_command_not_a_usage_mistake(self):
+        self.gh.set_pr(url="https://[broken")
+        r = self.run_cli(*self.full())
+        self.assertEqual((r.returncode, r.stdout), (7, ""), r.stderr)
 
     def test_a_failure_before_any_round_prints_nothing_on_stdout_and_says_why_on_stderr(self):
         self.gh.configure(view=[{"rc": 1}])
