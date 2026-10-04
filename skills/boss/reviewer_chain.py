@@ -130,7 +130,11 @@ def _reason(lines: list[str]) -> str:
 
 
 def _check_words(words: tuple[str, ...]) -> None:
-    """Refuse a vocabulary that would match any `VERDICT:` line (no words, or a blank one)."""
+    """Refuse a vocabulary that would match any `VERDICT:` line (no words, or a blank one).
+
+    "Blank" is Python's `strip()`, wider than the `_SPACE_CLASS` that matching uses: a word made
+    only of no-break or control spaces is a caller's mistake, and refusing it is the safe side.
+    """
     if not words or any(not w.strip() for w in words):
         raise ValueError("words must be a non-empty list of non-blank verdict words: %r" % (tuple(words),))
 
