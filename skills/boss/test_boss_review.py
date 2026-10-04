@@ -1011,6 +1011,46 @@ class ChainChild(Base):
         self.assertFalse([a for a in argv if a.startswith("--fallback-")])
 
 
+class OddWorktreeNames(Base):
+    """A worktree may sit in a directory whose name is any bytes but NUL and "/": git prints the path
+    as it is, and the review must read it back as it is."""
+    NAMES = {"bytes that are not text": b"odd-\xff-name", "a newline": b"odd-\nname",
+             "a unicode line separator": "odd-\u2028name".encode()}
+
+    def odd_checkout(self, name):
+        odd = Path(os.fsdecode(os.fsencode(self.sb.work) + b"/" + name))
+        odd.mkdir()
+        git(self.sb, odd, "init", "-q")
+        git(self.sb, odd, "commit", "-q", "--allow-empty", "-m", "the PR head")
+        self.gh = Gh(self.sb, git(self.sb, odd, "rev-parse", "HEAD"))
+        return odd
+
+    def test_a_reviews_directory_inside_such_a_worktree_is_refused_before_codex_is_asked(self):
+        for what, name in self.NAMES.items():
+            with self.subTest(name=what):
+                self.setUp_clean()
+                odd = self.odd_checkout(name)
+                inside = odd / ".claude-config"
+                inside.mkdir()
+                sub = odd / "src"
+                sub.mkdir()
+                self.codex(answer="VERDICT: GO")
+                with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(inside)}):
+                    self.assertEqual(self.review(checkout=sub), INFRA)
+                self.assertEqual(self.sb.calls_of("codex"), [])
+                self.assertEqual(self.comments(), [])
+                self.assertEqual(list(inside.iterdir()), [])
+
+    def test_a_review_from_such_a_worktree_is_posted_like_any_other(self):
+        for what, name in self.NAMES.items():
+            with self.subTest(name=what):
+                self.setUp_clean()
+                odd = self.odd_checkout(name)
+                self.codex(answer="VERDICT: GO")
+                self.assertEqual(self.review(checkout=odd).exit_code, 0)
+                self.assertEqual(len(self.comments()), 1)
+
+
 class StopBelow(unittest.TestCase):
     """What the timeout stops is the processes it saw below the chain, each by what it was then:
     a pid is reused once its process is gone, so a pid alone is not enough to signal."""
