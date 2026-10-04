@@ -50,6 +50,20 @@ REVIEW_FALLBACK_TIMEOUT = 600
 REVIEW_IO_TIMEOUT = 60
 REVIEW_CHAIN_SLACK = 30
 
+# What a PR review publishes of the reviewer's findings: at most this many `FINDING:` lines, each cut to
+# this many characters (the prefix counts).
+REVIEW_FINDINGS_MAX = 20
+REVIEW_FINDING_CHARS = 300
+REVIEW_FINDING_READ = 4000     # a line is limited to this many characters before the matching, so one without end cannot stall it
+
+# The PR text in the brief. The prompt reaches `codex` as one argv element and Linux refuses one of
+# 131072 bytes, so the title, body and diff are cut (by UTF-8 bytes) and the whole brief stays under
+# REVIEW_BRIEF_MAX. The cut limits the copy in the brief, not the review: the reviewer reads the checkout.
+REVIEW_TITLE_MAX = 1_000
+REVIEW_BODY_MAX = 20_000
+REVIEW_DIFF_MAX = 80_000
+REVIEW_BRIEF_MAX = 120_000
+
 
 def flag_for(ctx, cost, role):
     """Flags for a session with `ctx` tokens of context and `cost` cost-units
