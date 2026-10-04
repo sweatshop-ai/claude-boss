@@ -6,7 +6,7 @@
 
 **Blocked by:** 02 (PR review becomes a command)
 
-**Claimed by:** Anouk 2026-10-04 11:00
+**Claimed by:** Amara 2026-10-04 11:01
 
 **Status:** in-progress
 
