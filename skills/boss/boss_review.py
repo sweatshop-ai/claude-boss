@@ -301,8 +301,14 @@ def _checkout_of(job: _Job) -> _Checkout | None:
     if run.timed_out or run.code is None:
         raise _Infra("git rev-parse %s" % ("ran past %ss" % job.io_timeout if run.timed_out
                                            else "could not be run: %s" % run.err.strip()[-300:]))
-    lines = run.out.decode("utf-8", "replace").splitlines()
-    return _Checkout(lines[0], lines[1]) if run.code == 0 and len(lines) == 2 else None
+    # HEAD is the first line. The rest is the path and the newline git ends it with: a path may hold
+    # a newline or bytes that are not text, so it is cut at that one newline and decoded as the
+    # filesystem does, never split into lines or decoded with replacement.
+    head, _, rest = run.out.partition(b"\n")
+    root = rest[:-1] if rest.endswith(b"\n") else rest
+    if run.code != 0 or not root or not _SHA.fullmatch(head.decode("ascii", "replace")):
+        return None
+    return _Checkout(head.decode("ascii"), os.fsdecode(root))
 
 
 def build_brief(head_sha: str, base: str) -> str:
