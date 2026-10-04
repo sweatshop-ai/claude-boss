@@ -5,6 +5,8 @@ One place decides which reviewer answers, so `boss-run` and every other caller
 cannot drift apart. Standard library only.
 
     run_chain(prompt, words=..., fallback=HAIKU) -> Result
+    claude_argv(fallback, prompt) -> argv        the fallback's `claude` call, built in this one place
+    fallback_flags(fallback) -> flags            the command-line flags that rebuild a Fallback
 
 `Result.reviewer` is "codex", the fallback's name, or "none". Every attempt is
 kept on `Result.attempts` with a reason from a closed set:
@@ -72,6 +74,7 @@ class Fallback:
     timeout: int = DEFAULT_TIMEOUT
     allowed_tools: tuple[str, ...] | None = None
     when: tuple[str, ...] = ("absent", "timeout", "error", "noverdict")
+    extra_args: tuple[str, ...] = ()     # more `claude` flags, put ahead of `-p` (see claude_argv)
 
     def __post_init__(self):
         if not self.name.strip() or self.name.strip().lower() in RESERVED_NAMES:
@@ -79,6 +82,10 @@ class Fallback:
                              % (self.name, " and ".join(sorted(RESERVED_NAMES))))
         if self.allowed_tools is not None and not self.allowed_tools:
             raise ValueError("allowed_tools=() would read as no restriction; use None for that")
+        if not isinstance(self.extra_args, tuple) or not all(isinstance(a, str) for a in self.extra_args):
+            raise ValueError("extra_args must be a tuple of strings: %r" % (self.extra_args,))
+        if "--" in self.extra_args:
+            raise ValueError("extra_args cannot hold a bare --: it would end option parsing before -p")
         unknown = set(self.when) - CODEX_FAILURES
         if unknown:
             raise ValueError("when names reasons Codex cannot fail with: %s" % sorted(unknown))
@@ -300,13 +307,22 @@ def _codex(prompt, effort, timeout, words, strict) -> _Turn:
         Path(last).unlink(missing_ok=True)
 
 
+def claude_argv(fb: Fallback, prompt: str) -> list[str]:
+    """The `claude` call for a fallback: the one place its argv is built, so that whatever checks
+    the call (boss_review.py --check-fallback) runs the argv a review runs.
+
+    `--allowedTools`, `--tools` and `--mcp-config` take a variable number of values, so everything
+    but the model and the prompt goes ahead of `-p`, which ends them: after one of them, the prompt
+    would be read as one more tool name.
+    """
+    tools = ["--allowedTools", ",".join(fb.allowed_tools)] if fb.allowed_tools else []
+    return ["claude", *tools, *fb.extra_args, "-p", "--model", fb.model, prompt]
+
+
 def _claude(prompt, fb: Fallback, words, strict) -> _Turn:
     if shutil.which("claude") is None:
         return _Turn(Attempt(fb.name, "absent", "", None, "", fb.model), None)
-    # --allowedTools takes a variable number of values, so it goes ahead of -p:
-    # after it, the prompt would be read as one more tool name.
-    tools = ["--allowedTools", ",".join(fb.allowed_tools)] if fb.allowed_tools else []
-    run = _run(["claude", *tools, "-p", "--model", fb.model, prompt], fb.timeout)
+    run = _run(claude_argv(fb, prompt), fb.timeout)
     return _turn(fb.name, fb.model, run.out, run, words, strict)
 
 
@@ -332,6 +348,33 @@ def _csv(text: str) -> tuple[str, ...]:
     return tuple(part.strip() for part in text.split(",") if part.strip())
 
 
+def _json_strings(text: str) -> tuple[str, ...]:
+    try:
+        value = json.loads(text)
+    except ValueError:
+        value = None
+    if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
+        raise argparse.ArgumentTypeError("must be a JSON list of strings, e.g. '[\"--tools\", \"Read\"]': %r" % text)
+    return tuple(value)
+
+
+def fallback_flags(fb: Fallback) -> list[str]:
+    """`fb` as the command-line flags that rebuild it, for a caller that starts this command as a
+    child process and so cannot hand it a `Fallback`. Every field is carried, so that none (the
+    confinement in `extra_args`, above all) is dropped on the way; what the flags cannot carry
+    exactly is refused, never changed."""
+    flags = ["--fallback-name", fb.name, "--fallback-model", fb.model,
+             "--fallback-timeout", str(fb.timeout), "--fallback-when", ",".join(fb.when)]
+    if fb.allowed_tools:
+        tools = ",".join(fb.allowed_tools)
+        if _csv(tools) != tuple(fb.allowed_tools):
+            raise ValueError("--fallback-tools is one comma list and cannot carry %r" % (fb.allowed_tools,))
+        flags += ["--fallback-tools", tools]
+    if fb.extra_args:
+        flags += ["--fallback-extra-args", json.dumps(list(fb.extra_args))]
+    return flags
+
+
 def _parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
         prog="reviewer_chain.py",
@@ -351,6 +394,8 @@ def _parser() -> argparse.ArgumentParser:
     ap.add_argument("--fallback-tools", type=_csv, help="comma list for `claude --allowedTools`")
     ap.add_argument("--fallback-when", type=_csv, metavar="REASONS",
                     help="Codex reasons that let the fallback run (default: all four)")
+    ap.add_argument("--fallback-extra-args", type=_json_strings, metavar="JSON",
+                    help="more `claude` flags, as one JSON list of strings, put ahead of -p")
     ap.add_argument("--no-fallback", action="store_true", help="Codex only (also the default)")
     ap.add_argument("--strict", action="store_true",
                     help="two usable VERDICT lines that disagree are no verdict")
@@ -362,7 +407,7 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
     options = {"--fallback-name": args.fallback_name, "--fallback-model": args.fallback_model,
                "--fallback-timeout": args.fallback_timeout, "--fallback-tools": args.fallback_tools,
-               "--fallback-when": args.fallback_when}
+               "--fallback-when": args.fallback_when, "--fallback-extra-args": args.fallback_extra_args}
     given = [flag for flag, value in options.items() if value is not None]
     if args.no_fallback and given:
         ap.error("--no-fallback conflicts with %s" % ", ".join(given))
@@ -374,6 +419,8 @@ def main(argv: list[str] | None = None) -> int:
         fallback = None
         if args.fallback_name:
             extra = {} if args.fallback_when is None else {"when": args.fallback_when}
+            if args.fallback_extra_args is not None:
+                extra["extra_args"] = args.fallback_extra_args
             fallback = Fallback(args.fallback_name, args.fallback_model,
                                 DEFAULT_TIMEOUT if args.fallback_timeout is None else args.fallback_timeout,
                                 args.fallback_tools, **extra)
