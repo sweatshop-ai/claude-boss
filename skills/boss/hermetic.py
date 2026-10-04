@@ -8,7 +8,8 @@ money, touch the network, or run something on this machine. So the sandbox build
 the child's environment from scratch: PATH is a stubs directory followed by a
 tools directory holding symlinks to a short whitelist of real binaries. `codex`,
 `claude`, `gh` and `tmux` exist only as the stubs a test writes; if a test writes
-none, they do not exist at all.
+none, they do not exist at all. A test that needs one more real tool, such as `git`, names it
+in `Sandbox(extra_tools=...)`; the four above are refused there.
 
 Every stub logs its argv, its stdin and its working directory under calls/ before
 doing anything else, so a test can see exactly how the reviewer was called and from

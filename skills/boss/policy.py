@@ -43,10 +43,12 @@ RUNG_EVERY = 120
 STOP_MIN = 24 * 60
 
 # PR review (boss_review.py), seconds. A Codex review of a plan took 8 minutes, so Codex gets 600;
-# the fallback (03 and 08) gets its own 600; a `gh` call or the wait for a PR's lock gets 60.
+# the fallback reviewer, once there is one, gets a wait of its own, also 600; a `gh` or `git` call or
+# the wait for a PR's lock gets 60; the review's child process gets 30 past Codex's wait to wind up.
 REVIEW_CODEX_TIMEOUT = 600
 REVIEW_FALLBACK_TIMEOUT = 600
 REVIEW_IO_TIMEOUT = 60
+REVIEW_CHAIN_SLACK = 30
 
 
 def flag_for(ctx, cost, role):

@@ -9,8 +9,9 @@ itself. It holds a marker under `pm/.boss-sessions/` and a track.
 (`pm/<track>.goal.md`).
 
 **Policy**: the steering numbers a boss and its workers act on — context
-bands, cost lines, escalation rungs. One module, `skills/boss/policy.py`; the
-prose quotes it and `test_policy.py` keeps the quotes true.
+bands, cost lines, escalation rungs, review waits. One module,
+`skills/boss/policy.py`; the prose quotes it and `test_policy.py` keeps the
+quotes true.
 
 **Transcript**: a session's append-only JSONL log. Context, cost per turn and
 the pin are read from its last 4 MB by one module, `skills/boss/transcript.py`.
@@ -59,10 +60,12 @@ it run. Optional; without one the chain is Codex only.
 **Review round**: one run of `skills/boss/boss_review.py` on one PR head. The
 review runs first (Codex only, in a child process standing in the checkout);
 the round is claimed at the end of the run, under the PR's lock, whatever the
-outcome, so numbers follow posting order and each comment's number is its
-file's. Kept under `$CLAUDE_CONFIG_DIR/pm/reviews/<owner>/<repo>/pr<N>/`, never
-in a checkout, private (0700 and 0600). Its status is `posted`, `head-moved`
-(the head or the base moved during the review), `no-verdict` or `post-failed`.
+review said (GO, NO-GO, nothing, a head that moved), so numbers follow posting
+order and each comment's number is its file's. A failure before the claim
+leaves nothing behind. Kept under
+`$CLAUDE_CONFIG_DIR/pm/reviews/<owner>/<repo>/pr<N>/`, never in a checkout,
+private (0700 and 0600). Its status is `posted`, `head-moved` (the head or the
+base moved during the review), `no-verdict` or `post-failed`.
 
 **Round record**: `round<NN>.json`, what a gate reads. A round is `posted` only
 after `gh pr comment` returned success, so a comment on the PR with no `posted`
