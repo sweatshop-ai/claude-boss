@@ -25,6 +25,7 @@ import fcntl
 import json
 import os
 import re
+import select
 import signal
 import stat
 import subprocess
@@ -39,7 +40,7 @@ from typing import NamedTuple
 
 import boss_store
 import policy
-from reviewer_chain import CODEX_FAILURES, STDERR_TAIL, TERM_GRACE, _snapshot, _stop
+from reviewer_chain import CODEX_FAILURES, GO_NOGO, STDERR_TAIL, TERM_GRACE, _parse, _snapshot, _stop
 
 HERE = Path(__file__).resolve().parent
 CHAIN = HERE / "reviewer_chain.py"
@@ -102,51 +103,79 @@ class _Out(NamedTuple):
     timed_out: bool
 
 
-def _descendants(pid: int) -> list[int]:
-    """Every process below `pid`, read from /proc: the reviewer the chain started lives in a session
-    of its own, so the chain's process group does not reach it. Empty where there is no /proc."""
-    parent_of = {}
+class _Seen(NamedTuple):
+    """A process as it was when seen: a pid alone is not one, since a pid is reused once its
+    process is gone. `start` is when it started (field 22 of /proc/<pid>/stat, in ticks since boot)."""
+    pid: int
+    start: str
+
+
+def _stat_fields(pid: int) -> list[str] | None:
+    """The fields of /proc/<pid>/stat after the command name (state first, so field n is [n - 3]);
+    None when the process is gone or there is no /proc."""
+    try:
+        return Path("/proc/%d/stat" % pid).read_text().rsplit(")", 1)[1].split()
+    except (OSError, IndexError):
+        return None
+
+
+def _start_time(pid: int) -> str | None:
+    fields = _stat_fields(pid)
+    return fields[19] if fields and len(fields) > 19 else None
+
+
+def _below(pid: int) -> list[_Seen]:
+    """Every process below `pid`: the reviewer the chain started lives in a session of its own, so
+    the chain's process group does not reach it. Empty where there is no /proc. A process started
+    after this read is not in it."""
+    table = {}
     for entry in os.listdir("/proc") if os.path.isdir("/proc") else ():
-        if entry.isdigit():
-            try:
-                fields = Path("/proc/%s/stat" % entry).read_text().rsplit(")", 1)[1].split()
-                parent_of[int(entry)] = int(fields[1])
-            except (OSError, ValueError, IndexError):
-                continue
+        fields = _stat_fields(int(entry)) if entry.isdigit() else None
+        if fields and len(fields) > 19:
+            table[int(entry)] = (int(fields[1]), fields[19])
     found, frontier = [], [pid]
     while frontier:
-        frontier = [p for p, parent in parent_of.items() if parent in frontier]
-        found += frontier
+        frontier = [p for p, (parent, _) in table.items() if parent in frontier]
+        found += [_Seen(p, table[p][1]) for p in frontier]
     return found
 
 
-def _stop_groups(pids: list[int]) -> None:
-    """TERM, then KILL, the process group of each of `pids` (never this program's own)."""
-    groups = set()
-    for pid in pids:
-        try:
-            groups.add(os.getpgid(pid))
-        except ProcessLookupError:
-            pass
-    groups.discard(os.getpgrp())
-    for sig in (signal.SIGTERM, signal.SIGKILL):
-        deadline = time.monotonic() + (TERM_GRACE if sig == signal.SIGTERM else 0)
-        while True:
-            groups = {g for g in groups if _signal_group(g, sig if time.monotonic() >= deadline else 0)}
-            if not groups or time.monotonic() >= deadline:
-                break
-            time.sleep(0.05)
-
-
-def _signal_group(group: int, sig: int) -> bool:
-    """Send `sig` to a group; whether it is still there. Signal 0 only asks."""
+def _hold(seen: _Seen) -> int | None:
+    """A pidfd for `seen`, only if that process is still the one that was seen. A pidfd names the
+    process, not the number, so what is signalled through it cannot be a later holder of the pid;
+    the start time read after it was opened says it was the right process when it was."""
     try:
-        os.killpg(group, sig)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return False
-    return True
+        fd = os.pidfd_open(seen.pid)
+    except (AttributeError, OSError):          # no pidfd here, or the process is gone
+        return None
+    if _start_time(seen.pid) == seen.start:
+        return fd
+    os.close(fd)
+    return None
+
+
+def _stop_below(seen: list[_Seen]) -> None:
+    """TERM, then KILL, each of `seen` that is still the process that was seen."""
+    held = [fd for fd in map(_hold, seen) if fd is not None]
+    try:
+        for sig in (signal.SIGTERM, signal.SIGKILL):
+            for fd in held:
+                try:
+                    signal.pidfd_send_signal(fd, sig)
+                except ProcessLookupError:
+                    pass
+            poller = select.poll()
+            for fd in held:
+                poller.register(fd, select.POLLIN)       # readable once the process has exited
+            deadline = time.monotonic() + TERM_GRACE
+            while held and (left := deadline - time.monotonic()) > 0:
+                gone = {fd for fd, _ in poller.poll(left * 1000)}
+                held = [fd for fd in held if fd not in gone]
+                for fd in gone:
+                    poller.unregister(fd)
+    finally:
+        for fd in held:
+            os.close(fd)
 
 
 def _spawn(argv: list[str], timeout: float, cwd: str | None = None) -> _Out:
@@ -161,9 +190,9 @@ def _spawn(argv: list[str], timeout: float, cwd: str | None = None) -> _Out:
         try:
             code, timed_out = proc.wait(timeout=timeout), False
         except subprocess.TimeoutExpired:
-            below = _descendants(proc.pid)       # before the stop: afterwards they belong to init
+            below = _below(proc.pid)             # before the stop: afterwards they belong to init
             _stop(proc)
-            _stop_groups(below)
+            _stop_below(below)
             code, timed_out = None, True
         except BaseException:
             _stop(proc)
@@ -277,7 +306,17 @@ def _sound(data: dict, code: int) -> bool:
             and (answered or a["reason"] in CODEX_FAILURES)
             and (word in EXIT_FOR_VERDICT) == answered
             and (code == 0) == answered
-            and output == (a["output"] if answered else ""))
+            and output == (a["output"] if answered else "")
+            and (not answered or _follows(word, a["output"])))
+
+
+def _follows(word: str, output: str) -> bool:
+    """Whether the answer carries `word` as its verdict, read as the chain read it (01's parser,
+    strict, whole words). The chain parsed the bytes with NULs removed and keeps the answer as it
+    was written, so a NUL inside a multi-byte character can leave no verdict here where the chain
+    found one: that result is refused (exit 7), not posted."""
+    found = _parse(output.replace("\0", ""), GO_NOGO, strict=True)
+    return found is not None and found.word == word
 
 
 def _chain_result(run: _Out) -> dict:
