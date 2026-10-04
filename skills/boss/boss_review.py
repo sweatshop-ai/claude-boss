@@ -708,6 +708,23 @@ def _clean_surrogates(text: str) -> str:
     return re.sub("[\ud800-\udc7f\udd00-\udfff]", "?", text)
 
 
+def _built_in_replaced(line: str) -> str:
+    """`line` with what the built-in classes match replaced by `[redacted]`. Every class is matched on
+    the line as it stands, never on one that another class has changed, and matches that overlap are
+    one: so an address that holds a token or an IP address goes whole, whatever the order of the classes."""
+    merged: list[list[int]] = []
+    for start, end in sorted(m.span() for pattern in _BUILT_IN for m in pattern.finditer(line)):
+        if merged and start < merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], end)
+        else:
+            merged.append([start, end])
+    out, at = [], 0
+    for start, end in merged:
+        out += [line[at:start], REDACTED]
+        at = end
+    return "".join(out) + line[at:]
+
+
 def redact(text: str) -> str:
     """`text` with what must not be published replaced by `[redacted]`, one line at a time. A line
     that a pattern of the site's hard-rules file matches becomes `[redacted]` whole (the extent of a
@@ -718,12 +735,7 @@ def redact(text: str) -> str:
     hits = _site_hits(lines, rules) if rules else [False] * len(lines)
     out = []
     for line, hit in zip(lines, hits):
-        if hit:
-            line = REDACTED
-        else:
-            for pattern in _BUILT_IN:
-                line = pattern.sub(REDACTED, line)
-        out.append(line)
+        out.append(REDACTED if hit else _built_in_replaced(line))
     return "\n".join(out)
 
 
@@ -749,31 +761,27 @@ def _written_out(line: str) -> str:
     return "".join(out)
 
 
-def _first_chars(line: str) -> tuple[str, bool]:
-    """The first characters of `line` that policy lets be read, and whether it was cut: a line without
-    end cannot stall the matching. A last chunk that the limit split goes too (at its last space), so that
-    no half token is left."""
-    if len(line) <= policy.REVIEW_FINDING_READ:
-        return line, False
-    head = line[:policy.REVIEW_FINDING_READ]
-    return (head.rsplit(" ", 1)[0] if " " in head else head), True
-
-
 def findings_block(text: str) -> str:
     """What is published of the reviewer's findings: an indented code block (a comment is rendered
     markdown, and an @mention, an image or a link in reviewer text is not to be live), or "" when there
     is no finding. Every `FINDING:` line is counted but only as many as policy allows are worked on.
-    Each is limited, redacted (one `redact` call, which works line by line), its hiding characters
-    written out, and cut to the length policy gives counting its `FINDING:`: the pass comes first,
-    so a cut cannot leave half of a secret."""
+    A line longer than policy lets be read is not matched and not shown, only its length: a site
+    pattern is judged on a whole line, so no line is ever shown from a part of it, and one without an
+    end cannot stall the matching. The others are redacted (one `redact` call, which works line by
+    line), have their hiding characters written out, and are cut to the length policy gives, counting
+    the `FINDING:`: the pass comes first, so a cut cannot leave half of a secret."""
     found = finding_lines(text)
     if not found:
         return ""
-    limited = [_first_chars(line) for line in found[:policy.REVIEW_FINDINGS_MAX]]
+    taken = found[:policy.REVIEW_FINDINGS_MAX]
+    whole = [line for line in taken if len(line) <= policy.REVIEW_FINDING_READ]
+    redacted = iter(redact("\n".join(whole)).split("\n") if whole else [])
     shown = []
-    for (_, was_cut), line in zip(limited, redact("\n".join(text for text, _ in limited)).split("\n")):
-        # the ellipsis goes on after the matching: a home path there would swallow it
-        line = _written_out(line) + ("\u2026" if was_cut else "")
+    for line in taken:
+        if len(line) > policy.REVIEW_FINDING_READ:
+            shown.append("    FINDING: [a line of %d characters, not shown]" % len(line))
+            continue
+        line = _written_out(next(redacted))
         if len(line) > policy.REVIEW_FINDING_CHARS:
             line = line[:policy.REVIEW_FINDING_CHARS - 1] + "\u2026"
         shown.append("    " + line)
