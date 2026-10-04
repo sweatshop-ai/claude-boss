@@ -1017,6 +1017,38 @@ class StopBelow(unittest.TestCase):
         br._stop_below([br._Seen(self.other.pid, self.start)])
         self.assertFalse(alive(self.other.pid))
 
+    def fds(self):
+        return len(os.listdir("/proc/self/fd"))
+
+    def test_the_stop_leaves_no_file_descriptor_open_after_a_process_that_gave_way_to_term(self):
+        before = self.fds()
+        br._stop_below([br._Seen(self.other.pid, self.start)])
+        self.assertFalse(alive(self.other.pid))
+        self.assertEqual(self.fds(), before)
+
+    def test_a_process_that_ignores_term_is_killed_after_the_grace_and_leaves_no_descriptor_open(self):
+        stubborn = subprocess.Popen(
+            [sys.executable, "-c", "import signal, time\nsignal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+             "print('ready', flush=True)\ntime.sleep(300)"], stdout=subprocess.PIPE, text=True)
+        self.addCleanup(lambda: (stubborn.kill(), stubborn.wait(), stubborn.stdout.close()))
+        self.assertEqual(stubborn.stdout.readline().strip(), "ready")
+        seen = br._Seen(stubborn.pid, br._start_time(stubborn.pid))
+        before = self.fds()
+        with mock.patch.object(br, "TERM_GRACE", 0.3):
+            started = time.monotonic()
+            br._stop_below([seen])
+        self.assertGreaterEqual(time.monotonic() - started, 0.3, "killed before the grace was over")
+        self.assertFalse(alive(stubborn.pid))
+        self.assertEqual(self.fds(), before)
+
+    def test_a_process_that_cannot_be_signalled_is_skipped_not_an_error(self):
+        before = self.fds()
+        with mock.patch.object(br, "TERM_GRACE", 0.2), \
+                mock.patch.object(br.signal, "pidfd_send_signal", side_effect=PermissionError):
+            br._stop_below([br._Seen(self.other.pid, self.start)])
+        self.assertTrue(alive(self.other.pid))
+        self.assertEqual(self.fds(), before)
+
     def test_a_process_that_is_gone_is_not_an_error(self):
         gone = subprocess.Popen(["true"])
         gone.wait()
