@@ -261,7 +261,9 @@ def _run(argv: list[str], timeout: int, keep_stdout: bool = True) -> _Run:
 
 def _turn(reviewer, model, output, run: _Run, words, strict) -> _Turn:
     """Decide the reason: a usable verdict beats everything, then timeout, error, noverdict."""
-    verdict = _parse(output, words, strict)
+    # bash's $(...) dropped NUL bytes, so the old script parsed what was left: RE\0JECT was REJECT.
+    # The attempt keeps the output as the reviewer wrote it.
+    verdict = _parse(output.replace("\0", ""), words, strict)
     if verdict:
         reason = "answered"
     elif run.timed_out:
@@ -283,7 +285,8 @@ def _codex(prompt, effort, timeout, words, strict) -> _Turn:
                     "-c", 'model_reasoning_effort="%s"' % effort, "-o", last, prompt], timeout,
                    keep_stdout=False)
         try:
-            output = Path(last).read_bytes().decode("utf-8", "replace")
+            with open(last, "rb") as f:
+                output = _read(f)
         except OSError:            # the answer file was removed: no answer, as `cat 2>/dev/null` saw it
             output = ""
         return _turn("codex", None, output, run, words, strict)
