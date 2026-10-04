@@ -6,6 +6,7 @@ Every threshold a boss or a worker acts on lives here, and only here:
   context bands   when a session's context calls for action, by role
   cost lines      when cost per turn calls for action
   escalation      the rungs at which a blocker on the owner is re-raised
+  review waits    how long a PR review waits on Codex, on the fallback, on gh and on its lock
 
     flag_for(ctx, cost, role) -> list of flags, e.g. ["CTX-SPLIT"]
     heavy(ctx, cost, role)    -> True past the first context or recycle line
@@ -18,7 +19,7 @@ checks that every quote still matches; change a number here and that test
 names each file to update.
 
 Units are tokens for context and priced cost-units for cost (see transcript.py
-for the weights), minutes for rungs.
+for the weights), minutes for rungs, seconds for review waits.
 """
 
 WORKER, BOSS = "worker", "boss"
@@ -40,6 +41,12 @@ COST_HEAVY, COST_RECYCLE = 60_000, 90_000
 RUNGS = (5, 15, 30, 60, 120)
 RUNG_EVERY = 120
 STOP_MIN = 24 * 60
+
+# PR review (boss_review.py), seconds. A Codex review of a plan took 8 minutes, so Codex gets 600;
+# the fallback (03 and 08) gets its own 600; a `gh` call or the wait for a PR's lock gets 60.
+REVIEW_CODEX_TIMEOUT = 600
+REVIEW_FALLBACK_TIMEOUT = 600
+REVIEW_IO_TIMEOUT = 60
 
 
 def flag_for(ctx, cost, role):

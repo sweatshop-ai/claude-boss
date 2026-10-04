@@ -10,8 +10,9 @@ tools directory holding symlinks to a short whitelist of real binaries. `codex`,
 `claude`, `gh` and `tmux` exist only as the stubs a test writes; if a test writes
 none, they do not exist at all.
 
-Every stub logs its argv and its stdin under calls/ before doing anything else,
-so a test can see exactly how the reviewer was called.
+Every stub logs its argv, its stdin and its working directory under calls/ before
+doing anything else, so a test can see exactly how the reviewer was called and from
+where.
 """
 import json
 import os
@@ -32,7 +33,7 @@ TOOLS = ("bash sh env jq date mkdir mktemp cat grep sed tr head tail rm timeout 
 # Names that must never resolve to a real binary inside the sandbox.
 FORBIDDEN = ("codex", "claude", "gh", "tmux")
 
-Call = namedtuple("Call", "argv stdin")
+Call = namedtuple("Call", "argv stdin cwd", defaults=(None,))
 
 
 def alive(pid):
@@ -49,7 +50,12 @@ def alive(pid):
 
 
 class Sandbox:
-    def __init__(self):
+    def __init__(self, extra_tools=()):
+        """`extra_tools`: further real binaries to put on the sealed PATH (a test that needs
+        `git` names it). The names in FORBIDDEN are refused, whoever asks."""
+        refused = set(extra_tools) & set(FORBIDDEN)
+        if refused:
+            raise AssertionError("the sandbox never carries the real %s" % ", ".join(sorted(refused)))
         self.root = Path(tempfile.mkdtemp(prefix="boss-run-sb-")).resolve()
         self.stubs = self.root / "stubs"
         self.tools = self.root / "tools"
@@ -63,7 +69,7 @@ class Sandbox:
                   self.work, self.tmp, self.side):
             d.mkdir()
         try:
-            for name in TOOLS:
+            for name in (*TOOLS, *extra_tools):
                 real = shutil.which(name)
                 if real is None:
                     raise RuntimeError("sandbox needs the real %r on PATH" % name)
@@ -95,7 +101,7 @@ class Sandbox:
 
     # ------------------------------------------------------------------ stubs ----
     def stub(self, name, *, answer=None, out="", err="", rc=0, hang=False, child=False,
-             delay=0, hang_after=False, ignore_term=False, detached=False):
+             delay=0, first_delay=0, hang_after=False, ignore_term=False, detached=False):
         """Write stubs/<name>, a bash script that logs its call, then behaves.
 
         answer  the reviewer's reply: written to the file after `-o` for codex,
@@ -105,6 +111,7 @@ class Sandbox:
         hang    sleep 300 after logging
         child   start `sleep 300 &`, record its pid in <root>/child.pid, then wait
         delay   sleep this many seconds after logging, before answering
+        first_delay  the same, on the stub's first call only (a slow review that starts first)
         hang_after  answer first, then sleep 300 (a reviewer that wrote its answer
                 and never exited)
         ignore_term  ignore SIGTERM, so only SIGKILL stops it (children inherit this)
@@ -120,14 +127,7 @@ class Sandbox:
                 else:
                     path.write_text(text if key == "answer" else text + "\n", encoding="utf-8")
                 files[key] = shlex.quote(str(path))
-        lines = [
-            "#!" + self._bash,
-            "R=" + shlex.quote(str(self.root)),
-            'ID="$(date +%%s%%N)-%s"' % name,
-            'if [ "$#" -gt 0 ]; then printf \'%s\\0\' "$@" > "$R/calls/$ID.argv"; '
-            'else : > "$R/calls/$ID.argv"; fi',
-            'cat > "$R/calls/$ID.stdin"',
-        ]
+        lines = self._prologue(name)
         if ignore_term:
             lines.append("trap '' TERM")
         if detached:
@@ -140,6 +140,8 @@ class Sandbox:
             lines.append("wait")
         if delay:
             lines.append("sleep %s" % delay)
+        if first_delay:      # mkdir is atomic: only the first call makes the marker
+            lines.append('if mkdir "$R/side/first-%s" 2>/dev/null; then sleep %s; fi' % (name, first_delay))
         if "out" in files:
             lines.append("cat %s" % files["out"])
         if "err" in files:
@@ -154,6 +156,28 @@ class Sandbox:
         if hang_after:
             lines.append("sleep 300")
         lines.append("exit %d" % rc)
+        return self._write_stub(name, lines)
+
+    def stub_script(self, name, body):
+        """Write stubs/<name>: the same logging prologue as `stub`, then `body` (bash).
+
+        For a stub whose behaviour is a script of its own, such as a `gh` that keeps a PR.
+        $R is the sandbox root and "$@" are the stub's arguments.
+        """
+        return self._write_stub(name, [*self._prologue(name), body])
+
+    def _prologue(self, name):
+        return [
+            "#!" + self._bash,
+            "R=" + shlex.quote(str(self.root)),
+            'ID="$(date +%%s%%N)-%s"' % name,
+            'if [ "$#" -gt 0 ]; then printf \'%s\\0\' "$@" > "$R/calls/$ID.argv"; '
+            'else : > "$R/calls/$ID.argv"; fi',
+            'pwd -P > "$R/calls/$ID.cwd"',
+            'cat > "$R/calls/$ID.stdin"',
+        ]
+
+    def _write_stub(self, name, lines):
         path = self.stubs / name
         path.write_text("\n".join(lines) + "\n", encoding="utf-8")
         path.chmod(0o755)
@@ -169,7 +193,9 @@ class Sandbox:
             stdin_file = argv_file.with_suffix(".stdin")
             stdin = (stdin_file.read_bytes().decode("utf-8", "surrogateescape")
                      if stdin_file.exists() else "")
-            found.append(Call(argv, stdin))
+            cwd_file = argv_file.with_suffix(".cwd")
+            cwd = cwd_file.read_text(encoding="utf-8").rstrip("\n") if cwd_file.exists() else None
+            found.append(Call(argv, stdin, cwd))
         return found
 
     # --------------------------------------------------------------- running ----
