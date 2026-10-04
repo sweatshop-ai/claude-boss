@@ -55,3 +55,21 @@ usable verdict always wins, whatever the exit status.
 **Fallback**: the spec of the model asked when Codex fails: a name, an exact
 model id, a timeout, an optional tool restriction, and which Codex reasons let
 it run. Optional; without one the chain is Codex only.
+
+**Review round**: one run of `skills/boss/boss_review.py` on one PR head. The
+review runs first (Codex only, in a child process standing in the checkout);
+the round is claimed at the end of the run, under the PR's lock, whatever the
+outcome, so numbers follow posting order and each comment's number is its
+file's. Kept under `$CLAUDE_CONFIG_DIR/pm/reviews/<owner>/<repo>/pr<N>/`, never
+in a checkout, private (0700 and 0600). Its status is `posted`, `head-moved`
+(the head or the base moved during the review), `no-verdict` or `post-failed`.
+
+**Round record**: `round<NN>.json`, what a gate reads. A round is `posted` only
+after `gh pr comment` returned success, so a comment on the PR with no `posted`
+record behind it authorizes nothing. A round claimed and never finished is an
+empty file; the next round supersedes it and no round file is edited after its
+final write. `round<NN>.out` beside it holds the reviewer's full answer.
+
+**Repo key**: `<owner>/<repo>` lowercased by `repo_key`, the one spelling used
+for a PR's directory, lock and records, because GitHub does not tell the cases
+apart. It refuses anything but two plain names.
