@@ -53,26 +53,31 @@ class BuiltInClasses(RedactBase):
 
     def test_an_ipv4_address_goes_and_a_shorter_dotted_number_stays(self):
         self.assertRedacted("host 198.51.100.7 is down", "host %s is down" % REDACTED)
-        self.assertRedacted("999.1.1.1,10.0.0.1.", "%s,%s." % (REDACTED, REDACTED))
-        self.assertRedacted("a.1.2.3.4 and (1.2.3.4)", "a.%s and (%s)" % (REDACTED, REDACTED))
-        for stays in ("version 1.2.3", "12345.6.7.8", "build 2026.10", "1.2.3.4.5", "a 1.2.3.4.5 b"):
+        self.assertRedacted("999.1.1.1,198.51.100.7.", "%s,%s." % (REDACTED, REDACTED))
+        self.assertRedacted(
+            "a.198.51.100.7 and (198.51.100.7)", "a.%s and (%s)" % (REDACTED, REDACTED))
+        for stays in ("version 1.2.3", "12345.6.7.8", "build 2026.10",
+                      "198.51.100.7.5", "a 198.51.100.7.5 b"):
             self.assertRedacted(stays, stays)
 
     def test_each_token_shape_goes_and_a_look_alike_word_stays(self):
-        self.assertRedacted("\u00e9ghp_" + "A" * 20, "\u00e9" + REDACTED)        # a letter outside ASCII protects nothing
-        goes = ["ghp_" + "a1B2" * 6, "xoxb-1234567890-abcdefghij", "xoxp-" + "9" * 10,
-                "sk-" + "a" * 20, "sk-ant-api03-" + "Ab_9-" * 5, "AKIA" + "ABCDEFGH12345678"]
+        # a letter outside ASCII protects nothing
+        self.assertRedacted("\u00e9ghp_" + "A" * 20, "\u00e9" + REDACTED)
+        goes = ["ghp_" + "a1B2" * 6, "xoxb-1234567890-abcdefghij",
+                "xoxp-" + "9" * 10, "sk-" + "a" * 20, "sk-ant-api03-" + "Ab_9-" * 5,
+                "AKIA" + "ABCDEFGH12345678"]
         for token in goes:
             with self.subTest(token=token):
                 self.assertRedacted("key=%s." % token, "key=%s." % REDACTED)
         stays = ["sk-item", "xoxo", "task-list-of-the-quick-brown-fox", "ghp_short",
-                 "AKIA" + "ABCDEFGH1234567", "AKIA" + "ABCDEFGH123456789", "risk-assessment-of-something-longer", "xox-1234567890"]
+                 "AKIA" + "ABCDEFGH1234567", "AKIA" + "ABCDEFGH123456789",
+                 "risk-assessment-of-something-longer", "xox-1234567890"]
         for word in stays:
             with self.subTest(word=word):
                 self.assertRedacted(word, word)
 
     def test_an_email_address_goes(self):
-        self.assertRedacted("write to Jane.Doe+x@example.co.uk now", "write to %s now" % REDACTED)
+        self.assertRedacted("write to Jane.Doe+x@mail.example.invalid now", "write to %s now" % REDACTED)
         self.assertRedacted("ping @someone about it", "ping @someone about it")
 
     def test_a_home_directory_path_goes_with_what_follows_it(self):
@@ -89,15 +94,15 @@ class BuiltInClasses(RedactBase):
                 self.assertRedacted(before, after)
 
     def test_a_path_that_only_looks_like_a_home_directory_stays(self):
-        for stays in ("app/home/index.html", "/rootfs/x", "/root.txt", "/root.d/x", "/home", "/home/", "the root of it",
-                      "src/Users/list.py", "a~/b", "my-root/x"):
+        for stays in ("app/home/index.html", "/rootfs/x", "/root.txt", "/root.d/x", "/home",
+                      "/home/", "the root of it", "src/Users/list.py", "a~/b", "my-root/x"):
             with self.subTest(stays=stays):
                 self.assertRedacted(stays, stays)
 
     def test_text_is_redacted_line_by_line_and_the_lines_are_kept(self):
-        self.assertRedacted("a 10.0.0.1\n\nb\nc ~/x", "a %s\n\nb\nc %s" % (REDACTED, REDACTED))
+        self.assertRedacted("a 198.51.100.7\n\nb\nc ~/x", "a %s\n\nb\nc %s" % (REDACTED, REDACTED))
         self.assertRedacted("", "")
-        self.assertRedacted("no newline at the end 10.0.0.1\n", "no newline at the end %s\n" % REDACTED)
+        self.assertRedacted("no newline at the end 198.51.100.7\n", "no newline at the end %s\n" % REDACTED)
 
 
 class SiteRules(RedactBase):
@@ -121,14 +126,17 @@ class SiteRules(RedactBase):
         self.assertEqual(err, "")
 
     def test_the_pattern_is_posix_ere_with_classes_and_ignores_case_as_in_boss_run(self):
-        self.rules("push to main\tgit[[:space:]]+push[^&|;]*(^|[[:space:]:/])(main|master)([[:space:]]|$)")
+        pattern = "git[[:space:]]+push[^&|;]*(^|[[:space:]:/])(main|master)([[:space:]]|$)"
+        self.rules("push to main\t" + pattern)
         self.assertEqual(br.redact("run GIT   push origin MAIN now"), REDACTED)
         self.assertEqual(br.redact("git push origin dev"), "git push origin dev")
 
     def test_a_pattern_is_not_read_by_pythons_re(self):
         self.rules("digits\t\\d+", "word\t[[:alpha:]]{12}")
-        self.assertEqual(br.redact("abc 123"), "abc 123")                 # Python's re would read \d as a digit
-        self.assertEqual(br.redact("a abcdefghijkl b"), REDACTED)         # and [[:alpha:]] as a set of characters
+        # Python's re would read \d as a digit
+        self.assertEqual(br.redact("abc 123"), "abc 123")
+        # and [[:alpha:]] as a set of characters
+        self.assertEqual(br.redact("a abcdefghijkl b"), REDACTED)
 
     def test_text_with_backslashes_spaces_and_empty_lines_reaches_the_pattern_as_it_is(self):
         self.rules("path\tC:\\\\secret", "lead\t^   indented secret")
@@ -178,7 +186,8 @@ class SiteRules(RedactBase):
             self.assertEqual(br.redact("from-the-config-dir"), REDACTED)
         self.assertEqual(br.redact("from-the-config-dir"), REDACTED)
         default.unlink()
-        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": ""}):      # empty counts as unset: $HOME/.claude
+        # empty counts as unset: $HOME/.claude
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": ""}):
             (self.sb.home / ".claude").mkdir()
             (self.sb.home / ".claude" / "boss-hard-rules.tsv").write_text("x\tfrom-home\n")
             self.assertEqual(br.redact("from-home"), REDACTED)
@@ -192,11 +201,12 @@ class SiteRules(RedactBase):
 
     def test_a_missing_file_is_no_site_rules_and_runs_no_bash(self):
         (self.sb.tools / "bash").unlink()                              # a bash that cannot be found
-        out, err = self.redact_with_stderr("plain 10.0.0.1")
+        out, err = self.redact_with_stderr("plain 198.51.100.7")
         self.assertEqual((out, err), ("plain %s" % REDACTED, ""))
 
     def test_a_file_that_exists_and_cannot_be_read_is_an_error_not_no_rules(self):
-        (self.sb.cfg / "boss-hard-rules.tsv").mkdir()                  # a directory: open() fails, as for a file with no read bit
+        # a directory: open() fails, as for a file with no read bit
+        (self.sb.cfg / "boss-hard-rules.tsv").mkdir()
         with self.assertRaises(OSError):
             br.redact("anything")
 
@@ -212,7 +222,7 @@ class SiteRules(RedactBase):
         path.write_text("#!%s\n%s\n" % (self.sb.tools / "sh", body), encoding="utf-8")
         path.chmod(0o755)
 
-    def test_a_bash_that_exits_non_zero_or_prints_the_wrong_number_of_words_or_outlasts_the_wait_is_an_error(self):
+    def test_a_bash_exit_error_or_bad_output_or_timeout_is_an_error(self):
         self.rules("x\tsecret")
         for what, body in (("exits 3", "echo ok; echo 1; exit 3"), ("prints too little", "echo ok"),
                            ("prints too much", "echo ok; echo 0; echo 0"), ("prints nothing", "exit 0"),
@@ -234,9 +244,42 @@ class SiteRules(RedactBase):
         br.redact("a secret")
         self.assertEqual(list(self.sb.tmp.iterdir()), [])
 
+    def test_a_nul_in_a_pattern_is_dropped_as_read_drops_it_in_boss_run_not_a_value_error(self):
+        (self.sb.cfg / "boss-hard-rules.tsv").write_bytes(b"x\tsec\0ret\n")
+        self.assertEqual(br.redact("a secret"), REDACTED)
+
+    def test_a_lone_surrogate_in_the_text_becomes_a_question_mark_and_never_an_error(self):
+        self.rules("x\tsecret")
+        self.assertEqual(br.redact("a \ud800 b\nsecret \udc00"), "a ? b\n%s" % REDACTED)
+        (self.sb.cfg / "boss-hard-rules.tsv").unlink()
+        self.assertEqual(br.redact("a\ud800b \udfff"), "a?b ?")
+        # an escaped byte is kept: it is how bytes get through
+        self.assertEqual(br.redact("caf\udce9"), "caf\udce9")
+
+    def test_whatever_goes_wrong_in_running_bash_is_an_os_error(self):
+        self.rules("x\tsecret")
+        with mock.patch.object(br, "_spawn", side_effect=ValueError("embedded null byte")):
+            with self.assertRaises(OSError):
+                br.redact("a secret")
+
+    def test_a_word_from_bash_that_is_not_one_of_the_three_or_a_one_or_a_zero_is_an_error(self):
+        self.rules("x\tsecret")
+        for what, body in (
+                ("an unknown pattern word", "echo weird; echo 0"),
+                ("an unknown line word", "echo ok; echo maybe"),
+                ("a line word of two digits", "echo ok; echo 10"),
+                ("an empty line word", "echo ok; echo"),
+                ("a pattern word in the place of a line word", "echo ok; echo ok")):
+            with self.subTest(what=what):
+                self.fake_bash(body)
+                with self.assertRaises(OSError):
+                    br.redact("a secret")
+
     def test_the_built_in_classes_apply_to_the_lines_no_site_pattern_took(self):
         self.rules("x\tsecret")
-        self.assertEqual(br.redact("secret 10.0.0.1\nkept 10.0.0.1"), "%s\nkept %s" % (REDACTED, REDACTED))
+        text = "secret 198.51.100.7\nkept 198.51.100.7"
+        expected = "%s\nkept %s" % (REDACTED, REDACTED)
+        self.assertEqual(br.redact(text), expected)
 
     def test_a_nul_is_dropped_before_anything_else(self):
         self.rules("x\tsecret")
@@ -260,7 +303,8 @@ class Findings(RedactBase):
         self.assertEqual(block, "    FINDING: a.py:1 wrong\n    FINDING: b.py:2 also wrong")
 
     def test_each_line_is_redacted_on_its_own_a_site_pattern_takes_the_line_it_matches_and_no_other(self):
-        (self.sb.cfg / "boss-hard-rules.tsv").write_text("multi\tgit[[:space:]]+push[^&|;]*main\nsecret\tclient-x\n")
+        rules = "multi\tgit[[:space:]]+push[^&|;]*main\nsecret\tclient-x\n"
+        (self.sb.cfg / "boss-hard-rules.tsv").write_text(rules)
         text = "\n".join(["FINDING: a.py:1 runs git push to", "FINDING: main is fine",
                           "FINDING: uses client-x creds ghp_" + "a" * 30, "FINDING: ip 198.51.100.7 in ~/f"])
         self.assertEqual(br.findings_block(text).split("\n"), [
@@ -269,11 +313,14 @@ class Findings(RedactBase):
 
     def test_a_tab_becomes_a_space_and_any_other_control_format_or_separator_character_is_written_out(self):
         line = "FINDING: a\tb\rc\x0bd\x0ce\u2028f\u2029g\u202eh\u200bi\x85j\U000e0001k\x1bl"
-        self.assertEqual(br.findings_block(line),
-                         "    FINDING: a b\\u000Dc\\u000Bd\\u000Ce\\u2028f\\u2029g\\u202Eh\\u200Bi\\u0085j\\U000E0001k\\u001Bl")
+        expected = ("    FINDING: a b\\u000Dc\\u000Bd\\u000Ce\\u2028f\\u2029g\\u202Eh\\u200Bi"
+                    "\\u0085j\\U000E0001k\\u001Bl")
+        self.assertEqual(br.findings_block(line), expected)
 
     def test_a_line_is_cut_to_300_code_points_counting_the_prefix(self):
-        for body, cut in (("x" * 291, False), ("x" * 292, True), ("\u00e9" * 291, False), ("\u00e9" * 292, True)):
+        for body, cut in (
+                ("x" * 291, False), ("x" * 292, True),
+                ("\u00e9" * 291, False), ("\u00e9" * 292, True)):
             with self.subTest(len=len(body) + 9, cut=cut):
                 line = "FINDING: " + body
                 (shown,) = br.findings_block(line).split("\n")
@@ -370,7 +417,9 @@ class CommentText(unittest.TestCase):
     def test_with_findings_a_blank_line_and_the_block_follow_and_no_newline_ends_it(self):
         block = "    FINDING: a\n    FINDING: b"
         body = br.comment_body(3, "worker-a", "a" * 40, "NO-GO", block)
-        self.assertEqual(body, "Codex review 3 (run by worker-a)\nHead: %s\nVerdict: NO-GO\n\n%s" % ("a" * 40, block))
+        expected = "Codex review 3 (run by worker-a)\nHead: %s\nVerdict: NO-GO\n\n%s" % (
+            "a" * 40, block)
+        self.assertEqual(body, expected)
         self.assertFalse(body.endswith("\n"))
 
 
@@ -415,8 +464,10 @@ class BriefText(unittest.TestCase):
                 self.assertEqual(draws.call_count, 2)
                 self.assertEqual(brief.count("PRTEXT-fresh"), 2)
                 self.assertEqual(brief.count("PRTEXT-collide"), 1)
-                self.assertEqual(brief.index("PRTEXT-collide") > brief.index("--- BEGIN PR TEXT PRTEXT-fresh"), True)
-                self.assertLess(brief.index("PRTEXT-collide"), brief.index("--- END PR TEXT PRTEXT-fresh"))
+                collide_idx = brief.index("PRTEXT-collide")
+                begin_idx = brief.index("--- BEGIN PR TEXT PRTEXT-fresh")
+                self.assertGreater(collide_idx, begin_idx)
+                self.assertLess(collide_idx, brief.index("--- END PR TEXT PRTEXT-fresh"))
 
     def test_twenty_draws_that_all_collide_are_an_infrastructure_failure(self):
         with mock.patch.object(br, "new_delimiter", return_value="PRTEXT-same") as draws:
@@ -433,7 +484,9 @@ class BriefText(unittest.TestCase):
         self.assertNotIn("\0", brief)
 
     def test_each_piece_is_cut_by_bytes_at_its_cap_and_not_a_byte_before_it(self):
-        caps = {"title": policy.REVIEW_TITLE_MAX, "body": policy.REVIEW_BODY_MAX, "diff": policy.REVIEW_DIFF_MAX}
+        caps = {
+            "title": policy.REVIEW_TITLE_MAX, "body": policy.REVIEW_BODY_MAX,
+            "diff": policy.REVIEW_DIFF_MAX}
         self.assertEqual(caps, {"title": 1000, "body": 20000, "diff": 80000})
         for piece, cap in caps.items():
             with self.subTest(piece=piece):
@@ -449,17 +502,21 @@ class BriefText(unittest.TestCase):
                 self.assertNotIn("is cut", over.split("--- END PR TEXT")[0])
 
     def test_a_cut_never_splits_a_character_and_counts_the_bytes_it_shows(self):
-        body = "x" * (policy.REVIEW_BODY_MAX - 1) + "\u00e9"       # 20001 bytes, the last two make one character
+        # 20001 bytes, the last two make one character
+        body = "x" * (policy.REVIEW_BODY_MAX - 1) + "\u00e9"
         brief = self.brief(body=body)
         shown = "x" * (policy.REVIEW_BODY_MAX - 1)
         self.assertIn(shown + "\n", brief)
         self.assertNotIn("\u00e9", brief)
-        self.assertIn("it shows %d of %d bytes" % (policy.REVIEW_BODY_MAX - 1, policy.REVIEW_BODY_MAX + 1), brief)
+        msg = "it shows %d of %d bytes" % (
+            policy.REVIEW_BODY_MAX - 1, policy.REVIEW_BODY_MAX + 1)
+        self.assertIn(msg, brief)
 
     def test_a_cut_diff_says_where_the_whole_of_it_is_with_the_base_as_one_shell_quoted_argument(self):
         brief = self.brief(diff="d" * (policy.REVIEW_DIFF_MAX + 1), base="release")
         self.assertIn("`git diff origin/release...HEAD` in this checkout", brief.split("--- END PR TEXT")[1])
-        self.assertNotIn("git diff release...HEAD", brief)                  # the form for a checkout with no origin is gone
+        # the form for a checkout with no origin is gone
+        self.assertNotIn("git diff release...HEAD", brief)
         for base_name in ("topic/$(id)", "a'b", "x;rm -rf y", "-p", "--output=f"):
             with self.subTest(base=base_name):
                 brief = self.brief(diff="d" * (policy.REVIEW_DIFF_MAX + 1), base=base_name)
@@ -479,8 +536,15 @@ class BriefText(unittest.TestCase):
         delimiter = re.search(r"--- BEGIN PR TEXT (\S+) ---", brief).group(1)
         self.assertEqual(brief.count(delimiter), 2)
 
+    def test_a_brief_over_the_limit_is_refused_not_passed_on(self):
+        with mock.patch.object(policy, "REVIEW_BODY_MAX", 200_000):
+            with self.assertRaises(br._Infra):
+                self.brief(body="x" * 130_000)
+            self.brief(body="x" * 100_000)                       # a big one under the limit is fine
+
     def test_a_brief_of_three_maximal_pieces_of_four_byte_characters_is_under_the_limit(self):
-        long_base = "\u65e5" * 85                                  # 255 bytes, the longest name `_read_pr` takes
+        # 255 bytes, the longest name `_read_pr` takes
+        long_base = "\u65e5" * 85
         self.assertEqual(len(long_base.encode("utf-8")), 255)
         brief = self.brief(title="\U0001F600" * 1000, body="\U0001F600" * 20000, diff="\U0001F600" * 80000,
                            base=long_base)
@@ -488,7 +552,9 @@ class BriefText(unittest.TestCase):
         self.assertEqual(policy.REVIEW_BRIEF_MAX, 120000)
         self.assertLess(size, policy.REVIEW_BRIEF_MAX)
         self.assertLess(size, 131072)
-        self.assertGreater(size, policy.REVIEW_TITLE_MAX + policy.REVIEW_BODY_MAX + policy.REVIEW_DIFF_MAX - 10)
+        min_size = (policy.REVIEW_TITLE_MAX + policy.REVIEW_BODY_MAX +
+                    policy.REVIEW_DIFF_MAX - 10)
+        self.assertGreater(size, min_size)
 
 
 class ReviewBrief(base.Base):
@@ -510,7 +576,9 @@ class ReviewBrief(base.Base):
                          [["pr", "diff", str(base.PR), "--repo", base.REPO, "--color", "never"]])
         brief = self.brief_sent()
         fence = "\n\n".join((base.TITLE, base.BODY, base.DIFF))
-        self.assertRegex(brief, r"--- BEGIN PR TEXT (PRTEXT-[0-9a-f]{32}) ---\n" + re.escape(fence) + r"\n--- END PR TEXT \1 ---\n")
+        pattern = (r"--- BEGIN PR TEXT (PRTEXT-[0-9a-f]{32}) ---\n" +
+                   re.escape(fence) + r"\n--- END PR TEXT \1 ---\n")
+        self.assertRegex(brief, pattern)
 
     def test_a_pr_with_no_body_is_reviewed_with_an_empty_one(self):
         self.gh.set_pr(body=None)
@@ -591,11 +659,12 @@ class ReviewBrief(base.Base):
         self.assertEqual(self.sb.calls_of("codex"), [])
         self.assertFalse(self.reviews.exists())
 
-    def test_a_base_name_that_is_not_plain_or_is_longer_than_255_bytes_is_exit_seven_before_anything_else(self):
-        for what, name in (("a space", "a b"), ("a newline", "a\nb"), ("a NUL", "a\0b"), ("a tab", "a\tb"),
-                           ("a bidirectional override", "a\u202eb"), ("a no-break space", "a\u00a0b"),
-                           ("a line separator", "a\u2028b"), ("256 bytes", "b" * 256),
-                           ("two bytes over in multibyte characters", "\u65e5" * 85 + "xx")):
+    def test_a_base_name_bad_or_too_long_is_exit_seven_before_anything_else(self):
+        for what, name in (
+                ("a space", "a b"), ("a newline", "a\nb"), ("a NUL", "a\0b"), ("a tab", "a\tb"),
+                ("a bidirectional override", "a\u202eb"), ("a no-break space", "a\u00a0b"),
+                ("a line separator", "a\u2028b"), ("256 bytes", "b" * 256),
+                ("two bytes over in multibyte characters", "\u65e5" * 85 + "xx")):
             with self.subTest(what=what):
                 self.setUp_clean()
                 self.codex(answer="VERDICT: GO")
@@ -613,6 +682,21 @@ class ReviewBrief(base.Base):
         self.assertLess(len(self.brief_sent().encode("utf-8")), policy.REVIEW_BRIEF_MAX)
         self.assertEqual(self.record(1)["base"], name)
 
+    def test_a_brief_over_the_limit_is_exit_seven_before_codex_is_asked(self):
+        self.gh.set_pr(body="x" * 130_000)
+        self.codex(answer="VERDICT: GO")
+        with mock.patch.object(policy, "REVIEW_BODY_MAX", 200_000):
+            self.assertEqual(self.review(), base.INFRA)
+        self.assertEqual(self.sb.calls_of("codex"), [])
+        self.assertFalse(self.reviews.exists())
+
+    def test_a_nul_in_a_rules_pattern_does_not_turn_into_a_usage_error_after_codex_has_run(self):
+        (self.sb.cfg / "boss-hard-rules.tsv").write_bytes(b"x\tsec\0ret\n")
+        self.codex(answer="FINDING: the secret is in a.py\nVERDICT: NO-GO")
+        self.assertEqual(self.review().exit_code, 3)
+        (comment,) = self.comments()
+        self.assertNotIn("secret", comment.argv[-1])
+
     def test_a_hard_rules_file_that_cannot_be_read_is_exit_seven_before_codex_is_asked(self):
         (self.sb.cfg / "boss-hard-rules.tsv").mkdir()
         self.codex(answer="FINDING: x\nVERDICT: GO")
@@ -624,7 +708,8 @@ class ReviewBrief(base.Base):
     def test_a_redaction_that_fails_after_the_review_is_exit_seven_with_nothing_claimed_or_posted(self):
         (self.sb.cfg / "boss-hard-rules.tsv").write_text("x\tsecret\n")
         self.codex(answer="FINDING: a.py:1 broken\nVERDICT: NO-GO")
-        (self.sb.tools / "bash").unlink()                    # the rules file reads fine; the engine that matches it is gone
+        # the rules file reads fine; the engine that matches it is gone
+        (self.sb.tools / "bash").unlink()
         self.assertEqual(self.review(), base.INFRA)
         self.assertEqual(len(self.sb.calls_of("codex")), 1)
         self.assertEqual(self.comments(), [])
@@ -694,9 +779,11 @@ class SkillText(unittest.TestCase):
 
     def test_the_two_absolute_merge_sentences_are_untouched_for_08_to_replace(self):
         paragraph = self.paragraph()
-        self.assertIn("Every plan gets a Codex review before a worker builds from it, and every PR gets a Codex "
-                      "review on the head that merges, before you merge it.", paragraph)
-        self.assertIn("No PR merges without a GO on record; no plan is dispatched from without one.", paragraph)
+        msg1 = ("Every plan gets a Codex review before a worker builds from it, and every PR "
+                "gets a Codex review on the head that merges, before you merge it.")
+        self.assertIn(msg1, paragraph)
+        msg2 = "No PR merges without a GO on record; no plan is dispatched from without one."
+        self.assertIn(msg2, paragraph)
 
     def test_the_rules_that_still_hold_are_still_there(self):
         paragraph = self.paragraph()

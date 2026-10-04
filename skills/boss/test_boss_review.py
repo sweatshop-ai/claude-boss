@@ -265,7 +265,8 @@ class NoGoAndNoVerdict(Base):
         result = self.review()
         self.assertEqual(result, br.ReviewResult(3, 1, "posted", "NO-GO", self.round_file(1)))
         (comment,) = self.comments()
-        self.assertEqual(comment.argv[-1], self.body(1, "NO-GO") + "\n\n    FINDING: boss_review.py:10 loses a round")
+        expected = self.body(1, "NO-GO") + "\n\n    FINDING: boss_review.py:10 loses a round"
+        self.assertEqual(comment.argv[-1], expected)
         self.assertEqual((self.record(1)["verdict"], self.record(1)["status"]), ("NO-GO", "posted"))
 
     def test_no_reviewer_answering_posts_nothing_and_keeps_why_for_each_reason(self):
@@ -454,7 +455,9 @@ class Moved(Base):
     def test_the_pr_is_read_before_the_review_and_again_just_before_the_claim_and_post(self):
         self.codex(answer="VERDICT: GO")
         self.review()
-        self.assertEqual(self.sequence(), ["gh pr view", "gh pr diff", "gh pr view", "codex", "gh pr view", "gh pr comment"])
+        expected = ["gh pr view", "gh pr diff", "gh pr view", "codex", "gh pr view",
+                    "gh pr comment"]
+        self.assertEqual(self.sequence(), expected)
 
     def test_a_head_that_moved_during_the_review_posts_nothing_and_is_exit_six(self):
         for verdict, answer in (("GO", "VERDICT: GO"), ("NO-GO", "VERDICT: NO-GO"), (None, RAMBLE)):
