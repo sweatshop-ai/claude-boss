@@ -2,7 +2,7 @@
 
 **What to build:** 02 posts a bare verdict. This ticket makes the review safe to publish and safe to read. The brief that goes to the reviewer holds the PR's own text inside a fence and says it is data; the comment gains the reviewer's findings, cut to a cap and passed through a redaction function; and the skill's Codex routine names `boss_review.py` in place of the hand-typed `codex exec`.
 
-**Scope:** new on 2026-10-04, split out of the original 02 after Codex review 3 of the plan (finding 23), with the owner-accepted premortem (R4, R8, R25). Prompt injection and free-text leakage cannot be removed by a parser: Codex review 3 findings 18 and 19 are right, and `coverage.md` lists R4 and R8 as residual risks with the owner's decision pending. What this ticket does is the mitigation: the fence, the last-message rule, the cap and the pattern redaction. 08 reuses the redaction for the fallback's stderr tail.
+**Scope:** new on 2026-10-04, split out of the original 02 after Codex review 3 of the plan (finding 23), with the owner-accepted premortem (R4, R8, R25). Prompt injection and free-text leakage cannot be removed by a parser: Codex review 3 findings 18 and 19 are right, and `coverage.md` lists R4 and R8 as residual risks accepted by the owner on 2026-10-04. What this ticket does is the mitigation: the fence, the last-message rule, the cap and the pattern redaction. 08 reuses the redaction for the fallback's stderr tail.
 
 **Blocked by:** 02 (PR review becomes a command)
 
