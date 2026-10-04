@@ -112,11 +112,14 @@ class _Seen(NamedTuple):
 
 def _stat_fields(pid: int) -> list[str] | None:
     """The fields of /proc/<pid>/stat after the command name (state first, so field n is [n - 3]);
-    None when the process is gone or there is no /proc."""
+    None when the process is gone or there is no /proc. Read as bytes: the name may be any bytes,
+    and a ")" may be in it, so the fields start after the last one."""
     try:
-        return Path("/proc/%d/stat" % pid).read_text().rsplit(")", 1)[1].split()
-    except (OSError, IndexError):
+        raw = Path("/proc/%d/stat" % pid).read_bytes()
+    except OSError:
         return None
+    _, found, tail = raw.rpartition(b")")
+    return tail.decode("ascii", "replace").split() if found else None
 
 
 def _start_time(pid: int) -> str | None:
@@ -124,20 +127,38 @@ def _start_time(pid: int) -> str | None:
     return fields[19] if fields and len(fields) > 19 else None
 
 
+def _proc_table() -> dict[int, tuple[int, str]]:
+    """pid -> (parent pid, start time) of every process, read from /proc ({} where there is none)."""
+    try:
+        entries = os.listdir("/proc")
+    except OSError:
+        return {}
+    table = {}
+    for entry in entries:
+        fields = _stat_fields(int(entry)) if entry.isascii() and entry.isdigit() else None
+        if fields and len(fields) > 19 and fields[1].isdigit():
+            table[int(entry)] = (int(fields[1]), fields[19])
+    return table
+
+
+def _tree_below(table: dict[int, tuple[int, str]], pid: int) -> list[_Seen]:
+    """Every process of `table` that descends from `pid`, found with one pass over the table."""
+    children: dict[int, list[int]] = {}
+    for child, (parent, _) in table.items():
+        children.setdefault(parent, []).append(child)
+    found, visited, frontier = [], {pid}, [pid]
+    while frontier:
+        frontier = [c for p in frontier for c in children.get(p, ()) if c not in visited]
+        visited.update(frontier)
+        found += [_Seen(c, table[c][1]) for c in frontier]
+    return found
+
+
 def _below(pid: int) -> list[_Seen]:
     """Every process below `pid`: the reviewer the chain started lives in a session of its own, so
     the chain's process group does not reach it. Empty where there is no /proc. A process started
     after this read is not in it."""
-    table = {}
-    for entry in os.listdir("/proc") if os.path.isdir("/proc") else ():
-        fields = _stat_fields(int(entry)) if entry.isdigit() else None
-        if fields and len(fields) > 19:
-            table[int(entry)] = (int(fields[1]), fields[19])
-    found, frontier = [], [pid]
-    while frontier:
-        frontier = [p for p, (parent, _) in table.items() if parent in frontier]
-        found += [_Seen(p, table[p][1]) for p in frontier]
-    return found
+    return _tree_below(_proc_table(), pid)
 
 
 def _hold(seen: _Seen) -> int | None:
@@ -148,17 +169,24 @@ def _hold(seen: _Seen) -> int | None:
         fd = os.pidfd_open(seen.pid)
     except (AttributeError, OSError):          # no pidfd here, or the process is gone
         return None
-    if _start_time(seen.pid) == seen.start:
-        return fd
-    os.close(fd)
-    return None
+    kept = False
+    try:
+        kept = _start_time(seen.pid) == seen.start
+    finally:
+        if not kept:
+            os.close(fd)
+    return fd if kept else None
 
 
 def _stop_below(seen: list[_Seen]) -> None:
     """TERM, then KILL, each of `seen` that is still the process that was seen."""
-    opened = [fd for fd in map(_hold, seen) if fd is not None]
-    held = list(opened)                     # those not yet seen to exit
+    opened: list[int] = []
     try:
+        for one in seen:
+            fd = _hold(one)
+            if fd is not None:
+                opened.append(fd)
+        held = list(opened)                 # those not yet seen to exit
         for sig in (signal.SIGTERM, signal.SIGKILL):
             for fd in held:
                 try:
@@ -181,24 +209,32 @@ def _stop_below(seen: list[_Seen]) -> None:
 
 def _spawn(argv: list[str], timeout: float, cwd: str | None = None) -> _Out:
     """Run one program with a closed stdin, its output in temporary files, and stop it and
-    everything it started, in whatever session, when it outlasts `timeout`."""
-    with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
-        try:
-            proc = subprocess.Popen(argv, cwd=cwd, stdin=subprocess.DEVNULL, stdout=out, stderr=err,
-                                    start_new_session=True)
-        except OSError as exc:
-            return _Out(None, b"", str(exc), False)
-        try:
-            code, timed_out = proc.wait(timeout=timeout), False
-        except subprocess.TimeoutExpired:
-            below = _below(proc.pid)             # before the stop: afterwards they belong to init
-            _stop(proc)
-            _stop_below(below)
-            code, timed_out = None, True
-        except BaseException:
-            _stop(proc)
-            raise
-        return _Out(code, _snapshot(out), _snapshot(err, STDERR_TAIL).decode("utf-8", "replace"), timed_out)
+    everything it started, in whatever session, when it outlasts `timeout`. A program that cannot
+    be started, or whose output cannot be kept, has no exit code: the caller sees `code` None."""
+    try:
+        with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
+            return _run_into(argv, timeout, cwd, out, err)
+    except OSError as exc:
+        return _Out(None, b"", str(exc), False)
+
+
+def _run_into(argv: list[str], timeout: float, cwd: str | None, out, err) -> _Out:
+    try:
+        proc = subprocess.Popen(argv, cwd=cwd, stdin=subprocess.DEVNULL, stdout=out, stderr=err,
+                                start_new_session=True)
+    except OSError as exc:
+        return _Out(None, b"", str(exc), False)
+    try:
+        code, timed_out = proc.wait(timeout=timeout), False
+    except subprocess.TimeoutExpired:
+        below = _below(proc.pid)             # before the stop: afterwards they belong to init
+        _stop(proc)
+        _stop_below(below)
+        code, timed_out = None, True
+    except BaseException:
+        _stop(proc)
+        raise
+    return _Out(code, _snapshot(out), _snapshot(err, STDERR_TAIL).decode("utf-8", "replace"), timed_out)
 
 
 # ---------------------------------------------------------------------- the PR (gh) ----
@@ -313,10 +349,12 @@ def _sound(data: dict, code: int) -> bool:
 
 def _follows(word: str, output: str) -> bool:
     """Whether the answer carries `word` as its verdict, read as the chain read it (01's parser,
-    strict, whole words). The chain parsed the bytes with NULs removed and keeps the answer as it
-    was written, so a NUL inside a multi-byte character can leave no verdict here where the chain
-    found one: that result is refused (exit 7), not posted."""
-    found = _parse(output.replace("\0", ""), GO_NOGO, strict=True)
+    strict, whole words). The chain parsed the bytes with their NULs removed and keeps the answer
+    as it was written, so with a NUL in it the answer alone cannot say what the chain read: such an
+    answer is refused (exit 7), whatever verdict is reported for it."""
+    if "\0" in output:
+        return False
+    found = _parse(output, GO_NOGO, strict=True)
     return found is not None and found.word == word
 
 
@@ -340,13 +378,16 @@ def _chain_result(run: _Out) -> dict:
 def _ask_codex(checkout: str, head: str, base: str, codex_timeout: int) -> dict:
     """01's chain in a child process whose working directory is the checkout, so every reviewer
     it starts inherits that directory (`run_chain` has no parameter for one)."""
-    with tempfile.TemporaryDirectory(prefix="boss-review-") as tmp:
-        prompt = Path(tmp) / "prompt.txt"
-        prompt.write_text(build_brief(head, base), encoding="utf-8")
-        run = _spawn([sys.executable, str(CHAIN), "--prompt-file", str(prompt), "--words", "GO,NO-GO",
-                      "--match", "token", "--strict", "--no-fallback", "--effort", REVIEW_EFFORT,
-                      "--codex-timeout", str(codex_timeout)],
-                     codex_timeout + policy.REVIEW_CHAIN_SLACK, cwd=checkout)
+    try:
+        with tempfile.TemporaryDirectory(prefix="boss-review-") as tmp:
+            prompt = Path(tmp) / "prompt.txt"
+            prompt.write_text(build_brief(head, base), encoding="utf-8")
+            run = _spawn([sys.executable, str(CHAIN), "--prompt-file", str(prompt), "--words", "GO,NO-GO",
+                          "--match", "token", "--strict", "--no-fallback", "--effort", REVIEW_EFFORT,
+                          "--codex-timeout", str(codex_timeout)],
+                         codex_timeout + policy.REVIEW_CHAIN_SLACK, cwd=checkout)
+    except OSError as exc:
+        raise _Infra("the brief for the chain could not be written: %s" % exc)
     return _chain_result(run)
 
 

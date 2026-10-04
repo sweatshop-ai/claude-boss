@@ -15,6 +15,7 @@ write fail.
 import dataclasses
 import inspect
 import itertools
+import errno
 import json
 import os
 import re
@@ -921,6 +922,10 @@ class ChainChild(Base):
             "a GO the answer contradicts": (0, {"output": "VERDICT: NO-GO",
                                                 "attempt_output": "VERDICT: NO-GO"}),
             "a GO the answer does not carry": (0, {"output": "all fine", "attempt_output": "all fine"}),
+            "a GO in an answer that holds a NUL": (0, {"output": "VERDICT: GO\u0000",
+                                                       "attempt_output": "VERDICT: GO\u0000"}),
+            "a GO that only a NUL makes": (0, {"output": "VERDICT: G\u0000O",
+                                               "attempt_output": "VERDICT: G\u0000O"}),
             "a GO beside a NO-GO in the answer": (0, {"output": "VERDICT: GO\nVERDICT: NO-GO",
                                                       "attempt_output": "VERDICT: GO\nVERDICT: NO-GO"}),
             "two attempts": (0, {"attempts": [self.GOOD["attempts"][0]] * 2}),
@@ -980,6 +985,16 @@ class ChainChild(Base):
             self.assertInfraBeforeAnyClaim()
         self.assertTrue(marker.exists(), "the reviewer was killed without being asked to stop first")
 
+    def test_a_capture_file_that_cannot_be_made_is_exit_seven_not_an_error_out_of_review(self):
+        with mock.patch.object(br.tempfile, "TemporaryFile",
+                               side_effect=OSError(errno.EMFILE, "Too many open files")):
+            self.assertInfraBeforeAnyClaim()
+
+    def test_a_prompt_directory_that_cannot_be_made_is_exit_seven_not_an_error_out_of_review(self):
+        with mock.patch.object(br.tempfile, "TemporaryDirectory",
+                               side_effect=OSError(errno.ENOSPC, "No space left on device")):
+            self.assertInfraBeforeAnyClaim()
+
     def test_the_chain_is_asked_for_codex_only_whole_word_go_no_go_and_strict(self):
         recorded = self.sb.root / "chain-argv.json"
         body = ("import json, sys\nopen(%r, 'w').write(json.dumps(sys.argv[1:]))\nsys.exit(2)\n"
@@ -1010,15 +1025,15 @@ class StopBelow(unittest.TestCase):
         self.assertIn(br._Seen(self.other.pid, self.start), seen)
         self.assertNotIn(os.getpid(), [s.pid for s in seen])
 
-    def test_a_process_is_signalled_only_while_it_is_the_one_that_was_seen(self):
-        reused = br._Seen(self.other.pid, str(int(self.start) + 1))     # same pid, another process
-        br._stop_below([reused])
-        self.assertTrue(alive(self.other.pid), "a process that was not the one seen was stopped")
-        br._stop_below([br._Seen(self.other.pid, self.start)])
-        self.assertFalse(alive(self.other.pid))
-
     def fds(self):
         return len(os.listdir("/proc/self/fd"))
+
+    def spawn_python(self, code):
+        """A python process that has printed `ready`, killed when the test is over."""
+        proc = subprocess.Popen([sys.executable, "-c", code], stdout=subprocess.PIPE, text=True)
+        self.addCleanup(lambda: (proc.kill(), proc.wait(), proc.stdout.close()))
+        self.assertEqual(proc.stdout.readline().strip(), "ready")
+        return proc
 
     def test_the_stop_leaves_no_file_descriptor_open_after_a_process_that_gave_way_to_term(self):
         before = self.fds()
@@ -1026,20 +1041,89 @@ class StopBelow(unittest.TestCase):
         self.assertFalse(alive(self.other.pid))
         self.assertEqual(self.fds(), before)
 
-    def test_a_process_that_ignores_term_is_killed_after_the_grace_and_leaves_no_descriptor_open(self):
-        stubborn = subprocess.Popen(
-            [sys.executable, "-c", "import signal, time\nsignal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
-             "print('ready', flush=True)\ntime.sleep(300)"], stdout=subprocess.PIPE, text=True)
-        self.addCleanup(lambda: (stubborn.kill(), stubborn.wait(), stubborn.stdout.close()))
-        self.assertEqual(stubborn.stdout.readline().strip(), "ready")
+    def test_a_process_that_ignores_term_is_killed_only_after_the_grace_and_leaves_no_descriptor_open(self):
+        marker = Path(tempfile.mkdtemp(prefix="stop-below-")) / "termed"
+        self.addCleanup(shutil.rmtree, marker.parent, True)
+        stubborn = self.spawn_python(      # takes note of TERM, goes on running, and so must be killed
+            "import signal, time\n"
+            "def termed(*_):\n    open(%r, 'w').write(repr(time.monotonic()))\n"
+            "signal.signal(signal.SIGTERM, termed)\nprint('ready', flush=True)\n"
+            "while True:\n    time.sleep(0.02)\n" % str(marker))
         seen = br._Seen(stubborn.pid, br._start_time(stubborn.pid))
-        before = self.fds()
-        with mock.patch.object(br, "TERM_GRACE", 0.3):
-            started = time.monotonic()
+        died = []
+
+        def watch():
+            while alive(stubborn.pid):
+                time.sleep(0.005)
+            died.append(time.monotonic())
+        before = self.fds()           # the watcher opens /proc files while it runs: count around it
+        watcher = threading.Thread(target=watch)
+        watcher.start()
+        with mock.patch.object(br, "TERM_GRACE", 0.5):
             br._stop_below([seen])
-        self.assertGreaterEqual(time.monotonic() - started, 0.3, "killed before the grace was over")
-        self.assertFalse(alive(stubborn.pid))
+        watcher.join(10)
+        self.assertTrue(marker.exists(), "the process was killed before it could take note of TERM")
+        self.assertGreaterEqual(died[0] - float(marker.read_text()), 0.4,
+                                "the process was killed before the grace after TERM was over")
         self.assertEqual(self.fds(), before)
+
+    def test_hold_reads_the_start_time_after_the_pidfd_is_open_not_before(self):
+        order = []
+        real_open, real_start = os.pidfd_open, br._start_time
+
+        def opened(*a, **k):
+            order.append("open")
+            return real_open(*a, **k)
+
+        def started(*a, **k):
+            order.append("start")
+            return real_start(*a, **k)
+        with mock.patch.object(os, "pidfd_open", opened), mock.patch.object(br, "_start_time", started):
+            fd = br._hold(br._Seen(self.other.pid, self.start))
+        os.close(fd)
+        self.assertEqual(order, ["open", "start"])
+
+    def test_no_descriptor_survives_a_start_time_that_cannot_be_read(self):
+        third = subprocess.Popen(["sleep", "300"])
+        self.addCleanup(lambda: (third.kill(), third.wait()))
+        seen = [br._Seen(self.other.pid, self.start), br._Seen(third.pid, br._start_time(third.pid))]
+        before = self.fds()
+        with mock.patch.object(br, "_start_time", side_effect=[self.start, RuntimeError("boom")]):
+            with self.assertRaises(RuntimeError):
+                br._stop_below(seen)
+        self.assertEqual(self.fds(), before)
+        self.assertTrue(alive(self.other.pid) and alive(third.pid))
+
+    def test_the_walk_below_a_process_goes_on_past_one_whose_name_is_not_text(self):
+        odd = self.spawn_python(
+            "import ctypes, time\nctypes.CDLL(None).prctl(15, b'\\xff\\xfe', 0, 0, 0)\n"
+            "print('ready', flush=True)\ntime.sleep(300)")
+        self.assertIn(odd.pid, [s.pid for s in br._below(os.getpid())])
+
+    def test_the_tree_below_a_process_is_what_descends_from_it(self):
+        table = {10: (1, "a"), 11: (10, "b"), 12: (10, "c"), 13: (11, "d"), 14: (99, "e"), 99: (1, "f")}
+        self.assertEqual(sorted(br._tree_below(table, 10)),
+                         [br._Seen(11, "b"), br._Seen(12, "c"), br._Seen(13, "d")])
+        self.assertEqual(br._tree_below(table, 13), [])
+
+    def test_a_wide_process_tree_is_walked_in_linear_time(self):
+        table = {1000: (1, "0"), 99999: (1, "0")}          # 99999 is not below 1000
+        for i in range(20000):
+            table[2000 + i] = (1000, "0")
+            table[30000 + i] = (2000 + i, "0")
+        started = time.monotonic()
+        found = br._tree_below(table, 1000)
+        self.assertLess(time.monotonic() - started, 2)
+        self.assertEqual(len(found), 40000)
+
+    def test_a_process_is_signalled_only_while_it_is_the_one_that_was_seen(self):
+        before = self.fds()
+        reused = br._Seen(self.other.pid, str(int(self.start) + 1))     # same pid, another process
+        br._stop_below([reused])
+        self.assertTrue(alive(self.other.pid), "a process that was not the one seen was stopped")
+        self.assertEqual(self.fds(), before)
+        br._stop_below([br._Seen(self.other.pid, self.start)])
+        self.assertFalse(alive(self.other.pid))
 
     def test_a_process_that_cannot_be_signalled_is_skipped_not_an_error(self):
         before = self.fds()
