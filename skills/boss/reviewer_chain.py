@@ -208,7 +208,7 @@ def _stop(proc: subprocess.Popen) -> None:
 
 class _Run(NamedTuple):
     code: int | None     # None after a timeout, and when the reviewer could not be started
-    out: str
+    out: bytes           # as written: a NUL may sit inside a multi-byte character, so decoding waits
     err: str
     timed_out: bool
 
@@ -218,7 +218,7 @@ class _Turn(NamedTuple):
     verdict: Verdict | None
 
 
-def _read(f, tail: int | None = None) -> str:
+def _snapshot(f, tail: int | None = None) -> bytes:
     """What a reviewer had written to a temporary file when it exited: all of it, or only its
     last `tail` bytes. Never more: a descendant may still be writing, and a read to end of file
     would then have no end."""
@@ -226,7 +226,11 @@ def _read(f, tail: int | None = None) -> str:
     size = f.tell()
     start = 0 if tail is None else max(0, size - tail)
     f.seek(start)
-    return f.read(size - start).decode("utf-8", "replace")
+    return f.read(size - start)
+
+
+def _read(f, tail: int | None = None) -> str:
+    return _snapshot(f, tail).decode("utf-8", "replace")
 
 
 def _run(argv: list[str], timeout: int, keep_stdout: bool = True) -> _Run:
@@ -245,7 +249,7 @@ def _run(argv: list[str], timeout: int, keep_stdout: bool = True) -> _Run:
             proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=out, stderr=err,
                                     start_new_session=True)
         except OSError as exc:
-            return _Run(None, "", str(exc), False)
+            return _Run(None, b"", str(exc), False)
         code: int | None = None
         timed_out = False
         try:
@@ -256,14 +260,16 @@ def _run(argv: list[str], timeout: int, keep_stdout: bool = True) -> _Run:
         except BaseException:
             _stop(proc)
             raise
-        return _Run(code, _read(out) if keep_stdout else "", _read(err, tail=4 * STDERR_TAIL), timed_out)
+        return _Run(code, _snapshot(out) if keep_stdout else b"", _read(err, tail=4 * STDERR_TAIL), timed_out)
 
 
-def _turn(reviewer, model, output, run: _Run, words, strict) -> _Turn:
+def _turn(reviewer, model, raw: bytes, run: _Run, words, strict) -> _Turn:
     """Decide the reason: a usable verdict beats everything, then timeout, error, noverdict."""
-    # bash's $(...) dropped NUL bytes, so the old script parsed what was left: RE\0JECT was REJECT.
+    # bash's $(...) dropped NUL bytes, and grep decoded what was left: RE\0JECT was REJECT, and a NUL
+    # inside the bytes of one character gave that character back. So the NULs go before the decode.
     # The attempt keeps the output as the reviewer wrote it.
-    verdict = _parse(output.replace("\0", ""), words, strict)
+    output = raw.decode("utf-8", "replace")
+    verdict = _parse(raw.replace(b"\0", b"").decode("utf-8", "replace"), words, strict)
     if verdict:
         reason = "answered"
     elif run.timed_out:
@@ -286,10 +292,10 @@ def _codex(prompt, effort, timeout, words, strict) -> _Turn:
                    keep_stdout=False)
         try:
             with open(last, "rb") as f:
-                output = _read(f)
+                raw = _snapshot(f)
         except OSError:            # the answer file was removed: no answer, as `cat 2>/dev/null` saw it
-            output = ""
-        return _turn("codex", None, output, run, words, strict)
+            raw = b""
+        return _turn("codex", None, raw, run, words, strict)
     finally:
         Path(last).unlink(missing_ok=True)
 

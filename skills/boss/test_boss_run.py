@@ -469,6 +469,17 @@ class MoreCharacterization(Base):
         self.assertNotCalled("claude")
         self.assertEqual(self.sb.log_lines()[-1]["verdict"], "REJECT")
 
+    def test_a_nul_byte_inside_a_multibyte_space_before_the_verdict_is_dropped_first(self):
+        # bash's $(...) dropped the NUL from the bytes and grep then read U+3000 (a space) before
+        # VERDICT: so Codex's REJECT stood and Haiku was never asked. Decoding first would have cut
+        # the character into replacement characters and handed the decision to Haiku.
+        self.sb.stub("codex", answer=b"\xe3\x80\0\x80VERDICT: REJECT\nREASON: nul")
+        self.sb.stub("claude", answer=approve("haiku would approve"))
+        r = self.dry()
+        self.assertEqual(r.returncode, 3, r.stderr)
+        self.assertNotCalled("claude")
+        self.assertEqual(self.sb.log_lines()[-1]["verdict"], "REJECT")
+
     def test_a_usable_verdict_after_a_non_zero_exit_still_counts_for_either_reviewer(self):
         self.sb.stub("codex", answer=approve("codex said so"), rc=3)
         r = self.dry()

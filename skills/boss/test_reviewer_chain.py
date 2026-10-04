@@ -143,9 +143,9 @@ class Reasons(Base):
 
     def test_codexs_answer_file_is_read_with_the_bounded_read_too(self):
         # A child of Codex may keep appending to the -o file after Codex exits; reading it to end of
-        # file would never end. Every read of a reviewer's output has to go through _read.
+        # file would never end. Every read of a reviewer's output has to go through _snapshot.
         self.sb.stub("codex", answer=approve())
-        with mock.patch.object(rc, "_read", wraps=rc._read) as read:
+        with mock.patch.object(rc, "_snapshot", wraps=rc._snapshot) as read:
             self.chain()
         answer_file = self.sb.calls_of("codex")[0].argv[-2]
         self.assertIn(answer_file, [call.args[0].name for call in read.call_args_list])
@@ -342,6 +342,20 @@ class Matching(Base):
     def reason_of_nul(self):
         self.sb.stub("codex", answer="VERDICT: APPROVE\nREASON: fi\0ne")
         return self.chain().parsed.reason
+
+    def test_a_nul_byte_is_dropped_from_the_bytes_before_they_are_decoded_as_bash_did(self):
+        # $(...) dropped NUL from the bytes, and grep then decoded what was left: a NUL inside the
+        # three bytes of U+3000 gave back U+3000, which grep took as space before VERDICT. Decoding
+        # first would turn the cut sequence into replacement characters and lose the verdict.
+        raw = b"\xe3\x80\0\x80VERDICT: REJECT\nREASON: nul"
+        self.sb.stub("codex", answer=raw)
+        result = self.chain()
+        self.assertEqual(result.parsed, rc.Verdict("REJECT", "nul"))
+        self.assertEqual(result.attempts[0].output, raw.decode("utf-8", "replace"))
+        self.sb.stub("codex", answer=b"")
+        self.sb.stub("claude", answer=raw.replace(b"REJECT", b"APPROVE"))
+        result = self.chain(fallback=rc.HAIKU)
+        self.assertEqual((result.reviewer, result.parsed.word), ("haiku", "APPROVE"))
 
     def test_an_invisible_character_after_the_word_continues_a_token_too(self):
         # Marks and every control or format character (zero-width joiner and space, soft hyphen,
