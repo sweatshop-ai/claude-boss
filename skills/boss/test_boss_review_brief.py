@@ -60,6 +60,13 @@ class BuiltInClasses(RedactBase):
                       "198.51.100.7.5", "a 198.51.100.7.5 b"):
             self.assertRedacted(stays, stays)
 
+    def test_an_address_that_holds_another_class_goes_whole_whatever_the_order_of_the_classes(self):
+        token = "ghp_" + "a1B2" * 6
+        self.assertRedacted("mail john+%s@mail.example.invalid now" % token, "mail %s now" % REDACTED)
+        self.assertRedacted("mail john@198.51.100.7.example.invalid now", "mail %s now" % REDACTED)
+        self.assertRedacted("see /home/u/%s now" % token, "see %s now" % REDACTED)
+        self.assertRedacted("198.51.100.7,198.51.100.7", "%s,%s" % (REDACTED, REDACTED))   # touching is two
+
     def test_each_token_shape_goes_and_a_look_alike_word_stays(self):
         # a letter outside ASCII protects nothing
         self.assertRedacted("\u00e9ghp_" + "A" * 20, "\u00e9" + REDACTED)
@@ -374,22 +381,39 @@ class Findings(RedactBase):
         self.assertEqual(len(calls[0].split("\n")), 20)
         self.assertTrue(block.endswith("4980 more findings are not shown here."))
 
-    def test_a_line_is_limited_to_its_first_4000_characters_before_the_matching_and_ends_in_an_ellipsis(self):
+    def test_redact_is_never_given_a_line_over_the_read_limit(self):
         seen = []
         real = br.redact
+        lines = ["FINDING: short", "FINDING: " + "word " * 3000,
+                 "FINDING: " + "x" * (policy.REVIEW_FINDING_READ - 9)]
         with mock.patch.object(br, "redact", side_effect=lambda t: seen.append(t) or real(t)):
-            (shown,) = br.findings_block("FINDING: " + "word " * 3000).split("\n")
-        self.assertLessEqual(len(seen[0]), policy.REVIEW_FINDING_READ)
+            br.findings_block("\n".join(lines))
         self.assertEqual(policy.REVIEW_FINDING_READ, 4000)
-        self.assertTrue(shown.endswith("\u2026"))
+        self.assertTrue(all(len(line) <= policy.REVIEW_FINDING_READ for line in seen[0].split("\n")))
 
-    def test_a_token_that_the_4000_character_limit_splits_is_not_left_half_in_the_clear(self):
-        # the long path is replaced by ten characters, so the part after it is within the 300 that are shown
-        line = "FINDING: /home/" + "x" * 3980 + " sk-" + "A" * 30
-        self.assertEqual(line.index("sk-"), 3996)
-        (shown,) = br.findings_block(line).split("\n")
-        self.assertNotIn("sk-", shown)
-        self.assertEqual(shown, "    FINDING: %s\u2026" % REDACTED)
+    def test_a_line_over_the_read_limit_is_not_shown_only_its_length_is(self):
+        line = "FINDING: " + "x" * (policy.REVIEW_FINDING_READ - 9 + 1)
+        self.assertEqual(len(line), 4001)
+        self.assertEqual(br.findings_block(line), "    FINDING: [a line of 4001 characters, not shown]")
+        self.assertEqual(br.findings_block("FINDING: a\nFINDING: " + "y" * 5000 + "\nFINDING: b"),
+                         "    FINDING: a\n    FINDING: [a line of 5009 characters, not shown]"
+                         "\n    FINDING: b")
+
+    def test_a_line_of_exactly_the_read_limit_is_checked_whole_and_cut_to_the_shown_length(self):
+        line = "FINDING: " + "x" * (policy.REVIEW_FINDING_READ - 9)
+        self.assertEqual(len(line), 4000)
+        self.assertEqual(br.findings_block(line), "    " + line[:299] + "\u2026")
+
+    def test_what_the_limit_would_have_split_cannot_be_left_half_in_the_clear(self):
+        # the long path is replaced by ten characters, which would bring the end of the line into the 300 that
+        # are shown; a site pattern of two words would then miss the pair that the limit had separated
+        (self.sb.cfg / "boss-hard-rules.tsv").write_text("a client\tacme[[:space:]]+berlin\n")
+        line = "FINDING: /home/u/" + "x" * 3974 + " acme berlin and more"
+        self.assertEqual(line.index("berlin") + 3, 4000)
+        block = br.findings_block(line)
+        self.assertNotIn("acme", block)
+        self.assertNotIn("berlin", block)
+        self.assertEqual(block, "    FINDING: [a line of %d characters, not shown]" % len(line))
 
     def test_a_line_of_two_million_characters_without_a_space_costs_no_more_than_its_limit(self):
         started = time.monotonic()

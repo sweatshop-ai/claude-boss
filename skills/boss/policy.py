@@ -57,8 +57,8 @@ REVIEW_CHAIN_SLACK = 30
 # this many characters (the prefix counts).
 REVIEW_FINDINGS_MAX = 20
 REVIEW_FINDING_CHARS = 300
-# A finding line is limited to REVIEW_FINDING_READ characters before the matching, so that one
-# without an end cannot stall it.
+# A finding line longer than REVIEW_FINDING_READ characters is neither matched nor shown, only its
+# length: a site pattern is judged on a whole line, and one without an end cannot stall the matching.
 REVIEW_FINDING_READ = 4000
 
 # The PR text in the brief. The prompt reaches `codex` as one argv element and Linux refuses one of
