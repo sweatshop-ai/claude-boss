@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.10.0 — 2026-10-05
+
+A boss no longer leads agent-teams teammates by accident; a worker may lead
+them on purpose.
+
+- **`boss-start` turns agent teams off for the boss** with
+  `--settings '{"env":{"CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS":"0"}}'`. With them
+  on, any `Agent` call carrying a `name` starts a teammate inside the boss's
+  process, without asking: no pane, no stamp, invisible to `list --mine`, the
+  pulse and the workers watch, and gone when the boss exits. A shell export
+  cannot do this (settings.json env wins); a `--settings` payload can.
+  Checked: a control session wrote `~/.claude/teams/session-*` at startup, the
+  overridden one did not. A second `--settings` replaces the first rather
+  than merging (checked: two payloads, only the last one's env survived), so
+  `boss-start` now refuses an owner's `--settings` with exit 2 and says why.
+- **The guard watches `Agent`.** A named call (not a fork, not `isolation`) is
+  said every time, outside the power-of-two throttle, because nothing else the
+  boss runs will ever mention it. An unnamed call is counted like any other.
+  Still warn-only. Seven tests in `test_boss_guard.py`.
+- **Bursts.** Phase B's dispatch lets a worker run a ticket as a burst of at
+  most three agent-teams teammates, when its parts need no talk and share no
+  files. The worker decides; the burst spends its 150k. Criteria in
+  `references/models.md`.
+- **Glossary:** *Agent-teams teammate* and *Burst*; bare "teammate" and "team"
+  are to be avoided — the first means four things here, the second is `/team`.
+
 ## 0.9.1 — 2026-10-03
 
 The `boss` and `team` skill descriptions are shorter.
