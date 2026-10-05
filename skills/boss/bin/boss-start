@@ -22,6 +22,22 @@
 #                          /compact) — the threshold is the whole lever, and it
 #                          is set here or nowhere.
 #
+#   --settings (agent teams off)
+#                          With CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1, any Agent
+#                          call with a `name` starts an agent-teams teammate
+#                          inside the boss's process: no pane, no stamp, so
+#                          list --mine, the pulse and the workers watch never see
+#                          it, and it dies with the boss. A boss never leads
+#                          teammates (workers may). A shell `export ...=0` does
+#                          not work: the settings.json env wins over the shell.
+#                          A --settings payload applies after user settings, so
+#                          it does. Verified 2026-10-05: with it, no
+#                          ~/.claude/teams/session-* dir appears at startup.
+#                          A second --settings REPLACES the first (checked the
+#                          same day: two payloads, only the last one's env
+#                          survived), so an owner's --settings in the extra
+#                          args is refused rather than silently dropping either.
+#
 # Global settings would do it too (autoCompactWindow, model), but they would
 # apply to every worker as well, and for workers both are wrong.
 #
@@ -47,6 +63,16 @@ if [[ -z "${TMUX:-}" ]]; then
   exit 1
 fi
 
+for a in "$@"; do
+  if [[ "$a" == --settings || "$a" == --settings=* ]]; then
+    printf 'boss-start: --settings is refused here. A second --settings replaces the\n' >&2
+    printf '  one that turns agent teams off for the boss. Put what you need in\n' >&2
+    printf '  ~/.claude/settings.json, or start claude by hand with one payload that\n' >&2
+    printf '  also carries "env":{"CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS":"0"}.\n' >&2
+    exit 2
+  fi
+done
+
 track=""
 if [[ $# -gt 0 && "$1" != -* ]]; then track=$1; shift; fi
 
@@ -55,4 +81,5 @@ printf 'boss-start: model=%s effort=%s autocompact=%s fallback=%s%s\n' \
 printf '  after it opens, type: /boss%s\n' "${track:+ monitor}" >&2
 
 exec claude --model "$MODEL" --effort "$EFFORT" --autocompact "$AUTOCOMPACT" \
-  --fallback-model "$FALLBACK" "$@"
+  --fallback-model "$FALLBACK" \
+  --settings '{"env":{"CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS":"0"}}' "$@"

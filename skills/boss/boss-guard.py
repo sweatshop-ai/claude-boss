@@ -91,7 +91,18 @@ def owns(path):
     p = str(path)
     return p.startswith(OWNED) or bool(LOOSE.search(p))
 
-WATCHED = {"Bash", "Edit", "Write", "NotebookEdit", "Read", "Glob", "Grep"}
+WATCHED = {"Bash", "Edit", "Write", "NotebookEdit", "Read", "Glob", "Grep", "Agent"}
+
+
+def starts_teammate(ti):
+    """True when this Agent call launches an agent-teams teammate.
+
+    With CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS on, the harness turns any Agent call
+    that carries a `name` into a teammate, except a fork or a call that passes
+    `isolation`, which still run as subagents.
+    """
+    return bool(ti.get("name")) and ti.get("subagent_type") != "fork" \
+        and not ti.get("isolation")
 
 
 def ordinal(n):
@@ -158,6 +169,8 @@ def main():
         if ALLOWED_CMD.match(cmd) or ALLOWED_CMD.match(strip_prefix(cmd)):
             return 0
         detail = cmd[:200]
+    elif tool == "Agent":
+        detail = str(ti.get("name") or ti.get("description") or "")[:200]
     else:
         fp = ti.get("file_path") or ti.get("path") or ti.get("pattern") or ""
         if owns(fp):
@@ -177,7 +190,15 @@ def main():
         pass
 
     n = bump(sid)
-    if n == 1:
+    if tool == "Agent" and starts_teammate(ti):
+        # Every one is said. A teammate has no pane and no stamp, so nothing else
+        # the boss runs (list --mine, the pulse, the workers watch) will ever
+        # mention it; the throttle below is for the cheap, frequent calls.
+        msg = (f"Boss guard: Agent with name `{detail[:60]}` starts an agent-teams "
+               f"teammate — no pane, invisible to `list --mine` and the pulse, and "
+               f"it dies with you. A boss never leads teammates: dispatch to a "
+               f"worker. (Not blocked; logged.)")
+    elif n == 1:
         msg = (f"Boss guard: this session is coordinating, and {tool} on "
                f"`{detail[:90]}` is implementation work. Dispatch it to a worker "
                f"instead. (Not blocked, and recorded in pm/boss-guard.log — if this "
