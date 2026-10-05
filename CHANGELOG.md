@@ -12,7 +12,9 @@ them on purpose.
   pulse and the workers watch, and gone when the boss exits. A shell export
   cannot do this (settings.json env wins); a `--settings` payload can.
   Checked: a control session wrote `~/.claude/teams/session-*` at startup, the
-  overridden one did not.
+  overridden one did not. A second `--settings` replaces the first rather
+  than merging (checked: two payloads, only the last one's env survived), so
+  `boss-start` now refuses an owner's `--settings` with exit 2 and says why.
 - **The guard watches `Agent`.** A named call (not a fork, not `isolation`) is
   said every time, outside the power-of-two throttle, because nothing else the
   boss runs will ever mention it. An unnamed call is counted like any other.
