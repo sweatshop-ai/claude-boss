@@ -104,6 +104,31 @@ will not think of it:
 Spawning a whole cheap **worker** (`--model haiku`) is right only for a track that
 is mechanical end to end and whose output someone else checks.
 
+## Bursts — when a worker leads agent-teams teammates (2026-10-05)
+
+Where Claude Code's agent teams are on (`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`),
+a worker can spend one ticket leading **agent-teams teammates**: a **burst**. The
+worker decides, not you; it is the one that has read the code and can tell
+whether the angles are really separate. You only put the criteria and the
+ceiling in the dispatch (Phase B).
+
+A ticket is worth a burst when its parts can be worked **without talking and
+without touching the same files**: a review along separate lenses (security,
+performance, tests), a bug with competing hypotheses that should try to disprove
+each other, a research question with independent angles. Anything sequential,
+anything editing one set of files, stays a single session: two teammates on one
+file overwrite each other.
+
+**At most three teammates.** Every teammate's report lands in the worker's
+context, so a burst spends the worker's 150k `CTX-SPLIT` budget, not a separate
+one — and three focused teammates outperform five scattered ones by Anthropic's
+own account.
+
+Never the boss. A teammate lives inside its lead's process, has no pane and no
+stamp, and dies with it; a boss's teammates would be invisible to `list --mine`,
+the pulse and the workers watch. `boss-start` turns agent teams off for the boss,
+and the guard names any teammate spawn a bare-`claude` boss makes.
+
 ## What does and does not save tokens
 
 - **Retiring an idle session saves nothing.** An idle session costs nothing until

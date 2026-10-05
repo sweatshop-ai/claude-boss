@@ -5,6 +5,16 @@ itself. It holds a marker under `pm/.boss-sessions/` and a track.
 
 **Worker**: any session a boss dispatches to. One task per session.
 
+**Agent-teams teammate**: a session that a Claude Code agent-teams lead
+(`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS`) spawned inside its own process. Not a
+worker: it has no pane and no stamp, dies with its lead, and the boss neither
+dispatches to it nor sees it. A worker may lead them; a boss never does.
+_Avoid_: teammate (alone), sub-worker
+
+**Burst**: one worker leading agent-teams teammates for the length of one
+ticket. Its cost lands in that worker's context.
+_Avoid_: team (means `/team`, the peer mesh between workers)
+
 **Track**: the name of a boss's tracker (`pm/<track>.md`) and objective
 (`pm/<track>.goal.md`).
 

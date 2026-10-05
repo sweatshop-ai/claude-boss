@@ -73,6 +73,11 @@ boss-run --why "<what this is for>" [--cwd DIR] [--dry-run] -- <command ...>
 A `PreToolUse` hook warns and logs when you stray (`~/.claude/pm/boss-guard.log`).
 It does not block you — if a call really is coordination, say why and carry on.
 
+**You never lead agent-teams teammates.** An `Agent` call with a `name` starts one
+when agent teams are on, and it has no pane and no stamp, so nothing you watch
+with will ever see it. `boss-start` turns agent teams off for you; the guard
+names every spawn a bare-`claude` boss makes. Workers may lead them — see Phase B.
+
 *Why this is four lines and not three pages: the three pages did not work. See
 `references/incidents.md`.*
 
@@ -675,7 +680,12 @@ Parse `$ARGUMENTS`: empty or `status` → **A** · `dispatch <task> [worker]` �
    after it."* A dispatch that continues a split task names the handoff to read
    first. For a judgment task, add: *"Use a
    cheap subagent for the mechanical parts; keep for yourself only the steps where
-   a plausible-looking wrong answer would pass."*
+   a plausible-looking wrong answer would pass."* Where agent teams are on, add
+   too: *"If this ticket splits into parts that need no talk and touch no shared
+   files — review lenses, competing hypotheses, independent research angles — you
+   may run it as a burst of at most three agent-teams teammates. Their reports
+   count against your 150k."* The worker decides; `references/models.md` has the
+   criteria.
 5. **Verification is the tool result.** An error means it didn't land. If the
    dispatch only lands after a GitHub write the classifier blocks in the worker,
    do it yourself through `boss-run --why ... -- gh ...` instead of handing the
