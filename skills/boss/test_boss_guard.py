@@ -33,14 +33,16 @@ class GuardCase(unittest.TestCase):
         import shutil
         shutil.rmtree(self.tmp, ignore_errors=True)
 
-    def fire(self, command="rm -rf build", tool="Bash", sid=None):
+    def fire(self, command="rm -rf build", tool="Bash", sid=None, tool_input=None):
         """One PreToolUse call. Returns the additionalContext, or '' if silent."""
+        if tool_input is None:
+            tool_input = ({"command": command} if tool == "Bash"
+                          else {"file_path": command})
         payload = {
             "session_id": sid or self.sid,
             "hook_event_name": "PreToolUse",
             "tool_name": tool,
-            "tool_input": ({"command": command} if tool == "Bash"
-                           else {"file_path": command}),
+            "tool_input": tool_input,
         }
         env = dict(os.environ, CLAUDE_CONFIG_DIR=str(self.cfg))
         res = subprocess.run([sys.executable, str(GUARD)], input=json.dumps(payload),
@@ -134,6 +136,56 @@ class Precision(GuardCase):
     def test_the_prefix_strip_does_not_wave_through_real_work(self):
         self.assertNotEqual("", self.fire("cd /repo && npm run build"))
         self.assertNotEqual("", self.fire("FOO=1 python3 train.py"))
+
+
+class AgentTeams(GuardCase):
+    """A named Agent call in a boss starts an agent-teams teammate.
+
+    With CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 the harness launches it without
+    asking: no pane, no stamp, invisible to `list --mine`, the pulse and the
+    workers watch, and it dies with the boss. Rare and costly, so every one is
+    named out loud; the power-of-two throttle is for the cheap, frequent kind.
+    """
+
+    def spawn(self, **extra):
+        ti = {"description": "x", "prompt": "do the thing"}
+        ti.update(extra)
+        return self.fire(tool="Agent", tool_input=ti)
+
+    def test_a_named_agent_call_is_called_a_teammate(self):
+        said = self.spawn(name="reviewer")
+        self.assertIn("agent-teams teammate", said)
+        self.assertIn("reviewer", said)
+
+    def test_it_speaks_off_the_power_of_two_counts(self):
+        for i in range(4):
+            self.fire("touch f%d" % i)
+        self.assertIn("agent-teams teammate", self.spawn(name="fifth"),
+                      "a teammate spawn on call 5 went unsaid")
+
+    def test_every_spawn_speaks(self):
+        for i in range(3):
+            self.assertIn("agent-teams teammate", self.spawn(name="t%d" % i))
+
+    def test_spawns_are_logged(self):
+        self.spawn(name="reviewer")
+        self.assertEqual([l["tool"] for l in self.log_lines()], ["Agent"])
+
+    def test_an_unnamed_agent_call_is_counted_like_the_rest(self):
+        self.assertIn("Dispatch it to a worker", self.spawn())
+        self.assertIn("2nd", self.spawn())
+        self.assertEqual(self.spawn(), "", "the 3rd ordinary call should be silent")
+
+    def test_a_named_fork_or_isolated_call_is_not_a_teammate(self):
+        """The harness runs these as subagents even with a name."""
+        self.assertNotIn("agent-teams teammate",
+                         self.spawn(name="f", subagent_type="fork"))
+        self.assertNotIn("agent-teams teammate",
+                         self.spawn(name="w", isolation="worktree"))
+
+    def test_a_session_with_no_marker_is_left_alone(self):
+        self.assertEqual(self.fire(tool="Agent", sid="not-a-boss",
+                                   tool_input={"name": "x", "prompt": "y"}), "")
 
 
 if __name__ == "__main__":
