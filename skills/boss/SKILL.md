@@ -657,9 +657,9 @@ checks before you allow it:
 
 Then push. When `gh pr create` fires a duplicate `pull_request` run, cancel it and
 keep the push run. The merge gate does not change: CI green on the pinned head, plus
-every review GO. A check that fails puts the full run back on the worker's machine.
-Either way, look at `uptime` before any full local run: above the core count, the
-local run is the slowest path.
+every review GO. If any of the four checks fails, the full suite runs on the
+worker's machine, as before. Either way, look at `uptime` before any full local
+run: above the core count, the local run is the slowest path.
 
 ### Messaging discipline
 
