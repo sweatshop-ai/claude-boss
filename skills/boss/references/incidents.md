@@ -115,3 +115,23 @@ continues.
 events. "No polling loop" was the right instinct and it was implemented as nothing
 at all. Silence that is correct by the letter of the design, while four workers sit
 idle, is still the failure the design existed to prevent.
+
+## 2026-10-17 — the full suite crawled on the shared workstation while the CI sat free
+
+A suite of about 4,900 tests was at 66% after 40 minutes, at load 32–37: other
+tracks' test runs plus the worker's own reviewers, all on the one shared
+workstation. On an idle machine the same suite takes 549 s. The CI, on
+self-hosted runners, runs the same `pytest -q` on two Python versions in about 10
+minutes, on exactly the tree that gets merged.
+
+**What it bought:** P15. On a branch that deploys nothing the worker runs only the
+test files its change touches and lets the CI run the full suite while the reviews
+run, after four checks: same full command, runners not billed, nothing deploys, the
+head contains main's tip. A duplicate `pull_request` run from `gh pr create` is
+cancelled in favour of the push run. The merge gate is unchanged. And `uptime`
+before any full local run: above the core count, the local run is the slowest path.
+
+**The general lesson:** "run the whole suite before pushing" assumes the machine is
+idle. On a shared one it can be the slowest path while the CI has the free
+capacity. Where the capacity sits is a measurement, not a default: read the load
+before choosing.
