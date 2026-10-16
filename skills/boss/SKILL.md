@@ -577,7 +577,9 @@ and makes it worse.
 
 Workers run their own plan prompts and **the owner approves them in the worker's own
 pane**. Your job is to review plan *content* when a worker sends one, and reply
-with a verdict and specifics. Criteria: `references/reports.md`.
+with a verdict and specifics. Criteria: `references/reports.md`. A test plan that
+runs the full suite on the shared workstation for a branch that deploys nothing
+goes back to the worker: P15.
 
 ### P12. Blocked on the owner — never go quiet
 
@@ -634,6 +636,31 @@ every review round writes its output to a file and leaves it there, the verdict
 goes on the PR before the merge, and **no merge order is given on a GO that
 exists only in a message**, whoever produced it.
 
+### P15. The full test suite runs on the CI, not on the shared workstation
+
+Measured 2026-10-17: a suite of about 4,900 tests was at 66% after 40 minutes on
+the shared workstation, at load 32–37 (other tracks' test runs plus the worker's
+own reviewers). It takes 549 s when the machine is idle. The CI, on self-hosted
+runners, ran the same `pytest -q` on two Python versions in about 10 minutes, on
+exactly the tree that gets merged.
+
+So **when a branch deploys nothing, the worker runs only the test files its change
+touches, pushes, and lets the CI run the full suite while the reviews run.** Four
+checks before you allow it:
+
+1. the workflow runs the same full command (read its `run:` lines);
+2. its runners are not billed (hosted minutes can be billed out);
+3. the branch deploys nothing (the repo's deploy check, or the workflows' `on:`
+   triggers);
+4. the head contains main's tip (`git merge-base --is-ancestor origin/main HEAD`),
+   so the push run tests the exact merge tree.
+
+Then push. When `gh pr create` fires a duplicate `pull_request` run, cancel it and
+keep the push run. The merge gate does not change: CI green on the pinned head, plus
+every review GO. If any of the four checks fails, the full suite runs on the
+worker's machine, as before. Either way, look at `uptime` before any full local
+run: above the core count, the local run is the slowest path.
+
 ### Messaging discipline
 
 - **One message per topic.** There is a per-session cap (~50) and identical
@@ -685,7 +712,8 @@ Parse `$ARGUMENTS`: empty or `status` → **A** · `dispatch <task> [worker]` �
    files — review lenses, competing hypotheses, independent research angles — you
    may run it as a burst of at most three agent-teams teammates. Their reports
    count against your 150k."* The worker decides; `references/models.md` has the
-   criteria.
+   criteria. For a branch that deploys nothing, add: *"Run only the test files your
+   change touches; the CI runs the full suite (P15)."*
 5. **Verification is the tool result.** An error means it didn't land. If the
    dispatch only lands after a GitHub write the classifier blocks in the worker,
    do it yourself through `boss-run --why ... -- gh ...` instead of handing the
