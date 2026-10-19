@@ -330,11 +330,11 @@ review)
 
 premortem)
   # `review` finds what is structurally missing. This lists how the track could
-  # fail, so the owner only strikes out what is not a problem: imagining failures
-  # is the model's job, judging them is the owner's. With [dir] the model reads
+  # fail, and the boss covers every risk listed without asking the owner (they
+  # approved the list unchanged at every boss start). With [dir] the model reads
   # the code there and grounds the risks in it.
   # Fewer than 8 risks is a model that did not do the sweep; more than 25 is
-  # more than the owner will read, so the list is cut there.
+  # more than one objective can cover, so the list is cut there.
   t=${2:-}; need "$t" >/dev/null
   risk='^[[:space:]]*RISK:'
   ask_second_model boss-goal-premortem.md "$t" "$risk" "${3:-}" 8

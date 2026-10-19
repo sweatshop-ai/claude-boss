@@ -42,7 +42,8 @@ will compact only at the 1M ceiling, and the fix is the owner typing
    else is refused, because it becomes a file name under `pm/`.
 3. **Claim your objective**: `boss-goal show <track>`, or `boss-goal init <track>`,
    fill it in from what the owner asked for, then `check` it, `review` it, run
-   `premortem` on it, and ask them which risks are not a problem. See Objective.
+   `premortem` on it, and cover every risk it lists. No question to the owner.
+   See Objective.
 4. **`boss-lifecycle.sh list --mine`** — your roster. Then plain `list` once, to
    see whether another boss is on this machine and what is unowned. See Who your
    workers are.
@@ -370,10 +371,13 @@ good at the structural omissions — a deliverable no criterion tests, a deploy 
 no verification, an empty Pause-when on production work. Act on the MISSING lines
 or say why not; a reviewer that stays silent is not a pass, and `review` says so.
 
-**Never ask the owner what could go wrong.** They say yes to most of what a boss
-suggests, so a question they must answer from a blank page gets a thin answer, and
-a list they must approve item by item gets rubber-stamped. Invert it: a model
-imagines the failures, the owner judges them, and silence means *keep it*.
+**Never ask the owner what could go wrong, and never ask them to approve the
+list.** They say yes to most of what a boss suggests: a question they must answer
+from a blank page gets a thin answer, and a list put to them gets "All are real"
+every time (the owner, 2026-10-19: they approved the suggestion at every boss
+start). So the pre-mortem is a safety step the boss runs on its own: a model
+imagines the failures, the boss covers every one, and the owner sees the result
+in a report, not in a question.
 
 `premortem` puts the objective to Codex (Haiku as fallback) against
 `references/boss-goal-premortem.md`: it is a week later, the track failed, list
@@ -384,22 +388,24 @@ the code there and marks what it saw (`[seen: <path>]`). It takes one to five
 minutes: run it in the background straight after `review`, and dispatch the
 first Next item while it runs.
 
-When it returns, read back the Outcome and the Done-when list, then the numbered
-risks, grouped as you see fit. Dispatch before you ask: `AskUserQuestion` holds
-your turn until the owner answers, and the workers should not wait with you. Then
-open one `AskUserQuestion` (that is what rings the owner's chime): *"Which of
-these are **not** a problem? Type their numbers."* Options: **All are real**
-(recommended) and **None of them matter**; the owner types numbers under Other.
+When it returns, **every risk is real**; there is no strike-out step. Cover
+each one: a Done-when criterion that would catch it, a Constraint that forbids
+it, or a Pause-when line that hands it to the owner. Group them first —
+twenty-five risks are usually five or six failure modes, and one criterion
+covers a mode. The objective holds only the covering lines (it is capped at
+4 KB); the full mapping, each `R<n>` → the line that covers it, goes to the
+tracker, so `review` and the next boss can see nothing was dropped.
 
-- **A struck risk is settled.** Record it in the tracker as accepted, and never
-  raise it again.
-- **Every risk left in is real.** Cover each one: a Done-when criterion that would
-  catch it, a Constraint that forbids it, or a Pause-when line that hands it to
-  the owner. Group them first — twenty-five risks are usually five or six
-  failure modes, and one criterion covers a mode. The objective holds only the
-  covering lines (it is capped at 4 KB); the full mapping, each `R<n>` → the
-  line that covers it, goes to the tracker, so `review` and the next boss can
-  see nothing was dropped.
+Then tell the owner in a plain message, not an `AskUserQuestion`: the failure
+modes you found, in a few lines, and the line that now covers each. That message
+is a report; it rings the "ready" tick, not the chime, and nothing waits on it.
+
+- **The owner may still strike a risk**, whenever they choose, by telling you.
+  A struck risk is settled: drop its covering line if nothing else needs it,
+  record it in the tracker as accepted, and never raise it again.
+- **A risk only the owner can settle** (money, a client, a production host,
+  something they alone know) is not struck by you either. It becomes a
+  Pause-when line, and the work it touches stops there until they answer.
 
 On 2026-09-08 the risk that mattered, *"the Curator cross-owner vector"*, reached
 the boss at 01:35, six hours in, because the owner happened to still be awake. It
@@ -445,7 +451,7 @@ intentions, only this file.
 `/grilling` in your pane and it grills them on the file — that is their configured
 default for stress-testing a plan (`~/.claude/CLAUDE.md`, skill precedence). Never
 invoke it yourself at session start: it is relentless by design and interactive,
-which is the opposite of one numbered list to strike from.
+which is the opposite of a pre-mortem the boss settles on its own.
 
 ## Tracker — live state small, history archived
 
