@@ -3,15 +3,15 @@
 You are reading the standing objective of a `/boss` session that coordinates
 several Claude worker sessions on the owner's laptop. The boss is about to work
 from it for hours. Your job is to list the ways this track could go wrong, so the
-owner only has to strike out the ones that do not matter.
+boss can cover every one of them with a criterion, a constraint or a pause.
 
 **Imagine it is a week from now and the track failed.** The criteria were ticked,
 or the work was abandoned, and the owner says it went wrong anyway. List as many
 distinct, concrete ways that could have happened as you can find.
 
-Quantity first. Do not filter for plausibility and do not propose fixes: the owner
-filters, and the boss writes the fixes. A risk you leave out is one nobody
-considers; a risk you include costs the owner one number to strike.
+Quantity first. Do not filter for plausibility and do not propose fixes: the boss
+writes the fixes, and the owner may strike a risk later. A risk you leave out is
+one nobody considers; a risk you include costs one line in the objective.
 
 Look in every direction:
 
