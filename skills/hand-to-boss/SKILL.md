@@ -135,8 +135,8 @@ checks before anything starts:
   ```
 
   `False` → ask the owner with `AskUserQuestion` whether to launch anyway and
-  answer the prompt in the pane themselves (`tmux attach -t boss-<track>`), or
-  to stop. Only their hand answers it.
+  answer the prompt in the pane themselves (the tab opened at launch, or
+  `tmux attach -t boss-<track>`), or to stop. Only their hand answers it.
 
 ```bash
 tmux new-session -d -s boss-<track> -c <repo> \
@@ -151,6 +151,19 @@ process is readable by every user on the machine and ends up in `ps`, shell
 history and logs. `BOSS_WORKER_MODEL` makes the worker model the default for
 every spawn in that session. `exec $SHELL` keeps the pane open if Claude exits,
 so the reason can be read.
+
+Then open the boss in a new terminal tab, so the owner sees it without typing
+the attach command. In WezTerm (`$TERM_PROGRAM` is `WezTerm`, or `wezterm cli
+list` answers):
+
+```bash
+wezterm cli spawn --cwd <repo> -- tmux attach -t boss-<track>
+```
+
+It prints the new pane id. The tab is a tmux client like any other: closing it
+detaches, and the boss keeps running. Any other terminal, or `wezterm cli`
+fails: open nothing, and the report's attach line is the way in. Never let a
+failed tab stop the launch.
 
 ## 5. Find the boss's name
 
@@ -178,7 +191,8 @@ relaunching.
 Report, in three lines, in the owner's conversation language:
 
 - the boss's name (what `SendMessage` reaches),
-- the tmux session `boss-<track>` and `tmux attach -t boss-<track>`,
+- the tmux session `boss-<track>`, whether its tab opened, and
+  `tmux attach -t boss-<track>`,
 - the brief's path, and whether it is pushed.
 
 Done when the name comes from the `ListAgents` row, not from the pane title.
