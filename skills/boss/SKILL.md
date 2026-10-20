@@ -16,7 +16,7 @@ The owner watches those panes and can talk to any worker directly.
 ## Session start — do these four things
 
 A boss is launched with `boss-start` (`${CLAUDE_PLUGIN_ROOT}/skills/boss/bin/boss-start`),
-which runs `claude --model fable --effort xhigh --autocompact 450k
+which runs `claude --model fable --effort high --autocompact 450k
 --fallback-model opus` inside tmux. If you were started as bare `claude`, say so
 in your first reply: you are then on whatever `~/.claude/settings.json` says and
 will compact only at the 1M ceiling, and the fix is the owner typing
@@ -187,7 +187,7 @@ machinery that watches your team can see it.
 ### Lifecycle
 
 ```bash
-boss-start [track]                                        # the owner runs this: fable, xhigh, autocompact 450k
+boss-start [track]                                        # the owner runs this: fable, high, autocompact 450k
 boss-lifecycle.sh spawn <project-dir> [name] [--model M]  # prints pane id + name; M defaults to opus, effort medium
 boss-lifecycle.sh claim <pane-id> [name]                  # adopt a worker
 boss-lifecycle.sh retire <pane-id> [--kill]               # refuses if BUSY
