@@ -39,14 +39,16 @@ Same tokenizer across Fable 5.1 and Opus 4.7+, so the context lines (150k/250k
 for workers, 400k/500k for the boss) and the 60k/90k cost-per-turn lines need no
 re-baselining.
 
-**Effort: `xhigh` on both**, pinned by `boss-start` and by `spawn`. Claude
-Code's default is `high` on every model except Opus 4.7, so a global
-`effortLevel: high` changes nothing. the owner's instruction (2026-09-08) is that
-the result comes before the spend; `xhigh` is Anthropic's recommended setting
-for agentic coding on this tier, and on the boss the extra thinking is output
-tokens on top of a cache-read-dominated turn — the one place more tokens buy
-judgement cheaply. `max` was not chosen: the docs describe it as prone to
-overthinking with diminishing returns, and it cannot be set in settings.
+**Effort: `xhigh` on the boss, `medium` on every worker**, pinned by
+`boss-start` and by `spawn`. Claude Code's default is `high` on every model
+except Opus 4.7, so a global `effortLevel` would otherwise decide it. On the
+boss the extra thinking is output tokens on top of a cache-read-dominated turn
+— the one place more tokens buy judgement cheaply. Workers, Opus and Sonnet
+alike, run at `medium` (the owner, 2026-10-20; `xhigh` from 2026-09-08): a
+worker lives in the output columns, and its work is checked by the boss and
+the review chain. `BOSS_WORKER_EFFORT` overrides it for the machine. `max` was
+not chosen anywhere: the docs describe it as prone to overthinking with
+diminishing returns, and it cannot be set in settings.
 
 ---
 
