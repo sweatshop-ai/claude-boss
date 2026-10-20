@@ -49,9 +49,10 @@ set -euo pipefail
 
 MODEL="${BOSS_MODEL:-fable}"
 AUTOCOMPACT="${BOSS_AUTOCOMPACT:-450k}"
-# xhigh: the boss's output is a judgement and its input is 97% cache reads, so
-# deeper thinking is the one place extra tokens buy quality at almost no cost.
-EFFORT="${BOSS_EFFORT:-xhigh}"
+# high (the owner, 2026-10-20; xhigh before): the boss's input is 97% cache
+# reads by token count, but output, thinking included, was 17-30% of the bill
+# on six measured boss sessions, so xhigh was not as cheap as it looked.
+EFFORT="${BOSS_EFFORT:-high}"
 # Overload or outage on the primary must not silence the boss (P12: silence
 # after a blocker is a bug). Opus is the same tier; the switch lasts one turn
 # and Claude Code prints a notice when it happens.
