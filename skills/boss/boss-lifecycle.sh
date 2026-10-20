@@ -29,9 +29,10 @@ set -euo pipefail
 
 CLAUDE_CMD="${BOSS_CLAUDE_CMD:-claude}"
 WORKER_MODEL_DEFAULT="${BOSS_WORKER_MODEL:-opus}"    # see launch_claude
-# xhigh for agentic coding (the owner, 2026-09-08: the result matters more than
-# the spend). Pinned here so a worker does not depend on the global effortLevel.
-WORKER_EFFORT_DEFAULT="${BOSS_WORKER_EFFORT:-xhigh}"
+# medium for every worker, Opus and Sonnet alike (the owner, 2026-10-20; was
+# xhigh since 2026-09-08). Pinned here so a worker does not depend on the
+# global effortLevel. The boss keeps its own effort in boss-start.
+WORKER_EFFORT_DEFAULT="${BOSS_WORKER_EFFORT:-medium}"
 BOSS_PANE="${TMUX_PANE:-}"
 SHELL_CMDS='^(bash|zsh|fish|sh|dash)$'
 
