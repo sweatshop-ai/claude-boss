@@ -196,10 +196,14 @@ class CiState(unittest.TestCase):
         self.gh(run("queued", self.now - 60), self.history([30]))
         self.settle()
         f = next((self.tmp / "cache").glob("*.json"))
-        for bad in ("[]", '{"run": "x"}', '{"run": {"status": 5, "created_at": 7}}', '"x"'):
+        for bad in ("[]", '{"run": "x"}', '{"run": {"status": 5, "created_at": 7}}', '"x"',
+                    '{"run": {"status": ""}}', '{"run": {"status": "bogus"}}'):
             f.write_text(bad)
             out, _ = self.get()
             self.assertEqual(out["status"], "unknown", bad)
+        f.write_text('{"run": {"status": "queued"}, "median_s": 1e309}')
+        out, _ = self.get()
+        self.assertEqual((out["status"], out["eta_s"]), ("queued", None))
 
     def test_the_vendor_header_names_the_master(self):
         self.assertIn("master copy", CI.read_text(encoding="utf-8")[:2000])
