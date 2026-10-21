@@ -89,11 +89,16 @@ def pin(records, past_exit=False):
 
     `past_exit` leaves out what `/exit` writes before its "Background work is
     running" dialog, so the boss can tell that dialog on an idle worker from
-    a turn that started in the gap."""
+    a turn that started in the gap, and counts a prompt queued behind the
+    dialog (an `enqueue` record), which exiting would drop."""
     last = None
     for d in records:
         t = d.get("type")
         if past_exit and t == "user" and is_exit_record(d):
+            continue
+        if past_exit and t == "queue-operation" and d.get("operation") == "enqueue":
+            # A prompt that arrived behind the dialog: exiting would drop it.
+            last = "enqueue@%s" % d.get("timestamp")
             continue
         if t in ("user", "assistant") or (
                 t == "attachment" and (d.get("attachment") or {}).get("type") == "queued_command"):
