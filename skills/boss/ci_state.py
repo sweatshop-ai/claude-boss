@@ -90,12 +90,12 @@ def start_refresh(repo, branch):
         try:
             # A refresh that failed fast leaves no newer cache: without this,
             # every poll would start another one.
-            if time.time() - attempt.stat().st_mtime < MAX_AGE_S:
+            if 0 <= time.time() - attempt.stat().st_mtime < MAX_AGE_S:
                 return
         except FileNotFoundError:
             pass
         try:
-            if time.time() - lock.stat().st_mtime < REFRESH_S:
+            if 0 <= time.time() - lock.stat().st_mtime < REFRESH_S:
                 return
             lock.unlink()
         except FileNotFoundError:
@@ -114,8 +114,10 @@ def ci_state(repo, branch, now=None):
     try:
         age = now - f.stat().st_mtime
         cached = json.loads(f.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    except Exception:                     # any file, any shape: never raise here
         age, cached = None, None
+    if age is not None and age < 0:
+        age = MAX_AGE_S + 1               # written "in the future": the clock stepped back
     if age is None or age > MAX_AGE_S:
         start_refresh(repo, branch)
     if cached is None or age > STALE_S:
@@ -142,7 +144,9 @@ def from_cache(cached, now):
     out.update(status="queued" if status in WAITING else status, conclusion=run.get("conclusion"),
                run_url=run.get("html_url"))
     median = cached.get("median_s")
-    median = median if isinstance(median, (int, float)) and math.isfinite(median) else None
+    if isinstance(median, bool) or not isinstance(median, (int, float)) \
+            or not math.isfinite(median) or median <= 0:
+        median = None
     started = ts(run.get("run_started_at"))
     if out["status"] == "queued":
         # run_started_at is the current attempt's start (it resets on a re-run;
@@ -150,11 +154,11 @@ def from_cache(cached, now):
         # that state after earlier jobs ran: no timestamp says when, so no wait.
         since = started or ts(run.get("created_at"))
         if status != "waiting" and since:
-            out["queued_for_s"] = int(now - since)
+            out["queued_for_s"] = max(0, int(now - since))
         out["eta_s"] = int(median) if median else None
         out["eta_excludes_queue"] = True
     elif out["status"] == "in_progress" and started:
-        out["running_for_s"] = int(now - started)
+        out["running_for_s"] = max(0, int(now - started))
         out["eta_s"] = max(0, int(median - out["running_for_s"])) if median else None
     return out
 
@@ -189,6 +193,7 @@ def refresh(repo, branch):
                           % (on, run["workflow_id"], HISTORY)).get("workflow_runs") or []
                 spans = [ts(h.get("updated_at")) - ts(h.get("run_started_at")) for h in hist
                          if ts(h.get("updated_at")) and ts(h.get("run_started_at"))]
+                spans = [x for x in spans if x > 0]
                 median = statistics.median(spans) if spans else None
             except errors:
                 median = None
