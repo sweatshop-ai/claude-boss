@@ -242,7 +242,9 @@ data = json.load(open(os.path.join(d, "repo.json")))
 if path not in data:
     print(json.dumps({"message": "Not Found"}))
     sys.exit(1)
-print(json.dumps(data[path]))
+val = data[path]
+for page in (val["__pages__"] if isinstance(val, dict) and "__pages__" in val else [val]):
+    print(json.dumps(page))
 '''
 
 
@@ -306,18 +308,51 @@ class GitHubFrontier(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("no sub-issues", err)
 
-    def test_claim_labels_the_issue(self):
+    def claim(self, num, name="Mei"):
+        return subprocess.run([sys.executable, str(FRONTIER), "claim", self.SRC, num, name],
+                              capture_output=True, text=True, env=self.env)
+
+    def posts(self):
+        return [c for c in (json.loads(l) for l in (self.dir / "calls.log").read_text().splitlines())
+                if c[0] == "POST"]
+
+    def test_claim_creates_the_label_then_adds_it(self):
         self.repo([issue(11, "API")], {})
-        r = subprocess.run([sys.executable, str(FRONTIER), "claim", self.SRC, "11", "Mei"],
-                           capture_output=True, text=True, env=self.env)
+        r = self.claim("11")
         self.assertEqual(r.returncode, 0, r.stderr)
-        calls = [json.loads(l) for l in (self.dir / "calls.log").read_text().splitlines()]
-        self.assertIn(["POST", "repos/acme/app/issues/11/labels", "-f", "labels[]=worker:Mei"], calls)
+        self.assertEqual(self.posts(), [
+            ["POST", "repos/acme/app/labels", "-f", "name=worker:Mei"],
+            ["POST", "repos/acme/app/issues/11/labels", "-f", "labels[]=worker:Mei"]])
+
+    def test_claim_refuses_a_blocked_sub_issue(self):
+        api, docs = issue(11, "API"), issue(13, "Docs")
+        self.repo([api, docs], {13: [api]})
+        r = self.claim("13")
+        self.assertEqual(r.returncode, 3)
+        self.assertIn("not ready", r.stderr)
+        self.assertEqual(self.posts(), [])
+
+    def test_claim_refuses_an_issue_outside_the_map(self):
+        self.repo([issue(11, "API")], {})
+        r = self.claim("42")
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("not a sub-issue", r.stderr)
+
+    def test_every_page_of_sub_issues_and_blockers_counts(self):
+        a, b, c = issue(11, "A"), issue(12, "B"), issue(13, "C")
+        data = {"repos/acme/app/issues/10/sub_issues": {"__pages__": [[a, b], [c]]},
+                "repos/acme/app/issues/11/dependencies/blocked_by": [],
+                "repos/acme/app/issues/12/dependencies/blocked_by": [],
+                "repos/acme/app/issues/13/dependencies/blocked_by": {"__pages__": [[a], [b]]}}
+        (self.dir / "repo.json").write_text(json.dumps(data))
+        code, out, err = self.run_json()
+        self.assertEqual(code, 0, err)
+        self.assertEqual(out["ready"], ["11", "12"])
+        self.assertEqual({t["num"]: t for t in out["tickets"]}["13"]["open_blockers"], ["11", "12"])
 
     def test_claim_refuses_a_claimed_issue(self):
         self.repo([issue(11, "API", labels=["worker:Ada"])], {})
-        r = subprocess.run([sys.executable, str(FRONTIER), "claim", self.SRC, "11", "Mei"],
-                           capture_output=True, text=True, env=self.env)
+        r = self.claim("11")
         self.assertEqual(r.returncode, 3)
         self.assertIn("Ada", r.stderr)
 

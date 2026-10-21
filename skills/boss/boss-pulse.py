@@ -146,10 +146,19 @@ def tickets_source(body):
 
 
 GH_CACHE_S = 120        # a GitHub frontier older than this is refreshed
+GH_FIRST_S = 3          # the first read of a GitHub graph, inside the hook's 5 s
 
 
 def ready_of(out):
     return ["%s %s" % (t["num"], t["title"]) for t in out["tickets"] if t["state"] == "ready"]
+
+
+def frontier_cache(track, source):
+    """Where the last `frontier.py --json` of this track's GitHub graph is kept.
+    Keyed by the source too, so a track moved to another graph never reads the
+    old one's tickets. `boss-goal check` writes the same file."""
+    import hashlib
+    return STATE / ("%s.%s.frontier.json" % (track, hashlib.sha1(source.encode()).hexdigest()[:10]))
 
 
 def read_frontier(source, track):
@@ -157,16 +166,26 @@ def read_frontier(source, track):
 
     A folder is read the way `frontier.py` reads it, by importing it, so the
     pulse and the claim never disagree on what is ready. GitHub takes one call
-    per ticket, too slow for this hook's 5 s: the pulse reads the last
-    `frontier.py --json` saved under .pulse/, and refreshes it in a detached
-    process when it is missing or older than GH_CACHE_S. The first pulse on a
-    new GitHub graph therefore sees no frontier; the next one does."""
+    per ticket, too slow to repeat inside this hook's 5 s: the pulse reads the
+    last `frontier.py --json` saved under .pulse/ and refreshes it in a detached
+    process when it is older than GH_CACHE_S. With no cache yet it reads GitHub
+    itself, for GH_FIRST_S at most; a graph too big for that is left to the
+    background refresh and to `boss-goal check`, which saves the same cache."""
     if source.startswith("gh:"):
-        cache = STATE / ("%s.frontier.json" % track)
+        cache = frontier_cache(track, source)
         try:
             age = time.time() - cache.stat().st_mtime
         except OSError:
             age = None
+        if age is None:
+            try:
+                r = subprocess.run([sys.executable, str(FRONTIER_PY), "--json", source],
+                                   capture_output=True, text=True, timeout=GH_FIRST_S)
+                STATE.mkdir(parents=True, exist_ok=True)
+                cache.write_text(r.stdout if r.returncode == 0 else r.stderr, encoding="utf-8")
+                age = 0
+            except (subprocess.SubprocessError, OSError):
+                pass
         if age is None or age > GH_CACHE_S:
             try:
                 subprocess.Popen(
@@ -377,7 +396,7 @@ def main():
 
     if idle:
         lines.append("IDLE NOW, yours: "
-                     + ", ".join("%s (%s)" % (n, c) for n, c in idle[:8]))
+                     + ", ".join("%s (%s)" % (n, c) for n, c in idle[:policy.BOSS_SPAN]))
     for key, rung, mins, text in rungs[:3]:
         lines.append("OVERDUE: blocker open %d min, rung %d due - %s"
                      % (mins, rung, text))
@@ -405,8 +424,8 @@ def main():
     elif source:
         if idle and ready:
             n += 1
-            lines.append("%d. Dispatch one READY ticket to each idle worker, all of them "
-                         "this turn, not one. Claim each first: `python3 %s claim %s "
+            lines.append("%d. Dispatch the READY tickets this turn, one ticket per idle worker "
+                         "until the READY list runs out, not one per turn. Claim each first: `python3 %s claim %s "
                          "<NN> <worker>`." % (n, FRONTIER_PY, source))
         if spawn > 0:
             n += 1

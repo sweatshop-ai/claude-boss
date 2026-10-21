@@ -171,6 +171,11 @@ class Frontier(PulseCase):
         self.assertNotIn("Spawn", out)
 
 
+    def cache(self, source):
+        import hashlib
+        return self.tmp / "pm/.pulse" / ("%s.%s.frontier.json" % (
+            TRACK, hashlib.sha1(source.encode()).hexdigest()[:10]))
+
     def pulse_with_team(self, idle, size):
         """Run main() in-process with a stand-in for the tmux roster."""
         import contextlib
@@ -204,7 +209,7 @@ class Frontier(PulseCase):
             (self.issues / ("%s-x.md" % n)).write_text(ticket(n, name))
         self.goal_with_tickets(self.issues)
         out = self.pulse_with_team([("Ada", "w:1.0"), ("Bo", "w:1.1")], size=2)
-        self.assertIn("Dispatch one READY ticket to each idle worker, all of them", out)
+        self.assertIn("one ticket per idle worker until the READY list runs out", out)
         self.assertIn("Spawn 1 more worker (team 2 of 12)", out)
 
     def test_a_full_team_is_not_asked_to_grow(self):
@@ -212,7 +217,7 @@ class Frontier(PulseCase):
             (self.issues / ("%02d-x.md" % n)).write_text(ticket("%02d" % n, "T%d" % n))
         self.goal_with_tickets(self.issues)
         out = self.pulse_with_team([("Ada", "w:1.0")], size=12)
-        self.assertIn("Dispatch one READY ticket", out)
+        self.assertIn("Dispatch the READY tickets", out)
         self.assertNotIn("Spawn", out)
 
     def test_without_tickets_each_idle_worker_gets_a_next_item(self):
@@ -222,7 +227,7 @@ class Frontier(PulseCase):
     def test_a_github_graph_is_read_from_its_cache(self):
         """GitHub is too slow for a 5 s Stop hook: the pulse reads the last
         `frontier.py --json` it saved, and refreshes it in the background."""
-        cache = self.tmp / "pm/.pulse" / (TRACK + ".frontier.json")
+        cache = self.cache("gh:acme/app#10")
         cache.write_text(json.dumps({"tickets": [
             {"num": "11", "title": "API", "state": "ready"},
             {"num": "12", "title": "UI", "state": "claimed"}]}))
@@ -231,7 +236,7 @@ class Frontier(PulseCase):
         self.assertIn("READY NOW: 11 API", out)
         self.assertNotIn("12 UI", out)
 
-    def test_a_missing_github_cache_is_filled_in_the_background(self):
+    def test_the_first_pulse_on_a_github_graph_reads_it(self):
         fake = self.tmp / "bin"
         fake.mkdir()
         (fake / "gh").write_text("#!/bin/sh\necho '[]'\n")
@@ -243,12 +248,37 @@ class Frontier(PulseCase):
         res = subprocess.run([sys.executable, str(PULSE)], input=json.dumps(payload),
                              capture_output=True, text=True, env=env, timeout=20)
         self.assertEqual(res.returncode, 0, res.stderr)
-        cache = self.tmp / "pm/.pulse" / (TRACK + ".frontier.json")
-        for _ in range(50):
-            if cache.exists() and cache.read_text().strip():
-                break
-            time.sleep(0.1)
-        self.assertIn("no sub-issues", cache.read_text())
+        self.assertIn("no sub-issues", self.cache("gh:acme/app#10").read_text())
+        out = json.loads(res.stdout)["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("TICKET GRAPH BROKEN", out, "the first pulse reads GitHub itself")
+
+    def test_a_cache_belongs_to_one_source(self):
+        self.cache("gh:acme/app#10").write_text(json.dumps({"tickets": [
+            {"num": "11", "title": "API", "state": "ready"}]}))
+        self.goal_with_tickets("gh:acme/other#5")
+        fake = self.tmp / "bin"
+        fake.mkdir()
+        (fake / "gh").write_text("#!/bin/sh\necho '[]'\n")
+        (fake / "gh").chmod(0o755)
+        path = os.environ["PATH"]
+        os.environ["PATH"] = "%s:%s" % (fake, path)
+        try:
+            out = self.pulse_with_team([], size=0)
+        finally:
+            os.environ["PATH"] = path
+        self.assertNotIn("11 API", out)
+        self.assertIn("acme/other#5 has no sub-issues", out)
+
+    def test_more_idle_workers_than_tickets_stops_at_the_frontier(self):
+        (self.issues / "01-x.md").write_text(ticket("01", "API"))
+        self.goal_with_tickets(self.issues)
+        out = self.pulse_with_team([("Ada", "w:1.0"), ("Bo", "w:1.1")], size=2)
+        self.assertIn("one ticket per idle worker until the READY list runs out", out)
+
+    def test_every_idle_worker_up_to_the_span_is_named(self):
+        idle = [("W%d" % i, "w:1.%d" % i) for i in range(12)]
+        out = self.pulse_with_team(idle, size=12)
+        self.assertIn("W11 (w:1.11)", out)
 
 
 class Marker(PulseCase):

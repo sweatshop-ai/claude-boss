@@ -16,8 +16,12 @@ The boss hands out the whole frontier, not the top item.
   of issue N and GitHub's native issue dependencies; a closed issue is done, a
   `worker:<name>` label is the claim (every worker writes as one account, so the
   assignee cannot say who), an open blocker outside the sub-issues is external.
-  The pulse's Stop hook has 5 s, so it reads a cached `frontier.py --json` and
-  refreshes it in the background every 2 minutes.
+  The claim re-reads the live graph and refuses a ticket that is blocked,
+  claimed, done or not a sub-issue, and creates the label before adding it.
+  Paginated sub-issues and blockers are joined across pages. The pulse's Stop
+  hook has 5 s, so it reads a cached `frontier.py --json`, keyed by track and
+  source, refreshed in the background every 2 minutes; with no cache it reads
+  GitHub itself for up to 3 s, and `boss-goal check` saves the same cache.
 - **Without a graph, Next works the same way**: one item per idle worker.
 - **Span of control 5 → 12** (`policy.BOSS_SPAN`). The five had no measurement
   behind it. The limit the owner hits is the weekly usage cap (four times since
