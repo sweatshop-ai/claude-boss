@@ -170,13 +170,36 @@ class CiState(unittest.TestCase):
         self.assertEqual(calls.read_text(), "x")
 
     def test_waiting_and_requested_runs_are_queued(self):
-        for status in ("waiting", "pending", "requested"):
+        for status in ("pending", "requested"):      # "waiting": its own test
             self.tearDown()
             self.setUp()
             self.gh(run(status, self.now - 120), self.history([30]))
             out = self.settle()
             self.assertEqual(out["status"], "queued", status)
             self.assertAlmostEqual(out["queued_for_s"], 120, delta=30)
+
+    def test_a_rerun_counts_its_wait_from_its_own_attempt(self):
+        r = run("queued", self.now - 3 * 86400)
+        r.update(run_attempt=2, run_started_at=iso(self.now - 120))
+        self.gh(r, self.history([30]))
+        out = self.settle()
+        self.assertAlmostEqual(out["queued_for_s"], 120, delta=30)
+
+    def test_a_waiting_run_does_not_invent_a_wait(self):
+        r = run("waiting", self.now - 86400, self.now - 3600)
+        self.gh(r, self.history([30]))
+        out = self.settle()
+        self.assertEqual(out["status"], "queued")
+        self.assertIsNone(out["queued_for_s"])
+
+    def test_a_malformed_cache_reads_as_unknown(self):
+        self.gh(run("queued", self.now - 60), self.history([30]))
+        self.settle()
+        f = next((self.tmp / "cache").glob("*.json"))
+        for bad in ("[]", '{"run": "x"}', '{"run": {"status": 5, "created_at": 7}}', '"x"'):
+            f.write_text(bad)
+            out, _ = self.get()
+            self.assertEqual(out["status"], "unknown", bad)
 
     def test_the_vendor_header_names_the_master(self):
         self.assertIn("master copy", CI.read_text(encoding="utf-8")[:2000])

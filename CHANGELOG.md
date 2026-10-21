@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.11.2 — 2026-10-21
+
+- **`ci_state` hardened** (Codex review 3 of PR 21): a cache file of another shape
+  reads as `unknown` instead of raising on the caller's poll path; a re-run's wait
+  counts from its own attempt (`run_started_at`), not the first attempt's
+  `created_at`; a `waiting` run reports no wait, since no timestamp says when it
+  started waiting.
+
 ## 0.11.1 — 2026-10-21
 
 - **`ci_state.py`**: `ci_state(repo, branch)` says whether a branch's latest Actions
