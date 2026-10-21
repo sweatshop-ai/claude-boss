@@ -135,6 +135,49 @@ class CiState(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(self.get()[0]["status"], "queued")
 
+    def test_another_host_is_another_repo(self):
+        self.gh(run("queued", self.now - 60), self.history([30]))
+        self.settle("github.com/acme/app")
+        out, _ = self.get("git.example.com/acme/app")
+        self.assertEqual(out["status"], "unknown")
+
+    def test_a_failed_history_keeps_the_current_status(self):
+        answers = {"/workflows/": None,       # the fake answers nothing parseable
+                   "/actions/runs": {"workflow_runs": [run("in_progress", self.now - 300,
+                                                           self.now - 200)]}}
+        (self.tmp / "gh").write_text(FAKE_GH.replace(
+            'for key, val in cfg["answers"].items():',
+            'if "/workflows/" in path:\n    sys.exit(1)\nfor key, val in cfg["answers"].items():'))
+        (self.tmp / "gh.json").write_text(json.dumps({"answers": answers}))
+        out = self.settle()
+        self.assertEqual(out["status"], "in_progress")
+        self.assertIsNone(out["eta_s"])
+
+    def test_a_failed_refresh_is_not_retried_on_every_poll(self):
+        self.gh(run("queued", self.now - 60), self.history([30]))
+        self.settle()
+        old = time.time() - 120             # a minute later: cache and last attempt aged
+        for f in (self.tmp / "cache").glob("*.*"):
+            os.utime(f, (old, old))
+        self.gh(fail=True)
+        calls = self.tmp / "calls"
+        (self.tmp / "gh").write_text(FAKE_GH.replace(
+            "time.sleep(cfg.get(\"sleep\", 0))",
+            "open(os.path.join(d, 'calls'), 'a').write('x')\ntime.sleep(cfg.get(\"sleep\", 0))"))
+        for _ in range(5):
+            self.get()
+            time.sleep(0.4)
+        self.assertEqual(calls.read_text(), "x")
+
+    def test_waiting_and_requested_runs_are_queued(self):
+        for status in ("waiting", "pending", "requested"):
+            self.tearDown()
+            self.setUp()
+            self.gh(run(status, self.now - 120), self.history([30]))
+            out = self.settle()
+            self.assertEqual(out["status"], "queued", status)
+            self.assertAlmostEqual(out["queued_for_s"], 120, delta=30)
+
     def test_the_vendor_header_names_the_master(self):
         self.assertIn("master copy", CI.read_text(encoding="utf-8")[:2000])
 
