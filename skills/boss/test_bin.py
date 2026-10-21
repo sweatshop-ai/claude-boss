@@ -81,9 +81,11 @@ class Tools(unittest.TestCase):
         issues.mkdir()
         (issues / "01-a.md").write_text("# 01: A\n\n**Blocked by:** None\n\n**Status:** ready\n")
         self.goal_with_tickets(issues)
-        out = self.run_tool("boss-goal", "check", "demo").stdout
-        self.assertIn("TICKETS: Ready now: 01", out)
-        self.assertNotIn('nothing under "Next', out)
+        res = self.run_tool("boss-goal", "check", "demo")
+        self.assertNotIn("unbound variable", res.stderr)
+        self.assertIn("TICKETS: Ready now: 01", res.stdout)
+        self.assertIn("| 1 queued |", res.stdout)
+        self.assertNotIn('nothing under "Next', res.stdout)
 
     def test_check_names_a_broken_ticket_graph(self):
         issues = self.cfg / "issues"

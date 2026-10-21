@@ -195,7 +195,15 @@ check)
     fr="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/../../hand-to-boss/frontier.py"
     if out=$(python3 "$fr" "$tk" 2>&1); then
       printf 'TICKETS: %s\n' "$(head -1 <<<"$out")"
+      nxt=$(head -1 <<<"$out" | sed 's/^Ready now: //; s/^none$//' | tr ',' '\n' | grep -c '[0-9]' || true)
+      if [[ "$tk" == gh:* ]]; then
+        # Save the frontier where the pulse reads it (boss-pulse.py frontier_cache).
+        key=$(printf '%s' "$tk" | sha1sum | cut -c1-10)
+        mkdir -p "$PM/.pulse"
+        python3 "$fr" --json "$tk" > "$PM/.pulse/$t.$key.frontier.json" 2>&1 || true
+      fi
     else
+      nxt=0
       printf 'TICKET GRAPH BROKEN (%s):\n%s\n' "$tk" "$out"; rc=1
     fi
   else

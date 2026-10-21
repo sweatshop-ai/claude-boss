@@ -151,7 +151,17 @@ def gh_api(*args):
     r = subprocess.run(["gh", "api", *args], capture_output=True, text=True, timeout=30)
     if r.returncode != 0:
         raise BadInput("gh api %s: %s" % (" ".join(args), (r.stderr or r.stdout).strip()[:200]))
-    return json.loads(r.stdout or "null")
+    # --paginate prints one JSON document per page: read them all, join lists.
+    docs, text, i = [], r.stdout.strip(), 0
+    dec = json.JSONDecoder()
+    while i < len(text):
+        doc, i = dec.raw_decode(text, i)
+        docs.append(doc)
+        while i < len(text) and text[i].isspace():
+            i += 1
+    if len(docs) > 1 and all(isinstance(d, list) for d in docs):
+        return [x for d in docs for x in d]
+    return docs[0] if docs else None
 
 
 def gh_ticket(repo, issue, blockers, members):
@@ -177,7 +187,7 @@ def load_github(repo, parent):
         if not subs:
             return None, ["%s#%s has no sub-issues" % (repo, parent)]
         members = {s["number"] for s in subs}
-        tickets = [gh_ticket(repo, s, gh_api("repos/%s/issues/%d/dependencies/blocked_by"
+        tickets = [gh_ticket(repo, s, gh_api("--paginate", "repos/%s/issues/%d/dependencies/blocked_by"
                                              % (repo, s["number"])) or [], members)
                    for s in subs]
     except (BadInput, subprocess.SubprocessError, OSError, ValueError) as e:
@@ -187,26 +197,40 @@ def load_github(repo, parent):
     return tickets, ["cycle in blocked-by: %s" % " -> ".join(cycle)] if cycle else []
 
 
-def claim_github(repo, num, name):
-    try:
-        issue = gh_api("repos/%s/issues/%s" % (repo, num))
-    except (BadInput, subprocess.SubprocessError, OSError, ValueError) as e:
-        print("frontier: %s" % e, file=sys.stderr)
+def claim_github(repo, parent, num, name):
+    """Label sub-issue `num` worker:<name>, only when the live graph says it is ready."""
+    tickets, errors = load_github(repo, parent)
+    if tickets is None or errors:
+        for e in errors:
+            print("frontier: " + e, file=sys.stderr)
         return 2
-    t = gh_ticket(repo, issue, [], set())
-    if t["claimed_by"]:
+    classify(tickets)
+    num = str(int(num))
+    t = next((t for t in tickets if t["num"] == num), None)
+    if t is None:
+        print("frontier: %s is not a sub-issue of %s#%s" % (num, repo, parent), file=sys.stderr)
+        return 2
+    if t["state"] == "claimed":
         print("frontier: %s is already claimed by %s" % (num, t["claimed_by"]), file=sys.stderr)
         return 3
-    if t["status"] == "done":
-        print("frontier: %s is not ready (done)" % num, file=sys.stderr)
+    if t["state"] != "ready":
+        why = "done" if t["state"] == "done" else "blocked by %s" % ", ".join(
+            t["open_blockers"] + ["external: " + e for e in t["external"]])
+        print("frontier: %s is not ready (%s)" % (num, why), file=sys.stderr)
         return 3
+    label = WORKER_LABEL + name
     try:
-        gh_api("-X", "POST", "repos/%s/issues/%s/labels" % (repo, num),
-               "-f", "labels[]=%s%s" % (WORKER_LABEL, name))
+        # GitHub's docs do not say whether adding an unknown label creates it:
+        # create it first, and an "already exists" refusal is fine.
+        gh_api("-X", "POST", "repos/%s/labels" % repo, "-f", "name=" + label)
+    except BadInput:
+        pass
+    try:
+        gh_api("-X", "POST", "repos/%s/issues/%s/labels" % (repo, num), "-f", "labels[]=" + label)
     except (BadInput, subprocess.SubprocessError, OSError, ValueError) as e:
         print("frontier: %s" % e, file=sys.stderr)
         return 2
-    print(issue.get("html_url") or "%s#%s" % (repo, num))
+    print("https://github.com/%s/issues/%s" % (repo, num))
     return 0
 
 
@@ -214,7 +238,7 @@ def load(folder):
     gh = GH_SOURCE.match(str(folder))
     if gh:
         return load_github(*gh.groups())
-    files =sorted(p for p in Path(folder).glob("*.md") if TICKET_FILE.match(p.name))
+    files = sorted(p for p in Path(folder).glob("*.md") if TICKET_FILE.match(p.name))
     if not files:
         return None, ["no ticket files (NN-slug.md) in %s" % folder]
     tickets, errors = [], []
@@ -289,7 +313,7 @@ def as_text(out):
 def claim(folder, num, name):
     gh = GH_SOURCE.match(folder)
     if gh:
-        return claim_github(gh.group(1), num, name)
+        return claim_github(gh.group(1), gh.group(2), num, name)
     num = tid(num)
     # lock the folder itself, so no lock file is left in the owner's repo
     lock = os.open(folder, os.O_RDONLY)
