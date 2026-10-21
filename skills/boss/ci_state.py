@@ -32,6 +32,7 @@ CLI:
 """
 import hashlib
 import json
+import math
 import os
 import statistics
 import subprocess
@@ -48,6 +49,7 @@ GH_TIMEOUT_S = 15
 HISTORY = 10            # successful runs the ETA's median is taken over
 # GitHub's run statuses that wait for a runner, an approval or a concurrency slot.
 WAITING = {"queued", "waiting", "pending", "requested"}
+STATUSES = WAITING | {"in_progress", "completed"}
 
 
 def cache_dir():
@@ -120,7 +122,7 @@ def ci_state(repo, branch, now=None):
         return unknown()
     try:
         return from_cache(cached, now)
-    except (AttributeError, TypeError, ValueError, KeyError):
+    except Exception:                     # the contract: never raise on the caller's path
         return unknown("malformed cache")
 
 
@@ -133,14 +135,14 @@ def from_cache(cached, now):
     run = cached.get("run")
     if not run:
         return unknown(cached.get("error") if isinstance(cached.get("error"), str) else None)
-    if not isinstance(run, dict) or not isinstance(run.get("status"), str):
+    if not isinstance(run, dict) or run.get("status") not in STATUSES:
         return unknown("malformed cache")
     out = unknown()
     status = run["status"]
     out.update(status="queued" if status in WAITING else status, conclusion=run.get("conclusion"),
                run_url=run.get("html_url"))
     median = cached.get("median_s")
-    median = median if isinstance(median, (int, float)) else None
+    median = median if isinstance(median, (int, float)) and math.isfinite(median) else None
     started = ts(run.get("run_started_at"))
     if out["status"] == "queued":
         # run_started_at is the current attempt's start (it resets on a re-run;
