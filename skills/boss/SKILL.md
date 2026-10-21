@@ -310,14 +310,17 @@ globally — it would take that choice away from you for every worker.
 broadcast is the most expensive thing you can do; it should be rare and
 deliberate.
 
-### 3. Span of control. Five workers, not eleven.
+### 3. Span of control. Up to 12 workers.
 
-Every worker's report lands in your context and stays there, so your cost per turn
-scales with the size of your team. **Past about five workers, stop adding.** Beyond
-that, workers coordinate peer-to-peer through `/team` and you handle dispatch,
-review and escalation only.
+**Run as many workers as there is ready work, up to 12** (the owner, 2026-10-21:
+finishing sooner is worth spending the week's budget sooner). The limit the owner
+actually hits is the weekly usage cap, not the five-hour one and not the machine;
+more workers spend that budget faster, they do not add to it. Every worker's
+report still lands in your context, so keep reports short and let workers
+coordinate peer-to-peer through `/team` while you handle dispatch, review and
+escalation.
 
-If the owner wants more than five running, split them across two bosses on separate
+If the owner wants more than 12 running, split them across two bosses on separate
 tracks rather than one boss holding all of it.
 
 ---
@@ -345,6 +348,7 @@ boss-goal status <track> open|paused|met "<note>"
 | **Deliverables** | the artefacts, and where they land |
 | **Constraints** | what this track must not do |
 | **Pause when** | what genuinely needs the owner |
+| **Tickets** | optional: the ticket graph this track works, a folder (`/abs/path/issues`) or `gh:owner/repo#N`; when set, its frontier replaces Next |
 | **Next, in priority order** | what an idle worker gets, without anyone being asked |
 
 **Write it at session start from what the owner asked for.** They give an outcome in
@@ -501,6 +505,16 @@ The owner), and match them. Prefer a worker already in that project; a worker wh
 just finished a related task gets the follow-up. Otherwise pick an idle worker and
 `move` them first. **Never** hand a project-X task to a busy worker in project Y.
 
+**With a ticket graph, dispatch the whole frontier.** When the objective names
+`## Tickets`, the pulse lists every ready ticket. Give one to each idle worker in
+the same turn, not one per turn; when ready tickets outnumber idle workers and the
+team is under 12, spawn for the rest. Claim each ticket before its dispatch goes
+out: `python3 ${CLAUDE_PLUGIN_ROOT}/skills/hand-to-boss/frontier.py claim <source>
+<NN> <worker>` (a folder gets a `**Claimed by:**` line, committed by path; a
+`gh:` source gets a `worker:<name>` label). Without a graph, Next works the same
+way: one item per idle worker, top first, skipping an item that waits on work
+still in progress.
+
 Dispatch prompts must be **self-contained** — workers do not inherit your context.
 
 **Your dispatch carries the owner's authority (2026-09-08).** Workers are told in
@@ -533,7 +547,10 @@ too small to judge and a merge is too late. The routine, run by the worker who w
 the thing: `codex exec -s read-only ... < /dev/null`, briefed to read and not execute,
 output checked in the first minute; posted on the PR (or the plan's PR) as "Codex
 review N (run by <name>)" with every citation marked VERIFIED or NOT FOUND; the
-author replies per finding, fixes the real ones, and reruns until GO. A verdict on an
+author replies per finding, fixes the real ones, and reruns until GO, **at most three
+rounds on one PR** (2026-10-21: PR 11 ran twelve, its late findings were edge cases of
+the wrapper itself). After the third, what is still open becomes a ticket and the PR
+merges, unless an open finding is about security or lost data. A verdict on an
 older head is not a verdict on the head you merge: fixes after the last GO get one
 more run unless they are test-only and the reviewed production code is byte-identical
 (say so in the PR). No PR merges without a GO on record; no plan is dispatched from
@@ -699,7 +716,7 @@ Parse `$ARGUMENTS`: empty or `status` → **A** · `dispatch <task> [worker]` �
 1. **Validate the task.** Issue ref → `gh api repos/<owner>/<repo>/issues/<N>`
    (never `gh issue view`, broken here). Doesn't resolve → report and stop.
 2. **Pick the worker** per P6. None suitable → `spawn`, wait for it in
-   `list --mine` (spawn stamps it, so it appears there). Wrong project → `move`. Already five workers → see Span of control.
+   `list --mine` (spawn stamps it, so it appears there). Wrong project → `move`. Already 12 workers → see Span of control.
 3. **Preview the first dispatch** (skip once the owner grants autonomy): task,
    target, project, rationale.
 4. **Send a self-contained prompt** — task and issue number, how to read it, the
@@ -713,10 +730,11 @@ Parse `$ARGUMENTS`: empty or `status` → **A** · `dispatch <task> [worker]` �
    after it."* A dispatch that continues a split task names the handoff to read
    first. For a judgment task, add: *"Use a
    cheap subagent for the mechanical parts; keep for yourself only the steps where
-   a plausible-looking wrong answer would pass."* Where agent teams are on, add
-   too: *"If this ticket splits into parts that need no talk and touch no shared
-   files — review lenses, competing hypotheses, independent research angles — you
-   may run it as a burst of at most three agent-teams teammates. Their reports
+   a plausible-looking wrong answer would pass."* Add too: *"If this ticket splits
+   into parts that touch no shared files — review lenses, competing hypotheses,
+   independent research angles — you may run it as a burst: start with 3 background
+   subagents, at most 5, each in its own worktree when it edits. Use agent-teams
+   teammates instead only when the parts must talk to each other. Their reports
    count against your 150k."* The worker decides; `references/models.md` has the
    criteria. For a branch that deploys nothing, add: *"Run only the test files your
    change touches; the CI runs the full suite (P15)."*

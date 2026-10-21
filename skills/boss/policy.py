@@ -32,6 +32,15 @@ WORKER_SPLIT, WORKER_OVER = 150_000, 250_000
 # start evaluating; RESTART: overdue.
 BOSS_EVAL, BOSS_RESTART = 400_000, 500_000
 
+# How many workers one boss runs at once (2026-10-21, the owner: finish sooner,
+# spend the weekly budget sooner). The binding limit is the weekly usage cap,
+# not the machine; each report still lands in the boss's context.
+BOSS_SPAN = 12
+
+# A burst: at most BURST_MAX helpers inside one worker, BURST_START by default.
+# Anthropic's agent-teams guide: "Start with 3-5 teammates for most workflows."
+BURST_START, BURST_MAX = 3, 5
+
 # Cost per turn, against a fresh session's ~30k.
 COST_HEAVY, COST_RECYCLE = 60_000, 90_000
 

@@ -70,6 +70,31 @@ class Tools(unittest.TestCase):
         out = self.run_tool("boss-goal", "check", "demo")
         self.assertIn("NOT ARMED", out.stdout)
 
+    def goal_with_tickets(self, issues):
+        self.run_tool("boss-goal", "init", "demo")
+        goal = self.cfg / "pm" / "demo.goal.md"
+        goal.write_text(goal.read_text().replace(
+            "## Next, in priority order", "## Tickets\n%s\n\n## Next, in priority order" % issues))
+
+    def test_check_reads_the_ticket_graph_instead_of_next(self):
+        issues = self.cfg / "issues"
+        issues.mkdir()
+        (issues / "01-a.md").write_text("# 01: A\n\n**Blocked by:** None\n\n**Status:** ready\n")
+        self.goal_with_tickets(issues)
+        out = self.run_tool("boss-goal", "check", "demo").stdout
+        self.assertIn("TICKETS: Ready now: 01", out)
+        self.assertNotIn('nothing under "Next', out)
+
+    def test_check_names_a_broken_ticket_graph(self):
+        issues = self.cfg / "issues"
+        issues.mkdir()
+        (issues / "01-a.md").write_text("# 01: A\n\n**Status:** ready\n")
+        self.goal_with_tickets(issues)
+        out = self.run_tool("boss-goal", "check", "demo")
+        self.assertIn("TICKET GRAPH BROKEN", out.stdout)
+        self.assertIn("no **Blocked by:** field", out.stdout)
+        self.assertNotEqual(out.returncode, 0)
+
     def test_append_waits_for_the_tracker_lock(self):
         # boss-jev and the ladder routine rewrite the tracker by temp file and
         # rename under pm/.<track>.md.lock. An append that ignores the lock can

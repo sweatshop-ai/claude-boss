@@ -11,9 +11,19 @@ worker: it has no pane and no stamp, dies with its lead, and the boss neither
 dispatches to it nor sees it. A worker may lead them; a boss never does.
 _Avoid_: teammate (alone), sub-worker
 
-**Burst**: one worker leading agent-teams teammates for the length of one
-ticket. Its cost lands in that worker's context.
+**Burst**: one worker running parallel helpers for the length of one ticket —
+background subagents by default, agent-teams teammates when the parts must talk.
+Its cost lands in that worker's context.
 _Avoid_: team (means `/team`, the peer mesh between workers)
+
+**Ticket graph**: the tickets of a track and their Blocked-by edges — a folder
+of ticket files, or the sub-issues of one GitHub issue with GitHub's own
+dependencies. Named in the objective's `## Tickets`.
+_Avoid_: backlog, task list (no edges)
+
+**Frontier**: the tickets of a ticket graph that can be dispatched now: not
+done, not claimed, every blocker done, nothing external open.
+_Avoid_: ready list, queue
 
 **Track**: the name of a boss's tracker (`pm/<track>.md`) and objective
 (`pm/<track>.goal.md`).

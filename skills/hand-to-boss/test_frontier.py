@@ -223,5 +223,104 @@ class FrontierCase(unittest.TestCase):
         self.assertNotIn("after 01", r.stdout)
 
 
+FAKE_GH = r'''#!/usr/bin/env python3
+import json, os, sys
+d = os.environ["FAKE_GH_DIR"]
+args = [a for a in sys.argv[1:] if a != "--paginate"]
+assert args[0] == "api", args
+args = args[1:]
+method = "GET"
+if args[0] in ("-X", "--method"):
+    method, args = args[1], args[2:]
+path = args[0]
+with open(os.path.join(d, "calls.log"), "a") as f:
+    f.write(json.dumps([method, path] + args[1:]) + "\n")
+if method == "POST":
+    print("{}")
+    sys.exit(0)
+data = json.load(open(os.path.join(d, "repo.json")))
+if path not in data:
+    print(json.dumps({"message": "Not Found"}))
+    sys.exit(1)
+print(json.dumps(data[path]))
+'''
+
+
+def issue(n, title, state="open", labels=()):
+    return {"number": n, "title": title, "state": state,
+            "labels": [{"name": l} for l in labels]}
+
+
+class GitHubFrontier(unittest.TestCase):
+    """`gh:owner/repo#N`: the sub-issues of issue N, blocked by GitHub's native dependencies."""
+
+    SRC = "gh:acme/app#10"
+
+    def setUp(self):
+        self.dir = Path(tempfile.mkdtemp(prefix="frontier-gh-"))
+        (self.dir / "gh").write_text(FAKE_GH)
+        (self.dir / "gh").chmod(0o755)
+        self.env = dict(__import__("os").environ, FAKE_GH_DIR=str(self.dir),
+                        PATH="%s:%s" % (self.dir, __import__("os").environ["PATH"]))
+
+    def tearDown(self):
+        shutil.rmtree(self.dir)
+
+    def repo(self, subs, blocked_by):
+        data = {"repos/acme/app/issues/10/sub_issues": subs}
+        for s in subs:
+            data["repos/acme/app/issues/%d/dependencies/blocked_by" % s["number"]] = \
+                blocked_by.get(s["number"], [])
+            data["repos/acme/app/issues/%d" % s["number"]] = s
+        (self.dir / "repo.json").write_text(json.dumps(data))
+
+    def run_json(self):
+        r = subprocess.run([sys.executable, str(FRONTIER), "--json", self.SRC],
+                           capture_output=True, text=True, env=self.env)
+        return r.returncode, (json.loads(r.stdout) if r.stdout.strip() else None), r.stderr
+
+    def test_native_dependencies_decide_the_frontier(self):
+        api, ui, docs = issue(11, "API"), issue(12, "UI", labels=["worker:Ada"]), issue(13, "Docs")
+        done = issue(14, "Schema", state="closed")
+        self.repo([api, ui, docs, done], {11: [done], 13: [api, ui]})
+        code, out, err = self.run_json()
+        self.assertEqual(code, 0, err)
+        self.assertEqual(out["ready"], ["11"])
+        t = {x["num"]: x for x in out["tickets"]}
+        self.assertEqual(t["12"]["state"], "claimed")
+        self.assertEqual(t["12"]["claimed_by"], "Ada")
+        self.assertEqual(t["13"]["open_blockers"], ["11", "12"])
+        self.assertEqual(t["14"]["state"], "done")
+
+    def test_an_open_blocker_outside_the_map_is_external(self):
+        other = {"number": 99, "title": "Infra", "state": "open",
+                 "html_url": "https://github.com/acme/infra/issues/99"}
+        self.repo([issue(11, "API")], {11: [other]})
+        code, out, _ = self.run_json()
+        self.assertEqual(out["ready"], [])
+        self.assertEqual(out["external"], [{"num": "11", "what": "https://github.com/acme/infra/issues/99"}])
+
+    def test_no_sub_issues_fails_the_input_check(self):
+        self.repo([], {})
+        code, _, err = self.run_json()
+        self.assertEqual(code, 2)
+        self.assertIn("no sub-issues", err)
+
+    def test_claim_labels_the_issue(self):
+        self.repo([issue(11, "API")], {})
+        r = subprocess.run([sys.executable, str(FRONTIER), "claim", self.SRC, "11", "Mei"],
+                           capture_output=True, text=True, env=self.env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        calls = [json.loads(l) for l in (self.dir / "calls.log").read_text().splitlines()]
+        self.assertIn(["POST", "repos/acme/app/issues/11/labels", "-f", "labels[]=worker:Mei"], calls)
+
+    def test_claim_refuses_a_claimed_issue(self):
+        self.repo([issue(11, "API", labels=["worker:Ada"])], {})
+        r = subprocess.run([sys.executable, str(FRONTIER), "claim", self.SRC, "11", "Mei"],
+                           capture_output=True, text=True, env=self.env)
+        self.assertEqual(r.returncode, 3)
+        self.assertIn("Ada", r.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()
