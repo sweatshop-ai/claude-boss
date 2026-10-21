@@ -113,6 +113,17 @@ class Pin(unittest.TestCase):
         recs.append(u("m1", "please also fix the tests"))
         self.assertEqual(transcript.pin(recs, past_exit=True), "m1")
 
+    def test_past_exit_counts_a_prompt_queued_behind_the_dialog(self):
+        """A cross-session message arriving while the exit dialog is open is only
+        an enqueue record (seen 2026-10-20 10:07:39): exiting would drop it."""
+        recs = [{"type": "assistant", "uuid": "a1"},
+                {"type": "queue-operation", "operation": "enqueue",
+                 "timestamp": "2026-10-20T10:07:39.025Z", "content": "<cross-session-message ..."}]
+        self.assertNotEqual(transcript.pin(recs, past_exit=True), "a1")
+        recs.append({"type": "queue-operation", "operation": "dequeue",
+                     "timestamp": "2026-10-20T10:09:54.846Z"})
+        self.assertEqual(transcript.pin(recs, past_exit=True), "enqueue@2026-10-20T10:07:39.025Z")
+
     def test_none_without_a_conversation_record(self):
         self.assertIsNone(transcript.pin([{"type": "system", "uuid": "s1"}]))
 
