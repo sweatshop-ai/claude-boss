@@ -1251,9 +1251,16 @@ case "$1" in
       *) echo '' ;;
     esac ;;
   send-keys)
-    if [[ "$*" == *"/exit"* && -f "$STUB_DIR/exits" ]]; then echo bash > "$STUB_DIR/cmd"; fi ;;
+    if [[ "$*" == *"/exit"* && -f "$STUB_DIR/exits" ]]; then echo bash > "$STUB_DIR/cmd"; fi
+    # Enter on the exit dialog: "Exit and stop tasks" is what it confirms.
+    if [[ "$*" == "send-keys -t %5 Enter" && -f "$STUB_DIR/dialog" ]]; then echo bash > "$STUB_DIR/cmd"; fi ;;
   capture-pane)
-    if [[ -f "$STUB_DIR/dialog" ]]; then echo "   Background work is running"; else echo '$ '; fi ;;
+    if [[ -s "$STUB_DIR/dialog" ]]; then cat "$STUB_DIR/dialog"
+    elif [[ -f "$STUB_DIR/dialog" ]]; then
+      printf '%s\n' "   Background work is running" "   The following will stop when you exit:" \
+        "   shell · curl -s https://example.org/slow …" "   ❯ 1. Exit and stop tasks" "     2. Stay" \
+        "   Enter to confirm · Esc to cancel"
+    else echo '$ '; fi ;;
 esac
 exit 0
 '''
@@ -1261,7 +1268,13 @@ exit 0
 STUB_PANES = r'''#!/usr/bin/env python3
 import os, sys
 if sys.argv[1:2] == ["--state"]:
-    print(os.environ["STUB_ROW"])
+    d = os.environ["STUB_DIR"]
+    seen, later = os.path.join(d, "stated"), os.path.join(d, "row2")
+    if os.path.exists(seen) and os.path.exists(later):
+        print(open(later).read().strip("\n"))      # what a second read sees
+    else:
+        open(seen, "w").close()
+        print(os.environ["STUB_ROW"])
 else:
     print("%5\tWanda\tw-sid\t" + os.environ["STUB_ROW"].split("\t")[1] + "\t1\t1\t1")
 '''
@@ -1281,15 +1294,16 @@ class RequireIdle(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.tmp)
 
-    def run_retire(self, row, *extra, exits=True, dialog=False):
+    def run_retire(self, row, *extra, exits=True, dialog=False, require_idle=True):
         if exits:
             (self.tmp / "exits").touch()
         if dialog:
-            (self.tmp / "dialog").touch()
+            (self.tmp / "dialog").write_text("" if dialog is True else dialog)
         env = dict(os.environ, PATH="%s:%s" % (self.tmp / "bin", os.environ["PATH"]), TMUX="stub",
                    TMUX_PANE="%1", STUB_DIR=str(self.tmp), STUB_ROW=row, BOSS_EXIT_WAIT="2")
-        r = subprocess.run(["bash", str(self.tmp / "boss-lifecycle.sh"), "retire", "%5", "--require-idle"]
-                           + list(extra), env=env, capture_output=True, text=True, timeout=30)
+        r = subprocess.run(["bash", str(self.tmp / "boss-lifecycle.sh"), "retire", "%5"]
+                           + (["--require-idle"] if require_idle else []) + list(extra),
+                           env=env, capture_output=True, text=True, timeout=60)
         calls = (self.tmp / "calls").read_text() if (self.tmp / "calls").exists() else ""
         keys = [l for l in calls.splitlines() if l.startswith("send-keys")]
         return r, keys
@@ -1313,7 +1327,28 @@ class RequireIdle(unittest.TestCase):
             self.assertIn(words, r.stderr, row)
             self.assertEqual(keys, [], row)
 
+    def test_leftover_background_work_on_an_idle_worker_is_stopped(self):
+        """Idle, same input as before /exit: the dialog is about an orphaned
+        background task (a curl, a watcher), not a turn. Confirm 'Exit and stop tasks'."""
+        r, keys = self.run_retire("w-sid\tidle\tpin1", exits=False, dialog=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(keys, ["send-keys -t %5 /exit Enter", "send-keys -t %5 Enter"])
+        self.assertIn("curl -s https://example.org/slow", r.stdout + r.stderr)
+
+    def test_an_unfamiliar_dialog_is_not_confirmed(self):
+        r, keys = self.run_retire("w-sid\tidle\tpin1", exits=False,
+                                  dialog="   Background work is running\n   ❯ 1. Stay\n")
+        self.assertEqual(r.returncode, 1)
+        self.assertEqual(keys, ["send-keys -t %5 /exit Enter", "send-keys -t %5 Escape"])
+
+    def test_the_default_retire_also_stops_leftover_background_work(self):
+        r, keys = self.run_retire("w-sid\tidle\tpin1", exits=False, dialog=True, require_idle=False)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(keys[-1], "send-keys -t %5 Enter")
+        self.assertEqual(keys.count("send-keys -t %5 /exit Enter"), 1)
+
     def test_a_turn_in_the_gap_gets_one_escape_for_the_dialog(self):
+        (self.tmp / "row2").write_text("w-sid\tbusy\tpin2\n")
         r, keys = self.run_retire("w-sid\tidle\tpin1", exits=False, dialog=True)
         self.assertEqual(r.returncode, 1)
         self.assertIn("a turn started", r.stderr)

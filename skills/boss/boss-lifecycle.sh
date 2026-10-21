@@ -215,6 +215,23 @@ cmd_claim() {
   printf 'claimed %s as %s\n' "$pane" "${n:-unnamed}"
 }
 
+# The exit dialog of an IDLE session is about background work it left running:
+# an orphaned curl, a watcher, a forgotten server. Nothing of the conversation
+# is lost by stopping it, and leaving the dialog up blocks the restart until
+# someone presses a key in the pane (2026-09-22 Sinead, 2026-10-21 Tobias).
+# Confirm "Exit and stop tasks" only when the screen shows exactly that option
+# selected, and print what is stopped. Returns 1, touching nothing, otherwise.
+stop_leftover_background() {
+  local pane=$1 screen
+  screen=$(tmux capture-pane -t "$pane" -p)
+  grep -q 'Background work is running' <<<"$screen" || return 1
+  grep -q '❯ 1\. Exit and stop tasks' <<<"$screen" || return 1
+  printf 'stopping background work %s left running:\n' "$pane" >&2
+  awk '/will stop when you exit/{f=1;next} /❯/{f=0} f&&NF{print "  " $0}' <<<"$screen" >&2
+  tmux send-keys -t "$pane" Enter
+  wait_for_cmd "$pane" "$SHELL_CMDS" "${BOSS_EXIT_WAIT:-15}"
+}
+
 # --require-idle: stop the session only if it is idle at the last possible
 # moment, and never with Escape. Measured on Claude Code 2.1.276 (2026-09-18,
 # plans/2026-09-18-boss-jev-hook.md): /exit does not queue behind a busy turn.
@@ -238,6 +255,14 @@ retire_require_idle() {
   tmux send-keys -t "$pane" '/exit' Enter
   wait_for_cmd "$pane" "$SHELL_CMDS" "${BOSS_EXIT_WAIT:-15}" && return 0
   if tmux capture-pane -t "$pane" -p | grep -q 'Background work is running'; then
+    # Still idle on the same input as before /exit: no turn started, so the
+    # dialog lists leftovers. Anything else is a turn in the gap.
+    local sid2 st2 pin2
+    IFS=$'\t' read -r sid2 st2 pin2 <<<"$(python3 "$PANES_PY" --state "$pane" 2>/dev/null)"
+    if [[ "$sid2" == "$sid" && "$st2" == "idle" && "$pin2" == "$pin" ]] \
+        && stop_leftover_background "$pane"; then
+      return 0
+    fi
     tmux send-keys -t "$pane" Escape
     die "$pane: a turn started between the idle check and /exit; the exit dialog was closed with one Escape and the worker left running"
   fi
@@ -256,7 +281,9 @@ retire_default() {
     tmux send-keys -t "$pane" Escape
     sleep 1
     tmux send-keys -t "$pane" '/exit' Enter
-    wait_for_cmd "$pane" "$SHELL_CMDS" 30 && break
+    wait_for_cmd "$pane" "$SHELL_CMDS" "${BOSS_EXIT_WAIT:-30}" && break
+    # Not busy (asserted above) and two Escapes sent: a dialog now is leftovers.
+    stop_leftover_background "$pane" && break
     [[ $try == 2 ]] &&
       die "$pane did not return to a shell (current: $(pane_prop "$pane" '#{pane_current_command}'))"
   done
