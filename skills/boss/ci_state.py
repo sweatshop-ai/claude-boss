@@ -32,6 +32,7 @@ CLI:
 """
 import hashlib
 import json
+import math
 import os
 import statistics
 import subprocess
@@ -48,6 +49,7 @@ GH_TIMEOUT_S = 15
 HISTORY = 10            # successful runs the ETA's median is taken over
 # GitHub's run statuses that wait for a runner, an approval or a concurrency slot.
 WAITING = {"queued", "waiting", "pending", "requested"}
+STATUSES = WAITING | {"in_progress", "completed"}
 
 
 def cache_dir():
@@ -88,12 +90,12 @@ def start_refresh(repo, branch):
         try:
             # A refresh that failed fast leaves no newer cache: without this,
             # every poll would start another one.
-            if time.time() - attempt.stat().st_mtime < MAX_AGE_S:
+            if 0 <= time.time() - attempt.stat().st_mtime < MAX_AGE_S:
                 return
         except FileNotFoundError:
             pass
         try:
-            if time.time() - lock.stat().st_mtime < REFRESH_S:
+            if 0 <= time.time() - lock.stat().st_mtime < REFRESH_S:
                 return
             lock.unlink()
         except FileNotFoundError:
@@ -112,27 +114,51 @@ def ci_state(repo, branch, now=None):
     try:
         age = now - f.stat().st_mtime
         cached = json.loads(f.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    except Exception:                     # any file, any shape: never raise here
         age, cached = None, None
+    if age is not None and age < 0:
+        age = MAX_AGE_S + 1               # written "in the future": the clock stepped back
     if age is None or age > MAX_AGE_S:
         start_refresh(repo, branch)
     if cached is None or age > STALE_S:
         return unknown()
+    try:
+        return from_cache(cached, now)
+    except Exception:                     # the contract: never raise on the caller's path
+        return unknown("malformed cache")
+
+
+def from_cache(cached, now):
+    """The state a cached refresh says, at `now`. Anything not of the shape
+    `refresh` writes reads as unknown: a file from another version or a torn
+    write must not raise on the caller's poll path."""
+    if not isinstance(cached, dict):
+        return unknown("malformed cache")
     run = cached.get("run")
     if not run:
-        return unknown(cached.get("error"))
+        return unknown(cached.get("error") if isinstance(cached.get("error"), str) else None)
+    if not isinstance(run, dict) or run.get("status") not in STATUSES:
+        return unknown("malformed cache")
     out = unknown()
-    status = run.get("status") or "unknown"
+    status = run["status"]
     out.update(status="queued" if status in WAITING else status, conclusion=run.get("conclusion"),
                run_url=run.get("html_url"))
     median = cached.get("median_s")
-    created, started = ts(run.get("created_at")), ts(run.get("run_started_at"))
-    if out["status"] == "queued" and created:
-        out["queued_for_s"] = int(now - created)
+    if isinstance(median, bool) or not isinstance(median, (int, float)) \
+            or not math.isfinite(median) or median <= 0:
+        median = None
+    started = ts(run.get("run_started_at"))
+    if out["status"] == "queued":
+        # run_started_at is the current attempt's start (it resets on a re-run;
+        # created_at keeps the first attempt's). A `waiting` run may have entered
+        # that state after earlier jobs ran: no timestamp says when, so no wait.
+        since = started or ts(run.get("created_at"))
+        if status != "waiting" and since:
+            out["queued_for_s"] = max(0, int(now - since))
         out["eta_s"] = int(median) if median else None
         out["eta_excludes_queue"] = True
     elif out["status"] == "in_progress" and started:
-        out["running_for_s"] = int(now - started)
+        out["running_for_s"] = max(0, int(now - started))
         out["eta_s"] = max(0, int(median - out["running_for_s"])) if median else None
     return out
 
@@ -167,6 +193,7 @@ def refresh(repo, branch):
                           % (on, run["workflow_id"], HISTORY)).get("workflow_runs") or []
                 spans = [ts(h.get("updated_at")) - ts(h.get("run_started_at")) for h in hist
                          if ts(h.get("updated_at")) and ts(h.get("run_started_at"))]
+                spans = [x for x in spans if x > 0]
                 median = statistics.median(spans) if spans else None
             except errors:
                 median = None

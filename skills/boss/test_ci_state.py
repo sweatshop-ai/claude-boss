@@ -170,13 +170,79 @@ class CiState(unittest.TestCase):
         self.assertEqual(calls.read_text(), "x")
 
     def test_waiting_and_requested_runs_are_queued(self):
-        for status in ("waiting", "pending", "requested"):
+        for status in ("pending", "requested"):      # "waiting": its own test
             self.tearDown()
             self.setUp()
             self.gh(run(status, self.now - 120), self.history([30]))
             out = self.settle()
             self.assertEqual(out["status"], "queued", status)
             self.assertAlmostEqual(out["queued_for_s"], 120, delta=30)
+
+    def test_a_rerun_counts_its_wait_from_its_own_attempt(self):
+        r = run("queued", self.now - 3 * 86400)
+        r.update(run_attempt=2, run_started_at=iso(self.now - 120))
+        self.gh(r, self.history([30]))
+        out = self.settle()
+        self.assertAlmostEqual(out["queued_for_s"], 120, delta=30)
+
+    def test_a_waiting_run_does_not_invent_a_wait(self):
+        r = run("waiting", self.now - 86400, self.now - 3600)
+        self.gh(r, self.history([30]))
+        out = self.settle()
+        self.assertEqual(out["status"], "queued")
+        self.assertIsNone(out["queued_for_s"])
+
+    def test_a_malformed_cache_reads_as_unknown(self):
+        self.gh(run("queued", self.now - 60), self.history([30]))
+        self.settle()
+        f = next((self.tmp / "cache").glob("*.json"))
+        for bad in ("[]", '{"run": "x"}', '{"run": {"status": 5, "created_at": 7}}', '"x"',
+                    '{"run": {"status": ""}}', '{"run": {"status": "bogus"}}'):
+            f.write_text(bad)
+            out, _ = self.get()
+            self.assertEqual(out["status"], "unknown", bad)
+        f.write_text('{"run": {"status": "queued"}, "median_s": 1e309}')
+        out, _ = self.get()
+        self.assertEqual((out["status"], out["eta_s"]), ("queued", None))
+
+    def cache_files(self):
+        return list((self.tmp / "cache").glob("*.*"))
+
+    def test_a_cache_too_deep_to_parse_reads_as_unknown(self):
+        self.gh(run("queued", self.now - 60), self.history([30]))
+        self.settle()
+        next((self.tmp / "cache").glob("*.json")).write_text("[" * 100000)
+        self.assertEqual(self.get()[0]["status"], "unknown")
+
+    def test_a_clock_stepped_back_does_not_freeze_the_answer(self):
+        self.gh(run("in_progress", self.now - 300, self.now - 200), self.history([30]))
+        self.settle()
+        ahead = time.time() + 7200            # cache, lock and attempt written "in the future"
+        for f in self.cache_files():
+            os.utime(f, (ahead, ahead))
+        self.gh(run("completed", self.now - 300, self.now - 200, self.now - 10, "success"))
+        for _ in range(60):
+            out, _ = self.get()
+            if out["status"] == "completed":
+                break
+            time.sleep(0.1)
+        self.assertEqual(out["status"], "completed")
+
+    def test_a_start_ahead_of_the_local_clock_gives_no_negative_time(self):
+        self.gh(run("in_progress", self.now + 600, self.now + 600), self.history([5]))
+        out = self.settle()
+        self.assertEqual(out["running_for_s"], 0)
+        self.assertAlmostEqual(out["eta_s"], 300, delta=30)
+
+    def test_a_median_that_is_not_a_positive_duration_gives_no_eta(self):
+        self.gh(run("queued", self.now - 60), self.history([30]))
+        self.settle()
+        f = next((self.tmp / "cache").glob("*.json"))
+        for median in ("-50", "true", "0"):
+            f.write_text('{"run": {"status": "queued", "created_at": "%s"}, "median_s": %s}'
+                         % (iso(self.now - 60), median))
+            out, _ = self.get()
+            self.assertEqual((out["status"], out["eta_s"]), ("queued", None), median)
 
     def test_the_vendor_header_names_the_master(self):
         self.assertIn("master copy", CI.read_text(encoding="utf-8")[:2000])
