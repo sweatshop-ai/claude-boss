@@ -39,7 +39,9 @@ escalation ladder.
 
 Write it with `boss-goal` from this brief. **Done when**: every ticket not waiting
 on an external blocker has Status `done` and its boxes ticked; the ones still
-waiting are listed with who holds them.
+waiting are listed with who holds them. Give it a `## Tickets` section holding
+`{{issues dir}}`, one line: the pulse then reads the frontier itself and hands you
+every ready ticket each time a worker goes idle.
 
 ## Staffing
 
@@ -49,7 +51,8 @@ waiting are listed with who holds them.
   `--model` lands there too.
 - One git worktree per worker, on its own branch, under `{{worktree root}}`.
   Two workers never share a branch or a worktree.
-- At most {{N}} workers at once (five is the span of control).
+- At most {{N}} workers at once (12 is the span of control): as many as the
+  frontier has ready tickets.
 
 ## Claiming a ticket
 
