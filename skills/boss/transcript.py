@@ -69,14 +69,37 @@ def usage(records, band=BAND):
     return last[0] + last[1] + last[2], cost, len(rows)
 
 
-def pin(records):
+EXIT_MARKS = ("<local-command-caveat>", "<local-command-stdout>")
+
+
+def is_exit_record(d):
+    """A user record `/exit` itself writes: the local-command caveat, the
+    `/exit` line, its stdout. Any other slash command is input."""
+    msg = d.get("message") if isinstance(d.get("message"), dict) else {}
+    c = msg.get("content")
+    return isinstance(c, str) and (c.startswith(EXIT_MARKS)
+                                   or c.lstrip().startswith("<command-name>/exit</command-name>"))
+
+
+def pin(records, past_exit=False):
     """The pin `boss-lifecycle.sh --require-idle --expect-last` compares against:
     a worker that took any input after the boss looked has a newer one. Not the
     file size, because idle sessions still append records of their own
-    (away_summary, ai-title, bridge-session, measured 2026-09-18)."""
+    (away_summary, ai-title, bridge-session, measured 2026-09-18).
+
+    `past_exit` leaves out what `/exit` writes before its "Background work is
+    running" dialog, so the boss can tell that dialog on an idle worker from
+    a turn that started in the gap, and counts a prompt queued behind the
+    dialog (an `enqueue` record), which exiting would drop."""
     last = None
     for d in records:
         t = d.get("type")
+        if past_exit and t == "user" and is_exit_record(d):
+            continue
+        if past_exit and t == "queue-operation" and d.get("operation") == "enqueue":
+            # A prompt that arrived behind the dialog: exiting would drop it.
+            last = "enqueue@%s" % d.get("timestamp")
+            continue
         if t in ("user", "assistant") or (
                 t == "attachment" and (d.get("attachment") or {}).get("type") == "queued_command"):
             last = d.get("uuid") or last
