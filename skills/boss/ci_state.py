@@ -19,8 +19,9 @@ last good answer until it is STALE_S old, then reads as `unknown`. Every
 failure is a value, never an exception: agentview calls this on its poll path,
 where a read that hangs freezes every tile.
 
-`repo` is `owner/name` or `host/owner/name` (what agentview's projects.py
-gives). The cache lives in $CI_STATE_CACHE, default ~/.cache/ci-state.
+`repo` is `owner/name` (github.com) or `host/owner/name` (what agentview's
+projects.py gives); a host other than github.com is asked with `gh --hostname`.
+GitHub's waiting statuses (waiting, pending, requested) read as `queued`. The cache lives in $CI_STATE_CACHE, default ~/.cache/ci-state.
 
 The master copy lives in claude-boss (skills/boss/ci_state.py). A vendored copy
 carries a "vendored from" line under the shebang; change the master, not it.
@@ -45,19 +46,23 @@ STALE_S = 900           # a cached answer older than this is no answer
 REFRESH_S = 30          # one refresh's budget; a lock older than this is dead
 GH_TIMEOUT_S = 15
 HISTORY = 10            # successful runs the ETA's median is taken over
+# GitHub's run statuses that wait for a runner, an approval or a concurrency slot.
+WAITING = {"queued", "waiting", "pending", "requested"}
 
 
 def cache_dir():
     return Path(os.environ.get("CI_STATE_CACHE") or Path.home() / ".cache" / "ci-state")
 
 
-def owner_name(repo):
+def host_repo(repo):
+    """(host, owner/name). `owner/name` is on github.com; any other host is its own repo."""
     parts = repo.strip("/").split("/")
-    return "/".join(parts[-2:])
+    host = parts[-3] if len(parts) >= 3 else "github.com"
+    return host, "/".join(parts[-2:])
 
 
 def cache_file(repo, branch):
-    key = hashlib.sha1(("%s\0%s" % (owner_name(repo), branch)).encode()).hexdigest()[:16]
+    key = hashlib.sha1(("%s/%s\0%s" % (host_repo(repo) + (branch,))).encode()).hexdigest()[:16]
     return cache_dir() / ("%s.json" % key)
 
 
@@ -77,8 +82,16 @@ def unknown(error=None):
 def start_refresh(repo, branch):
     """Start one detached refresh unless one is already running."""
     lock = cache_file(repo, branch).with_suffix(".lock")
+    attempt = cache_file(repo, branch).with_suffix(".attempt")
     try:
         cache_dir().mkdir(parents=True, exist_ok=True)
+        try:
+            # A refresh that failed fast leaves no newer cache: without this,
+            # every poll would start another one.
+            if time.time() - attempt.stat().st_mtime < MAX_AGE_S:
+                return
+        except FileNotFoundError:
+            pass
         try:
             if time.time() - lock.stat().st_mtime < REFRESH_S:
                 return
@@ -109,7 +122,8 @@ def ci_state(repo, branch, now=None):
     if not run:
         return unknown(cached.get("error"))
     out = unknown()
-    out.update(status=run.get("status") or "unknown", conclusion=run.get("conclusion"),
+    status = run.get("status") or "unknown"
+    out.update(status="queued" if status in WAITING else status, conclusion=run.get("conclusion"),
                run_url=run.get("html_url"))
     median = cached.get("median_s")
     created, started = ts(run.get("created_at")), ts(run.get("run_started_at"))
@@ -123,8 +137,9 @@ def ci_state(repo, branch, now=None):
     return out
 
 
-def gh(path):
-    r = subprocess.run(["gh", "api", path], capture_output=True, text=True, timeout=GH_TIMEOUT_S)
+def gh(host, path):
+    cmd = ["gh", "api"] + (["--hostname", host] if host != "github.com" else []) + [path]
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=GH_TIMEOUT_S)
     if r.returncode != 0:
         raise RuntimeError((r.stderr or r.stdout).strip()[:200] or "gh exit %d" % r.returncode)
     return json.loads(r.stdout)
@@ -133,20 +148,30 @@ def gh(path):
 def refresh(repo, branch):
     f = cache_file(repo, branch)
     lock = f.with_suffix(".lock")
+    errors = (RuntimeError, subprocess.SubprocessError, OSError, ValueError, AttributeError)
     try:
-        on = owner_name(repo)
-        runs = gh("repos/%s/actions/runs?branch=%s&per_page=1"
+        cache_dir().mkdir(parents=True, exist_ok=True)
+        f.with_suffix(".attempt").touch()
+    except OSError:
+        pass
+    try:
+        host, on = host_repo(repo)
+        runs = gh(host, "repos/%s/actions/runs?branch=%s&per_page=1"
                   % (on, urllib.parse.quote(branch, safe=""))).get("workflow_runs") or []
         run = runs[0] if runs else None
         median = None
         if run and run.get("workflow_id"):
-            hist = gh("repos/%s/actions/workflows/%s/runs?status=success&per_page=%d"
-                      % (on, run["workflow_id"], HISTORY)).get("workflow_runs") or []
-            spans = [ts(h.get("updated_at")) - ts(h.get("run_started_at")) for h in hist
-                     if ts(h.get("updated_at")) and ts(h.get("run_started_at"))]
-            median = statistics.median(spans) if spans else None
+            # The ETA is optional: a failed history read keeps the run's status.
+            try:
+                hist = gh(host, "repos/%s/actions/workflows/%s/runs?status=success&per_page=%d"
+                          % (on, run["workflow_id"], HISTORY)).get("workflow_runs") or []
+                spans = [ts(h.get("updated_at")) - ts(h.get("run_started_at")) for h in hist
+                         if ts(h.get("updated_at")) and ts(h.get("run_started_at"))]
+                median = statistics.median(spans) if spans else None
+            except errors:
+                median = None
         body = {"run": run, "median_s": median}
-    except (RuntimeError, subprocess.SubprocessError, OSError, ValueError, AttributeError) as e:
+    except errors as e:
         if f.exists():
             return 1                      # keep the last good answer; it ages to stale
         body = {"run": None, "median_s": None, "error": str(e)[:200]}
