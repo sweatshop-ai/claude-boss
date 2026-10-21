@@ -152,10 +152,13 @@ def main():
             if pane_id != args[1]:
                 continue
             t = transcript_for(rec)
-            pin = transcript.pin(transcript.tail(t)) if t else None
-            print("\t".join([rec.get("sessionId") or "-", rec.get("status") or "-", pin or "-"]))
+            recs = transcript.tail(t) if t else []
+            pin = transcript.pin(recs)
+            past = transcript.pin(recs, past_exit=True)
+            print("\t".join([rec.get("sessionId") or "-", rec.get("status") or "-",
+                             pin or "-", past or "-"]))
             return 0
-        print("-\t-\t-")
+        print("-\t-\t-\t-")
         return 1
 
     want = args[0] if args else None

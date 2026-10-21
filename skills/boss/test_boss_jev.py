@@ -1253,7 +1253,8 @@ case "$1" in
   send-keys)
     if [[ "$*" == *"/exit"* && -f "$STUB_DIR/exits" ]]; then echo bash > "$STUB_DIR/cmd"; fi
     # Enter on the exit dialog: "Exit and stop tasks" is what it confirms.
-    if [[ "$*" == "send-keys -t %5 Enter" && -f "$STUB_DIR/dialog" ]]; then echo bash > "$STUB_DIR/cmd"; fi ;;
+    if [[ "$*" == "send-keys -t %5 Enter" && -f "$STUB_DIR/dialog" && ! -f "$STUB_DIR/slow" ]]; then
+      echo bash > "$STUB_DIR/cmd"; fi ;;
   capture-pane)
     if [[ -s "$STUB_DIR/dialog" ]]; then cat "$STUB_DIR/dialog"
     elif [[ -f "$STUB_DIR/dialog" ]]; then
@@ -1334,6 +1335,21 @@ class RequireIdle(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(keys, ["send-keys -t %5 /exit Enter", "send-keys -t %5 Enter"])
         self.assertIn("curl -s https://example.org/slow", r.stdout + r.stderr)
+
+    def test_the_exit_records_do_not_count_as_a_turn(self):
+        """/exit writes its own user records before the dialog: the plain pin
+        moves, the past-exit pin (4th field) does not."""
+        (self.tmp / "row2").write_text("w-sid\tidle\tpin-exit\tpin1\n")
+        r, keys = self.run_retire("w-sid\tidle\tpin1\tpin1", exits=False, dialog=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(keys[-1], "send-keys -t %5 Enter")
+
+    def test_a_confirmed_exit_that_is_slow_gets_no_escape(self):
+        (self.tmp / "slow").touch()
+        r, keys = self.run_retire("w-sid\tidle\tpin1\tpin1", exits=False, dialog=True)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("still shutting down", r.stderr)
+        self.assertEqual(keys, ["send-keys -t %5 /exit Enter", "send-keys -t %5 Enter"])
 
     def test_an_unfamiliar_dialog_is_not_confirmed(self):
         r, keys = self.run_retire("w-sid\tidle\tpin1", exits=False,

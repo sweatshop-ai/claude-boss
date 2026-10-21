@@ -9,7 +9,9 @@
   2026-09-22, a sleep watcher; Tobias 2026-10-21, an orphaned curl), which the
   classifier forbids the boss. Now, when the worker is still idle on the same input
   as before `/exit` and the dialog shows `❯ 1. Exit and stop tasks`, the retire
-  confirms it and prints what it stopped. A changed state or any other dialog
+  confirms it and prints what it stopped. "Same input" leaves out the three user
+  records `/exit` writes itself (`transcript.pin(past_exit=True)`, a 4th field of
+  `boss-panes.py --state`). A confirmed exit still shutting down is left alone. A changed state or any other dialog
   keeps the old refusal. Claude Code has no setting or flag to skip this dialog.
 - **The dispatch asks the worker to stop its background tasks before the handoff.**
 

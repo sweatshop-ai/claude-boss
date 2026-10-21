@@ -99,6 +99,20 @@ class Pin(unittest.TestCase):
         ]
         self.assertEqual(transcript.pin(recs), "q1")
 
+    def test_past_exit_skips_what_exit_itself_writes(self):
+        def u(uid, content):
+            return {"type": "user", "uuid": uid, "message": {"role": "user", "content": content}}
+        recs = [{"type": "assistant", "uuid": "a1"},
+                u("c1", "<local-command-caveat>Caveat: the command below...</local-command-caveat>"),
+                u("c2", "<command-name>/exit</command-name>\n<command-message>exit</command-message>"),
+                u("c3", "<local-command-stdout>(no content)</local-command-stdout>")]
+        self.assertEqual(transcript.pin(recs), "c3")
+        self.assertEqual(transcript.pin(recs, past_exit=True), "a1")
+        recs.append(u("c4", "<command-name>/model</command-name>"))
+        self.assertEqual(transcript.pin(recs, past_exit=True), "c4", "another command is input")
+        recs.append(u("m1", "please also fix the tests"))
+        self.assertEqual(transcript.pin(recs, past_exit=True), "m1")
+
     def test_none_without_a_conversation_record(self):
         self.assertIsNone(transcript.pin([{"type": "system", "uuid": "s1"}]))
 

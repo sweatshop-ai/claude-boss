@@ -220,7 +220,9 @@ cmd_claim() {
 # is lost by stopping it, and leaving the dialog up blocks the restart until
 # someone presses a key in the pane (2026-09-22 Sinead, 2026-10-21 Tobias).
 # Confirm "Exit and stop tasks" only when the screen shows exactly that option
-# selected, and print what is stopped. Returns 1, touching nothing, otherwise.
+# selected, and print what is stopped. Returns 1, touching nothing, when the
+# dialog is not that one; 2 when it was confirmed but the session has not
+# reached the shell in time (SessionEnd hooks): it is exiting, leave it be.
 stop_leftover_background() {
   local pane=$1 screen
   screen=$(tmux capture-pane -t "$pane" -p)
@@ -229,7 +231,7 @@ stop_leftover_background() {
   printf 'stopping background work %s left running:\n' "$pane" >&2
   awk '/will stop when you exit/{f=1;next} /❯/{f=0} f&&NF{print "  " $0}' <<<"$screen" >&2
   tmux send-keys -t "$pane" Enter
-  wait_for_cmd "$pane" "$SHELL_CMDS" "${BOSS_EXIT_WAIT:-15}"
+  wait_for_cmd "$pane" "$SHELL_CMDS" "${BOSS_EXIT_WAIT:-15}" || return 2
 }
 
 # --require-idle: stop the session only if it is idle at the last possible
@@ -241,9 +243,9 @@ stop_leftover_background() {
 # Escapes abort ANY busy turn, so this path sends none before /exit. What is
 # left is the gap between the read below and the keystroke.
 retire_require_idle() {
-  local pane=$1 row sid st pin
+  local pane=$1 row sid st pin past
   row=$(python3 "$PANES_PY" --state "$pane" 2>/dev/null) || true
-  IFS=$'\t' read -r sid st pin <<<"$row"
+  IFS=$'\t' read -r sid st pin past <<<"$row"
   [[ -z "$EXPECT_SESSION" || "$sid" == "$EXPECT_SESSION" ]] ||
     die "$pane runs session ${sid:--}, not $EXPECT_SESSION: not retiring (--require-idle)"
   [[ "$EXPECT_LAST" != "-" && "$pin" != "-" || -z "$EXPECT_LAST" ]] ||
@@ -255,14 +257,16 @@ retire_require_idle() {
   tmux send-keys -t "$pane" '/exit' Enter
   wait_for_cmd "$pane" "$SHELL_CMDS" "${BOSS_EXIT_WAIT:-15}" && return 0
   if tmux capture-pane -t "$pane" -p | grep -q 'Background work is running'; then
-    # Still idle on the same input as before /exit: no turn started, so the
-    # dialog lists leftovers. Anything else is a turn in the gap.
-    local sid2 st2 pin2
-    IFS=$'\t' read -r sid2 st2 pin2 <<<"$(python3 "$PANES_PY" --state "$pane" 2>/dev/null)"
-    if [[ "$sid2" == "$sid" && "$st2" == "idle" && "$pin2" == "$pin" ]] \
-        && stop_leftover_background "$pane"; then
-      return 0
+    # Still idle on the same input as before /exit (the 4th field leaves out
+    # the records /exit writes itself): no turn started, so the dialog lists
+    # leftovers. Anything else is a turn in the gap.
+    local sid2 st2 pin2 past2 rc=1
+    IFS=$'\t' read -r sid2 st2 pin2 past2 <<<"$(python3 "$PANES_PY" --state "$pane" 2>/dev/null)"
+    if [[ "$sid2" == "$sid" && "$st2" == "idle" && "$past2" == "$past" ]]; then
+      rc=0; stop_leftover_background "$pane" || rc=$?
     fi
+    [[ $rc == 0 ]] && return 0
+    [[ $rc == 2 ]] && die "$pane: 'Exit and stop tasks' confirmed, still shutting down after ${BOSS_EXIT_WAIT:-15} s; left as is"
     tmux send-keys -t "$pane" Escape
     die "$pane: a turn started between the idle check and /exit; the exit dialog was closed with one Escape and the worker left running"
   fi
@@ -283,7 +287,10 @@ retire_default() {
     tmux send-keys -t "$pane" '/exit' Enter
     wait_for_cmd "$pane" "$SHELL_CMDS" "${BOSS_EXIT_WAIT:-30}" && break
     # Not busy (asserted above) and two Escapes sent: a dialog now is leftovers.
-    stop_leftover_background "$pane" && break
+    local rc=0
+    stop_leftover_background "$pane" || rc=$?
+    [[ $rc == 0 ]] && break
+    [[ $rc == 2 ]] && die "$pane: 'Exit and stop tasks' confirmed, still shutting down; left as is"
     [[ $try == 2 ]] &&
       die "$pane did not return to a shell (current: $(pane_prop "$pane" '#{pane_current_command}'))"
   done
