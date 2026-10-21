@@ -728,8 +728,8 @@ Parse `$ARGUMENTS`: empty or `status` → **A** · `dispatch <task> [worker]` �
    ends with: *"When the task is done, or when I ask you to stop at a boundary,
    write `handoff-<name>-<date>.md` in your cwd and end it with the line printed by
    `python3 ${CLAUDE_PLUGIN_ROOT}/skills/boss/boss-jev.py footer --task <N> --repos <every repo
-   you touched>`, after committing and pushing. You will be restarted fresh
-   after it."* A dispatch that continues a split task names the handoff to read
+   you touched>`, after committing and pushing, and after stopping every background
+   task you started (`/tasks`, or TaskStop). You will be restarted fresh after it."* A dispatch that continues a split task names the handoff to read
    first. For a judgment task, add: *"Use a
    cheap subagent for the mechanical parts; keep for yourself only the steps where
    a plausible-looking wrong answer would pass."* Add too: *"If this ticket splits

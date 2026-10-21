@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.11.4 — 2026-10-21
+
+- **A worker that left background work running can be retired again.** Its `/exit`
+  opens "Background work is running"; `retire --require-idle` read that as a turn
+  started in the gap, closed it with Escape and gave up, and the plain retire looped
+  on it, so a restart waited for someone to press Enter in the pane (Sinead
+  2026-09-22, a sleep watcher; Tobias 2026-10-21, an orphaned curl), which the
+  classifier forbids the boss. Now, when the worker is still idle on the same input
+  as before `/exit` and the dialog shows `❯ 1. Exit and stop tasks`, the retire
+  confirms it and prints what it stopped. "Same input" leaves out the three user
+  records `/exit` writes itself (`transcript.pin(past_exit=True)`, a 4th field of
+  `boss-panes.py --state`). A confirmed exit still shutting down is left alone. A changed state or any other dialog
+  keeps the old refusal. Claude Code has no setting or flag to skip this dialog.
+- **The dispatch asks the worker to stop its background tasks before the handoff.**
+
 ## 0.11.3 — 2026-10-21
 
 - **`ci_state` returns `head_sha`**, the commit the run is for (null when unknown),
