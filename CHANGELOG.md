@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.11.3 — 2026-10-21
+
+- **`ci_state` returns `head_sha`**, the commit the run is for (null when unknown),
+  so agentview shows "waiting on CI" only when the run is for the session's own
+  HEAD, not for a commit someone else pushed to the same branch (Tarek).
+
 ## 0.11.2 — 2026-10-21
 
 - **`ci_state` hardened** (Codex review 3 of PR 21): a cache file of another shape

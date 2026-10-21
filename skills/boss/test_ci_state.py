@@ -45,7 +45,7 @@ def run(status, created, started=None, updated=None, conclusion=None, wf=7):
     return {"status": status, "conclusion": conclusion, "workflow_id": wf,
             "created_at": iso(created), "run_started_at": iso(started or created),
             "updated_at": iso(updated or started or created),
-            "html_url": "https://github.com/acme/app/actions/runs/1"}
+            "html_url": "https://github.com/acme/app/actions/runs/1", "head_sha": "a" * 40}
 
 
 class CiState(unittest.TestCase):
@@ -243,6 +243,18 @@ class CiState(unittest.TestCase):
                          % (iso(self.now - 60), median))
             out, _ = self.get()
             self.assertEqual((out["status"], out["eta_s"]), ("queued", None), median)
+
+    def test_the_run_says_which_commit_it_is_for(self):
+        self.gh(run("in_progress", self.now - 300, self.now - 200), self.history([30]))
+        self.assertEqual(self.settle()["head_sha"], "a" * 40)
+
+    def test_head_sha_is_null_when_unknown_or_malformed(self):
+        self.gh(fail=True)
+        self.assertIsNone(self.settle()["head_sha"])
+        f = next((self.tmp / "cache").glob("*.json"))
+        f.write_text('{"run": {"status": "queued", "head_sha": 7}}')
+        out, _ = self.get()
+        self.assertEqual((out["status"], out["head_sha"]), ("queued", None))
 
     def test_the_vendor_header_names_the_master(self):
         self.assertIn("master copy", CI.read_text(encoding="utf-8")[:2000])
