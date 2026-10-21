@@ -2,9 +2,10 @@
 """Is a branch's work waiting on CI, and until when.
 
     ci_state(repo, branch) -> {status, conclusion, queued_for_s, running_for_s,
-                               eta_s, eta_excludes_queue, run_url, error}
+                               eta_s, eta_excludes_queue, run_url, head_sha, error}
 
-`status` is GitHub's own for the branch's latest Actions run: queued,
+`head_sha` is the commit the run is for, so a caller can tell a run of its own
+HEAD from one somebody else pushed to the same branch. `status` is GitHub's own for the branch's latest Actions run: queued,
 in_progress or completed, or `unknown` when nothing usable is known. It is a
 fact, read from `gh api repos/<owner>/<name>/actions/runs`. `eta_s` is an
 estimate: the median duration of that workflow's last successful runs, minus
@@ -78,7 +79,7 @@ def ts(s):
 def unknown(error=None):
     return {"status": "unknown", "conclusion": None, "queued_for_s": None,
             "running_for_s": None, "eta_s": None, "eta_excludes_queue": False,
-            "run_url": None, "error": error}
+            "run_url": None, "head_sha": None, "error": error}
 
 
 def start_refresh(repo, branch):
@@ -142,7 +143,8 @@ def from_cache(cached, now):
     out = unknown()
     status = run["status"]
     out.update(status="queued" if status in WAITING else status, conclusion=run.get("conclusion"),
-               run_url=run.get("html_url"))
+               run_url=run.get("html_url"),
+               head_sha=run.get("head_sha") if isinstance(run.get("head_sha"), str) else None)
     median = cached.get("median_s")
     if isinstance(median, bool) or not isinstance(median, (int, float)) \
             or not math.isfinite(median) or median <= 0:
