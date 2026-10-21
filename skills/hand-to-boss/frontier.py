@@ -16,10 +16,17 @@ the leading id of each item counts) or something outside the team
   ready     every ticket it waits on is done, nothing external is open
   waiting   anything else
 
+A source can also be `gh:owner/repo#N`: the sub-issues of issue N are the
+tickets, GitHub's native issue dependencies are the Blocked by, a closed issue
+is done, and a `worker:<name>` label is the claim (every worker writes as one
+GitHub account, so the assignee cannot say who). An open blocker outside the
+sub-issues is external.
+
 Usage:
     frontier.py <issues-dir>                     the frontier as text, for the brief
     frontier.py --json <issues-dir>              the same, as JSON
     frontier.py claim <issues-dir> <NN> <name>   write the claim line, set in-progress
+    frontier.py claim gh:owner/repo#N <issue> <name>   label the issue worker:<name>
 
 Exit 2 when the input is not a ticket graph: no ticket files, a file that is
 not UTF-8, a ticket with no Blocked by field, a reference to a ticket that
@@ -34,6 +41,7 @@ import fcntl
 import json
 import os
 import re
+import subprocess
 import sys
 import tempfile
 from datetime import datetime
@@ -135,8 +143,78 @@ def find_cycle(edges):
     return None
 
 
+GH_SOURCE = re.compile(r"^gh:([\w.-]+/[\w.-]+)#(\d+)$")
+WORKER_LABEL = "worker:"
+
+
+def gh_api(*args):
+    r = subprocess.run(["gh", "api", *args], capture_output=True, text=True, timeout=30)
+    if r.returncode != 0:
+        raise BadInput("gh api %s: %s" % (" ".join(args), (r.stderr or r.stdout).strip()[:200]))
+    return json.loads(r.stdout or "null")
+
+
+def gh_ticket(repo, issue, blockers, members):
+    """One sub-issue as a ticket. The claim is a `worker:<name>` label: every
+    worker writes as the same GitHub account, so the assignee cannot say who."""
+    claimed = next((l["name"][len(WORKER_LABEL):] for l in issue.get("labels") or []
+                    if l.get("name", "").startswith(WORKER_LABEL)), "")
+    internal = [str(b["number"]) for b in blockers if b["number"] in members]
+    external = [b.get("html_url") or "#%d" % b["number"] for b in blockers
+                if b["number"] not in members and b.get("state") == "open"]
+    return {"num": str(issue["number"]), "file": "%s#%d" % (repo, issue["number"]),
+            "path": None, "title": issue.get("title", ""),
+            "status": "done" if issue.get("state") == "closed" else "open",
+            "claimed_by": claimed, "blocked_raw": [], "blocked_by": internal,
+            "external": external}
+
+
+def load_github(repo, parent):
+    """The sub-issues of issue `parent`, each blocked by GitHub's native issue
+    dependencies (`issues/<n>/dependencies/blocked_by`)."""
+    try:
+        subs = gh_api("--paginate", "repos/%s/issues/%s/sub_issues" % (repo, parent))
+        if not subs:
+            return None, ["%s#%s has no sub-issues" % (repo, parent)]
+        members = {s["number"] for s in subs}
+        tickets = [gh_ticket(repo, s, gh_api("repos/%s/issues/%d/dependencies/blocked_by"
+                                             % (repo, s["number"])) or [], members)
+                   for s in subs]
+    except (BadInput, subprocess.SubprocessError, OSError, ValueError) as e:
+        return None, [str(e)]
+    edges = {t["num"]: t["blocked_by"] for t in tickets}
+    cycle = find_cycle(edges)
+    return tickets, ["cycle in blocked-by: %s" % " -> ".join(cycle)] if cycle else []
+
+
+def claim_github(repo, num, name):
+    try:
+        issue = gh_api("repos/%s/issues/%s" % (repo, num))
+    except (BadInput, subprocess.SubprocessError, OSError, ValueError) as e:
+        print("frontier: %s" % e, file=sys.stderr)
+        return 2
+    t = gh_ticket(repo, issue, [], set())
+    if t["claimed_by"]:
+        print("frontier: %s is already claimed by %s" % (num, t["claimed_by"]), file=sys.stderr)
+        return 3
+    if t["status"] == "done":
+        print("frontier: %s is not ready (done)" % num, file=sys.stderr)
+        return 3
+    try:
+        gh_api("-X", "POST", "repos/%s/issues/%s/labels" % (repo, num),
+               "-f", "labels[]=%s%s" % (WORKER_LABEL, name))
+    except (BadInput, subprocess.SubprocessError, OSError, ValueError) as e:
+        print("frontier: %s" % e, file=sys.stderr)
+        return 2
+    print(issue.get("html_url") or "%s#%s" % (repo, num))
+    return 0
+
+
 def load(folder):
-    files = sorted(p for p in Path(folder).glob("*.md") if TICKET_FILE.match(p.name))
+    gh = GH_SOURCE.match(str(folder))
+    if gh:
+        return load_github(*gh.groups())
+    files =sorted(p for p in Path(folder).glob("*.md") if TICKET_FILE.match(p.name))
     if not files:
         return None, ["no ticket files (NN-slug.md) in %s" % folder]
     tickets, errors = [], []
@@ -209,6 +287,9 @@ def as_text(out):
 
 
 def claim(folder, num, name):
+    gh = GH_SOURCE.match(folder)
+    if gh:
+        return claim_github(gh.group(1), num, name)
     num = tid(num)
     # lock the folder itself, so no lock file is left in the owner's repo
     lock = os.open(folder, os.O_RDONLY)

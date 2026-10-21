@@ -189,8 +189,19 @@ check)
     grep -qE '`|https?://|#[0-9]+|\.(py|sh|md|ts|js|yml)' <<<"$c" && continue
     printf 'WEAK: not obviously checkable — %s\n' "${c:0:90}"
   done < <(grep '^- \[ \]' "$f" || true)
-  nxt=$(awk '/^## Next, in priority order/{f=1;next} f&&/^[0-9]+\./{n++} END{print n+0}' "$f")
-  (( nxt < 1 )) && printf 'WARN: nothing under "Next, in priority order" — an idle worker has nowhere to go.\n'
+  # A ticket graph replaces Next: the pulse hands out its frontier.
+  tk=$(awk '/^## Tickets[[:space:]]*$/{f=1;next} /^## /{f=0} f&&NF{gsub(/`/,""); print; exit}' "$f")
+  if [[ -n "$tk" ]]; then
+    fr="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/../../hand-to-boss/frontier.py"
+    if out=$(python3 "$fr" "$tk" 2>&1); then
+      printf 'TICKETS: %s\n' "$(head -1 <<<"$out")"
+    else
+      printf 'TICKET GRAPH BROKEN (%s):\n%s\n' "$tk" "$out"; rc=1
+    fi
+  else
+    nxt=$(awk '/^## Next, in priority order/{f=1;next} f&&/^[0-9]+\./{n++} END{print n+0}' "$f")
+    (( nxt < 1 )) && printf 'WARN: nothing under "Next, in priority order" — an idle worker has nowhere to go.\n'
+  fi
   (( sz > CAP )) && { printf 'OVER CAP: %s B > %s B. Move the reasoning to the tracker.\n' "$sz" "$CAP"; rc=1; }
   st=$(sed -n '2s/_Status: \(.*\)_/\1/p' "$f")
   # An objective nothing reads is a note to self. Say plainly whether the pulse

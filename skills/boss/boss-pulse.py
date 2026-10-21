@@ -113,20 +113,84 @@ def owned_panes(boss_pane):
     return mine
 
 
-def idle_workers(sid):
-    """Named workers owned by this boss that are idle right now."""
+def team(sid):
+    """This boss's live workers: (the idle ones as (name, coordinate), how many in all)."""
     live = live_sessions()
     me = next((r for r in live.values() if r.get("sessionId") == sid), None)
     if not me:
-        return []
+        return [], 0
     boss_pane = (me.get("tmux") or "").rsplit(".", 1)[-1]
-    out = []
+    idle, size = [], 0
     for pane, coord in owned_panes(boss_pane):
         rec = live.get(pane)
-        if not rec or (rec.get("status") or "") != "idle":
+        if not rec:
             continue
-        out.append((rec.get("name") or coord, coord))
-    return out
+        size += 1
+        if (rec.get("status") or "") == "idle":
+            idle.append((rec.get("name") or coord, coord))
+    return idle, size
+
+
+# ------------------------------------------------------------- ticket graph
+
+FRONTIER_PY = Path(__file__).resolve().parent.parent / "hand-to-boss" / "frontier.py"
+
+
+def tickets_source(body):
+    """The first line under `## Tickets`: a folder of ticket files, or nothing."""
+    for line in section(body, "Tickets").splitlines():
+        line = line.strip().strip("`").strip()
+        if line:
+            return line
+    return ""
+
+
+GH_CACHE_S = 120        # a GitHub frontier older than this is refreshed
+
+
+def ready_of(out):
+    return ["%s %s" % (t["num"], t["title"]) for t in out["tickets"] if t["state"] == "ready"]
+
+
+def read_frontier(source, track):
+    """(ready tickets as "NN title", error) for the ticket graph at `source`.
+
+    A folder is read the way `frontier.py` reads it, by importing it, so the
+    pulse and the claim never disagree on what is ready. GitHub takes one call
+    per ticket, too slow for this hook's 5 s: the pulse reads the last
+    `frontier.py --json` saved under .pulse/, and refreshes it in a detached
+    process when it is missing or older than GH_CACHE_S. The first pulse on a
+    new GitHub graph therefore sees no frontier; the next one does."""
+    if source.startswith("gh:"):
+        cache = STATE / ("%s.frontier.json" % track)
+        try:
+            age = time.time() - cache.stat().st_mtime
+        except OSError:
+            age = None
+        if age is None or age > GH_CACHE_S:
+            try:
+                subprocess.Popen(
+                    ["sh", "-c", '"$0" "$1" --json "$2" > "$3.$$" 2>&1; mv "$3.$$" "$3"',
+                     sys.executable, str(FRONTIER_PY), source, str(cache)],
+                    stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL, start_new_session=True)
+            except OSError:
+                pass
+        if age is None:
+            return [], None
+        text = cache.read_text(encoding="utf-8", errors="replace")
+        try:
+            return ready_of(json.loads(text)), None
+        except (ValueError, KeyError, TypeError):
+            return [], text.strip()[:300] or "empty frontier cache"
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("frontier", str(FRONTIER_PY))
+    fr = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(fr)
+    tickets, errors = fr.load(source)
+    if tickets is None or errors:
+        return [], "; ".join(errors)[:300]
+    return ready_of(fr.classify(tickets)), None
 
 
 def open_blockers(track):
@@ -277,11 +341,15 @@ def main():
     if question_pending(sid):
         return 0
 
-    idle = idle_workers(sid)
+    idle, size = team(sid)
     fired = dict(st.get("rungs") or {})
     rungs = due_rungs(track, fired)
     blockers = open_blockers(track)
-    if not idle and not rungs and not blockers:
+    source = tickets_source(body)
+    ready, broken = read_frontier(source, track) if source else ([], None)
+    # More ready tickets than idle workers, and room left in the team.
+    spawn = min(len(ready) - len(idle), policy.BOSS_SPAN - size) if not broken else 0
+    if not idle and not rungs and not blockers and not broken and spawn <= 0:
         return 0                                  # team busy, nothing overdue
 
     outcome = section(body, "Outcome")
@@ -297,7 +365,12 @@ def main():
     if unmet:
         lines.append("NOT YET MET:")
         lines += ["  " + l[6:][:160] for l in unmet[:6]]
-    if nxt:
+    if broken:
+        lines.append("TICKET GRAPH BROKEN (%s): %s" % (source, broken))
+    elif source:
+        lines.append("READY NOW: " + ("; ".join(r[:60] for r in ready[:policy.BOSS_SPAN])
+                                      or "none"))
+    elif nxt:
         lines.append("NEXT, in priority order:")
         lines += ["  " + l[:160] for l in nxt[:6]]
     lines.append("")
@@ -325,9 +398,25 @@ def main():
                      "labelled, and the reason that actually decides it. Prose makes them "
                      "type; a question makes the dashboard chime and their phone light up. "
                      "See `references/escalation.md`." % n)
-    if idle:
+    if broken:
         n += 1
-        lines.append("%d. Dispatch the top NEXT item to an idle worker (P6: match "
+        lines.append("%d. Fix the ticket graph before dispatching from it: "
+                     "`python3 %s %s` names what is wrong." % (n, FRONTIER_PY, source))
+    elif source:
+        if idle and ready:
+            n += 1
+            lines.append("%d. Dispatch one READY ticket to each idle worker, all of them "
+                         "this turn, not one. Claim each first: `python3 %s claim %s "
+                         "<NN> <worker>`." % (n, FRONTIER_PY, source))
+        if spawn > 0:
+            n += 1
+            lines.append("%d. Spawn %d more worker%s (team %d of %d) and dispatch the "
+                         "remaining READY tickets to them." % (
+                             n, spawn, "s" if spawn > 1 else "", size, policy.BOSS_SPAN))
+    elif idle:
+        n += 1
+        lines.append("%d. Dispatch NEXT items to the idle workers, one each, top first; "
+                     "skip an item that waits on work still in progress (P6: match "
                      "the project; move or spawn only if none fits)." % n)
         n += 1
         lines.append("%d. NEXT empty or stale? Refill it from the board or the "
