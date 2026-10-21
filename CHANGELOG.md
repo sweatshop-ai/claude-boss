@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.11.1 — 2026-10-21
+
+- **`ci_state.py`**: `ci_state(repo, branch)` says whether a branch's latest Actions
+  run is queued, running or done, how long it has waited or run, and an ETA (median
+  of the workflow's last successful runs, minus elapsed; a queued run's ETA leaves the
+  queue out). The caller never waits on the network: it reads a cache and starts a
+  detached refresh; every failure reads as `unknown`. Written for agentview, which
+  vendors it (Tarek, 2026-10-21), and for the boss pulse, which does not use it yet.
+  On sweatshop-ai/render-doc a run takes 45-95 min and waited up to 2 h for a runner.
+
 ## 0.11.0 — 2026-10-21
 
 The boss hands out the whole frontier, not the top item.
