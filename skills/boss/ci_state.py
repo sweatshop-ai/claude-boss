@@ -118,17 +118,37 @@ def ci_state(repo, branch, now=None):
         start_refresh(repo, branch)
     if cached is None or age > STALE_S:
         return unknown()
+    try:
+        return from_cache(cached, now)
+    except (AttributeError, TypeError, ValueError, KeyError):
+        return unknown("malformed cache")
+
+
+def from_cache(cached, now):
+    """The state a cached refresh says, at `now`. Anything not of the shape
+    `refresh` writes reads as unknown: a file from another version or a torn
+    write must not raise on the caller's poll path."""
+    if not isinstance(cached, dict):
+        return unknown("malformed cache")
     run = cached.get("run")
     if not run:
-        return unknown(cached.get("error"))
+        return unknown(cached.get("error") if isinstance(cached.get("error"), str) else None)
+    if not isinstance(run, dict) or not isinstance(run.get("status"), str):
+        return unknown("malformed cache")
     out = unknown()
-    status = run.get("status") or "unknown"
+    status = run["status"]
     out.update(status="queued" if status in WAITING else status, conclusion=run.get("conclusion"),
                run_url=run.get("html_url"))
     median = cached.get("median_s")
-    created, started = ts(run.get("created_at")), ts(run.get("run_started_at"))
-    if out["status"] == "queued" and created:
-        out["queued_for_s"] = int(now - created)
+    median = median if isinstance(median, (int, float)) else None
+    started = ts(run.get("run_started_at"))
+    if out["status"] == "queued":
+        # run_started_at is the current attempt's start (it resets on a re-run;
+        # created_at keeps the first attempt's). A `waiting` run may have entered
+        # that state after earlier jobs ran: no timestamp says when, so no wait.
+        since = started or ts(run.get("created_at"))
+        if status != "waiting" and since:
+            out["queued_for_s"] = int(now - since)
         out["eta_s"] = int(median) if median else None
         out["eta_excludes_queue"] = True
     elif out["status"] == "in_progress" and started:
