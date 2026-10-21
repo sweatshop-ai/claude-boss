@@ -1,5 +1,42 @@
 # Changelog
 
+## 0.11.0 — 2026-10-21
+
+The boss hands out the whole frontier, not the top item.
+
+- **`## Tickets` in the objective** names a ticket graph: a folder of ticket
+  files, or `gh:owner/repo#N`. With it, the pulse reads the frontier and lists
+  every ready ticket, asks for one to each idle worker in the same turn, and
+  asks for a spawn when ready tickets outnumber idle workers and the team is
+  under `BOSS_SPAN`. A broken graph (a cycle, a missing Blocked by) is named and
+  nothing is dispatched from it. `boss-goal check` reads the graph too.
+  Before this the graph lived only in the hand-to-boss brief, and the pulse said
+  "dispatch the top NEXT item": one worker per turn.
+- **GitHub ticket graphs.** `frontier.py gh:owner/repo#N` reads the sub-issues
+  of issue N and GitHub's native issue dependencies; a closed issue is done, a
+  `worker:<name>` label is the claim (every worker writes as one account, so the
+  assignee cannot say who), an open blocker outside the sub-issues is external.
+  The claim re-reads the live graph and refuses a ticket that is blocked,
+  claimed, done or not a sub-issue, and creates the label before adding it.
+  Paginated sub-issues and blockers are joined across pages, and an issue is
+  known by repo and number. The pulse's Stop hook has 5 s, so it keeps the last
+  `frontier.py --json`, keyed by track and source, and reads GitHub again when
+  it is older than 30 s, for 3 s at most (a bigger graph finishes in the
+  background); `boss-goal check` saves the same cache. A failed read keeps the
+  last good frontier.
+- **Without a graph, Next works the same way**: one item per idle worker.
+- **Span of control 5 → 12** (`policy.BOSS_SPAN`). The five had no measurement
+  behind it. The limit the owner hits is the weekly usage cap (four times since
+  10-10), not the five-hour one; the owner prefers finishing sooner.
+- **Bursts: background subagents by default, 3 to start, at most 5**
+  (`policy.BURST_START`, `BURST_MAX`). Agent-teams teammates only when the parts
+  must talk. The old "at most three" misquoted Anthropic's guide, which says
+  "Start with 3-5 teammates" and that three "often" beat five.
+- **Codex: at most three rounds on one PR**, then the open findings become a
+  ticket and the PR merges, unless one is about security or lost data. PR 11
+  ran twelve.
+- **Glossary:** *Ticket graph* and *Frontier*; *Burst* now covers subagents.
+
 ## 0.10.0 — 2026-10-05
 
 A boss no longer leads agent-teams teammates by accident; a worker may lead

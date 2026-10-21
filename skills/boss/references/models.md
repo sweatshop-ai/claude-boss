@@ -108,25 +108,33 @@ will not think of it:
 Spawning a whole cheap **worker** (`--model haiku`) is right only for a track that
 is mechanical end to end and whose output someone else checks.
 
-## Bursts — when a worker leads agent-teams teammates (2026-10-05)
+## Bursts — when a worker runs helpers in parallel (2026-10-05, 2026-10-21)
 
-Where Claude Code's agent teams are on (`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`),
-a worker can spend one ticket leading **agent-teams teammates**: a **burst**. The
+A worker can spend one ticket running parallel helpers: a **burst**. The
 worker decides, not you; it is the one that has read the code and can tell
 whether the angles are really separate. You only put the criteria and the
 ceiling in the dispatch (Phase B).
+
+**Background subagents by default.** They load MCP tools and can call any skill,
+but start without Claude Code's full system prompt, cost less than agent-teams
+teammates (Anthropic's agent-teams guide: "Lower: results summarized back to main
+context"), and need no setting. A subagent that edits gets its own worktree
+(`isolation: "worktree"`). **Agent-teams teammates only when the parts must talk**
+— hypotheses that should try to disprove each other — and only where
+`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`.
 
 A ticket is worth a burst when its parts can be worked **without talking and
 without touching the same files**: a review along separate lenses (security,
 performance, tests), a bug with competing hypotheses that should try to disprove
 each other, a research question with independent angles. Anything sequential,
-anything editing one set of files, stays a single session: two teammates on one
+anything editing one set of files, stays a single session: two helpers on one
 file overwrite each other.
 
-**At most three teammates.** Every teammate's report lands in the worker's
+**Start with 3 helpers, at most 5.** Anthropic's guide: "Start with 3-5 teammates
+for most workflows" — and "three focused teammates often outperform five
+scattered ones", often, not always. Every helper's report lands in the worker's
 context, so a burst spends the worker's 150k `CTX-SPLIT` budget, not a separate
-one — and three focused teammates outperform five scattered ones by Anthropic's
-own account.
+one; that, not the count, is what caps a burst.
 
 Never the boss. A teammate lives inside its lead's process, has no pane and no
 stamp, and dies with it; a boss's teammates would be invisible to `list --mine`,
