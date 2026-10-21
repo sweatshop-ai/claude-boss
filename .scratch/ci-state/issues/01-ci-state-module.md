@@ -26,9 +26,10 @@ boss should not read it as stuck or idle, and agentview could show it.
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done (PR 21)
 
-- [ ] Tests with a fake `gh`: queued, in_progress, completed, gh failure -> unknown, a slow
-      gh never delays the caller past the cache read
-- [ ] The boss pulse names a worker whose PR waits on CI, with the ETA, instead of counting it idle
-- [ ] Vendor header so agentview can copy it unchanged (agentview's use is a separate decision)
+- [x] Tests with a fake `gh`: queued, in_progress, completed, gh failure -> unknown, a slow
+      gh never delays the caller past the cache read (`skills/boss/test_ci_state.py`, 12 tests)
+- [x] Vendor header so agentview can copy it unchanged (agentview's use: Thierry said yes
+      on 2026-10-21, Tarek builds it)
+- The boss pulse using it moved to ticket 02.
