@@ -145,8 +145,8 @@ def tickets_source(body):
     return ""
 
 
-GH_CACHE_S = 120        # a GitHub frontier older than this is refreshed
-GH_FIRST_S = 3          # the first read of a GitHub graph, inside the hook's 5 s
+GH_CACHE_S = 30         # a GitHub frontier older than this is read again
+GH_FIRST_S = 3          # one read of a GitHub graph, inside the hook's 5 s
 
 
 def ready_of(out):
@@ -166,35 +166,41 @@ def read_frontier(source, track):
 
     A folder is read the way `frontier.py` reads it, by importing it, so the
     pulse and the claim never disagree on what is ready. GitHub takes one call
-    per ticket, too slow to repeat inside this hook's 5 s: the pulse reads the
-    last `frontier.py --json` saved under .pulse/ and refreshes it in a detached
-    process when it is older than GH_CACHE_S. With no cache yet it reads GitHub
-    itself, for GH_FIRST_S at most; a graph too big for that is left to the
-    background refresh and to `boss-goal check`, which saves the same cache."""
+    per ticket: the pulse keeps the last `frontier.py --json` under .pulse/ and
+    reads GitHub again when it is older than GH_CACHE_S, for GH_FIRST_S at most
+    inside this hook's 5 s. A graph too big for that is refreshed in the
+    background and by `boss-goal check`, which saves the same cache; a failed
+    read keeps the last good frontier."""
     if source.startswith("gh:"):
         cache = frontier_cache(track, source)
         try:
             age = time.time() - cache.stat().st_mtime
         except OSError:
             age = None
-        if age is None:
+        if age is None or age > GH_CACHE_S:
             try:
                 r = subprocess.run([sys.executable, str(FRONTIER_PY), "--json", source],
                                    capture_output=True, text=True, timeout=GH_FIRST_S)
-                STATE.mkdir(parents=True, exist_ok=True)
-                cache.write_text(r.stdout if r.returncode == 0 else r.stderr, encoding="utf-8")
-                age = 0
+                # A failed read never replaces a good frontier: GitHub down for a
+                # minute must not turn the graph "broken". With no cache at all,
+                # the error is what the boss needs to see.
+                if r.returncode == 0 or age is None:
+                    STATE.mkdir(parents=True, exist_ok=True)
+                    tmp = cache.with_suffix(".tmp%d" % os.getpid())
+                    tmp.write_text(r.stdout if r.returncode == 0 else r.stderr, encoding="utf-8")
+                    os.replace(tmp, cache)
+                    age = 0
             except (subprocess.SubprocessError, OSError):
-                pass
-        if age is None or age > GH_CACHE_S:
-            try:
-                subprocess.Popen(
-                    ["sh", "-c", '"$0" "$1" --json "$2" > "$3.$$" 2>&1; mv "$3.$$" "$3"',
-                     sys.executable, str(FRONTIER_PY), source, str(cache)],
-                    stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL, start_new_session=True)
-            except OSError:
-                pass
+                # Too slow for this hook: finish in the background, success only.
+                try:
+                    subprocess.Popen(
+                        ["sh", "-c", '"$0" "$1" --json "$2" > "$3.$$" 2>/dev/null '
+                         '&& mv "$3.$$" "$3" || rm -f "$3.$$"',
+                         sys.executable, str(FRONTIER_PY), source, str(cache)],
+                        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL, start_new_session=True)
+                except OSError:
+                    pass
         if age is None:
             return [], None
         text = cache.read_text(encoding="utf-8", errors="replace")

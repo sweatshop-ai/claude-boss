@@ -511,7 +511,9 @@ the same turn, not one per turn; when ready tickets outnumber idle workers and t
 team is under 12, spawn for the rest. Claim each ticket before its dispatch goes
 out: `python3 ${CLAUDE_PLUGIN_ROOT}/skills/hand-to-boss/frontier.py claim <source>
 <NN> <worker>` (a folder gets a `**Claimed by:**` line, committed by path; a
-`gh:` source gets a `worker:<name>` label). Without a graph, Next works the same
+`gh:` source gets a `worker:<name>` label). When a ticket closes, run
+`boss-goal check <track>`: it re-reads the graph, so the tickets it unblocked are
+in the next pulse rather than up to 30 s later. Without a graph, Next works the same
 way: one item per idle worker, top first, skipping an item that waits on work
 still in progress.
 

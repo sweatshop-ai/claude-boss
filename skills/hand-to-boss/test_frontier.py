@@ -302,6 +302,16 @@ class GitHubFrontier(unittest.TestCase):
         self.assertEqual(out["ready"], [])
         self.assertEqual(out["external"], [{"num": "11", "what": "https://github.com/acme/infra/issues/99"}])
 
+    def test_a_blocker_in_another_repo_with_a_local_number_is_external(self):
+        local, other = issue(11, "API", state="closed"), {
+            "number": 11, "title": "Infra", "state": "open",
+            "html_url": "https://github.com/acme/infra/issues/11"}
+        self.repo([local, issue(12, "UI")], {12: [other]})
+        code, out, err = self.run_json()
+        self.assertEqual(code, 0, err)
+        self.assertEqual(out["ready"], [])
+        self.assertEqual(out["external"], [{"num": "12", "what": "https://github.com/acme/infra/issues/11"}])
+
     def test_no_sub_issues_fails_the_input_check(self):
         self.repo([], {})
         code, _, err = self.run_json()

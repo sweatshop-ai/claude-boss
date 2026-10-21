@@ -164,14 +164,20 @@ def gh_api(*args):
     return docs[0] if docs else None
 
 
+def issue_url(repo, issue):
+    return issue.get("html_url") or "https://github.com/%s/issues/%d" % (repo, issue["number"])
+
+
 def gh_ticket(repo, issue, blockers, members):
     """One sub-issue as a ticket. The claim is a `worker:<name>` label: every
     worker writes as the same GitHub account, so the assignee cannot say who."""
     claimed = next((l["name"][len(WORKER_LABEL):] for l in issue.get("labels") or []
                     if l.get("name", "").startswith(WORKER_LABEL)), "")
-    internal = [str(b["number"]) for b in blockers if b["number"] in members]
-    external = [b.get("html_url") or "#%d" % b["number"] for b in blockers
-                if b["number"] not in members and b.get("state") == "open"]
+    # An issue is known by repo and number: a blocker in another repo may share
+    # a number with a sub-issue here.
+    internal = [str(b["number"]) for b in blockers if issue_url(repo, b) in members]
+    external = [issue_url(repo, b) for b in blockers
+                if issue_url(repo, b) not in members and b.get("state") == "open"]
     return {"num": str(issue["number"]), "file": "%s#%d" % (repo, issue["number"]),
             "path": None, "title": issue.get("title", ""),
             "status": "done" if issue.get("state") == "closed" else "open",
@@ -186,7 +192,7 @@ def load_github(repo, parent):
         subs = gh_api("--paginate", "repos/%s/issues/%s/sub_issues" % (repo, parent))
         if not subs:
             return None, ["%s#%s has no sub-issues" % (repo, parent)]
-        members = {s["number"] for s in subs}
+        members = {issue_url(repo, s) for s in subs}
         tickets = [gh_ticket(repo, s, gh_api("--paginate", "repos/%s/issues/%d/dependencies/blocked_by"
                                              % (repo, s["number"])) or [], members)
                    for s in subs]

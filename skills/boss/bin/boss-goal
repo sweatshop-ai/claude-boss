@@ -200,7 +200,8 @@ check)
         # Save the frontier where the pulse reads it (boss-pulse.py frontier_cache).
         key=$(printf '%s' "$tk" | sha1sum | cut -c1-10)
         mkdir -p "$PM/.pulse"
-        python3 "$fr" --json "$tk" > "$PM/.pulse/$t.$key.frontier.json" 2>&1 || true
+        c="$PM/.pulse/$t.$key.frontier.json"
+        python3 "$fr" --json "$tk" > "$c.$$" 2>/dev/null && mv "$c.$$" "$c" || rm -f "$c.$$"
       fi
     else
       nxt=0

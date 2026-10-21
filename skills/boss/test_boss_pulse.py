@@ -252,6 +252,48 @@ class Frontier(PulseCase):
         out = json.loads(res.stdout)["hookSpecificOutput"]["additionalContext"]
         self.assertIn("TICKET GRAPH BROKEN", out, "the first pulse reads GitHub itself")
 
+    def fake_gh(self, script):
+        fake = self.tmp / "bin"
+        fake.mkdir(exist_ok=True)
+        (fake / "gh").write_text(script)
+        (fake / "gh").chmod(0o755)
+        return fake
+
+    def pulse_with_path(self, fake, idle=(), size=0):
+        path = os.environ["PATH"]
+        os.environ["PATH"] = "%s:%s" % (fake, path)
+        try:
+            return self.pulse_with_team(list(idle), size)
+        finally:
+            os.environ["PATH"] = path
+
+    def stale_cache(self, source, ready):
+        cache = self.cache(source)
+        cache.write_text(json.dumps({"tickets": [
+            {"num": n, "title": t, "state": "ready"} for n, t in ready]}))
+        old = time.time() - 3600
+        os.utime(cache, (old, old))
+        return cache
+
+    def test_a_stale_cache_is_refreshed_before_it_is_used(self):
+        """A worker just closed a blocker: the old cache says nothing is ready."""
+        self.stale_cache("gh:acme/app#10", [])
+        sub = {"number": 12, "title": "UI", "state": "open", "labels": []}
+        fake = self.fake_gh("#!/bin/sh\ncase \"$*\" in *sub_issues*) echo '%s';; *) echo '[]';; esac\n"
+                            % json.dumps([sub]))
+        self.goal_with_tickets("gh:acme/app#10")
+        self.assertIn("READY NOW: 12 UI", self.pulse_with_path(fake))
+
+    def test_a_failed_refresh_keeps_the_last_good_frontier(self):
+        cache = self.stale_cache("gh:acme/app#10", [("11", "API")])
+        fake = self.fake_gh("#!/bin/sh\necho 'HTTP 502' >&2\nexit 1\n")
+        self.goal_with_tickets("gh:acme/app#10")
+        out = self.pulse_with_path(fake)
+        self.assertIn("READY NOW: 11 API", out)
+        self.assertNotIn("BROKEN", out)
+        time.sleep(1.5)                       # let any background refresh finish
+        self.assertIn('"11"', cache.read_text())
+
     def test_a_cache_belongs_to_one_source(self):
         self.cache("gh:acme/app#10").write_text(json.dumps({"tickets": [
             {"num": "11", "title": "API", "state": "ready"}]}))
