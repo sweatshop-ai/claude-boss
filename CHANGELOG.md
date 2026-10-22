@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.11.5 — 2026-10-22
 
 - **The reviewer fallback is Opus, not Haiku** (Thierry, 2026-10-22). When Codex is
   absent, silent or at its usage limit, `boss-run`, `reviewer_chain.py` and
