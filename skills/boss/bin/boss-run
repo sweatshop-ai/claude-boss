@@ -9,7 +9,7 @@
 # Two gates, in order:
 #   1. Hard rules. Pattern matches on the command text. No reviewer can override
 #      them and there is no flag to skip them.
-#   2. The reviewer (reviewer_chain.py). Codex first, Haiku if Codex is missing or
+#   2. The reviewer (reviewer_chain.py). Codex first, Opus if Codex is missing or
 #      silent. If neither answers, nothing runs — a gate that fails open is not a
 #      gate.
 #
@@ -35,10 +35,12 @@ PM="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/pm"
 LOG="${PM}/boss-run.log"
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 PROMPT_FILE="${HERE}/../references/boss-run-review.md"
-HAIKU_MODEL="claude-haiku-4-5-20251001"
-FALLBACK_NAME="haiku"      # what the log and the chain call the Haiku reviewer
+FALLBACK_MODEL="claude-opus-5-5"
+FALLBACK_NAME="opus"      # what the log and the chain call the Opus fallback reviewer
 # Seconds each reviewer gets, whole numbers. Tests set it short so a hung reviewer is cut off at once.
 TIMEOUT="${BOSS_RUN_REVIEW_TIMEOUT:-120}"
+# Opus answers slower than Haiku did, so the fallback gets twice the Codex budget unless set.
+FALLBACK_TIMEOUT="${BOSS_RUN_REVIEW_FALLBACK_TIMEOUT:-$((TIMEOUT * 2))}"
 
 WHY="" ; CWD="$PWD" ; DRY=0 ; CMD="" ; FLAT=""
 REVIEWER="none" ; VERDICT="" ; REASON=""
@@ -117,7 +119,7 @@ check_hard_rules() {
 }
 
 # ---------------------------------------------------------------- reviewer ----
-# Which reviewer answers -- Codex, then Haiku, otherwise nobody -- is decided by
+# Which reviewer answers -- Codex, then Opus, otherwise nobody -- is decided by
 # reviewer_chain.py. boss-run renders the prompt, calls it, and acts on its answer
 # only when the answer is whole: exit 0, one JSON object, a reviewer's name, and
 # APPROVE or REJECT. A crash, garbage, a signal or a missing python3 is "no
@@ -175,7 +177,7 @@ run_reviewer() {
   json=$(python3 "$CHAIN" --prompt-file "$PROMPT_TMP" \
            --words APPROVE,REJECT --match prefix --effort medium \
            --codex-timeout "$TIMEOUT" \
-           --fallback-name "$FALLBACK_NAME" --fallback-model "$HAIKU_MODEL" --fallback-timeout "$TIMEOUT" \
+           --fallback-name "$FALLBACK_NAME" --fallback-model "$FALLBACK_MODEL" --fallback-timeout "$FALLBACK_TIMEOUT" \
            </dev/null 2>/dev/null); rc=$?
   rm -f -- "$PROMPT_TMP"; PROMPT_TMP=""
   [[ $rc -eq 0 ]] || return 1
@@ -244,7 +246,7 @@ PROMPT=$(render_prompt && printf .) || finish 2
 PROMPT=${PROMPT%.}
 if ! run_reviewer "$PROMPT"; then
   REVIEWER="none"; VERDICT=""; REASON="no reviewer answered"
-  printf 'boss-run: no reviewer answered (codex and %s both silent or absent).\n' "$HAIKU_MODEL" >&2
+  printf 'boss-run: no reviewer answered (codex and %s both silent or absent).\n' "$FALLBACK_MODEL" >&2
   printf '  Nothing was run. Retry, or hand the command to the owner.\n' >&2
   finish 4
 fi

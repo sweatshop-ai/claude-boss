@@ -3,7 +3,7 @@
 
 Run: python3 skills/boss/test_boss_run.py
 
-boss-run asks a reviewer (codex, then Haiku through claude) whether a command
+boss-run asks a reviewer (codex, then Opus through claude) whether a command
 matches its stated intent, and runs the command only on APPROVE. Three kinds of
 test live here:
 
@@ -32,7 +32,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from hermetic import Sandbox, alive  # noqa: E402
 
-HAIKU = "claude-haiku-4-5-20251001"
+OPUS = "claude-opus-5-5"
 WHY = "post the status comment on the PR"
 CMD = "touch dry.flag"
 RAMBLE = "I would need more context before I can say anything about this."
@@ -165,18 +165,18 @@ class Reject(Base):
 
 class Fallback(Base):
     def test_without_codex_haiku_through_claude_answers(self):
-        self.sb.stub("claude", answer=approve("haiku agrees"))
+        self.sb.stub("claude", answer=approve("opus agrees"))
         r = self.dry()
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(r.stdout, "boss-run: APPROVE (reviewer: haiku) — haiku agrees\n"
+        self.assertEqual(r.stdout, "boss-run: APPROVE (reviewer: opus) — opus agrees\n"
                                    "  --dry-run: not executed.\n")
         entry = self.only_log()
         self.assertEqual((entry["reviewer"], entry["verdict"], entry["reason"]),
-                         ("haiku", "APPROVE", "haiku agrees"))
+                         ("opus", "APPROVE", "opus agrees"))
         calls = self.sb.calls_of("claude")
         self.assertEqual(len(calls), 1)
         argv = calls[0].argv
-        self.assertEqual(argv[:3], ["-p", "--model", HAIKU])
+        self.assertEqual(argv[:3], ["-p", "--model", OPUS])
         self.assertEqual(len(argv), 4, argv)
         self.assertIn("INTENT: %s\n" % WHY, argv[3])
 
@@ -184,7 +184,7 @@ class Fallback(Base):
         self.sb.stub("claude", answer=reject("not what was asked"))
         r = self.live("touch must-not-run.flag")
         self.assertEqual(r.returncode, 3)
-        self.assertTrue(r.stderr.startswith("boss-run: REJECTED by haiku — not what was asked\n"))
+        self.assertTrue(r.stderr.startswith("boss-run: REJECTED by opus — not what was asked\n"))
         self.assertFalse((self.sb.work / "must-not-run.flag").exists())
 
     def test_codex_that_fails_without_an_answer_falls_to_haiku(self):
@@ -192,7 +192,7 @@ class Fallback(Base):
         self.sb.stub("claude", answer=approve())
         r = self.dry()
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("(reviewer: haiku)", r.stdout)
+        self.assertIn("(reviewer: opus)", r.stdout)
         self.assertEqual(len(self.sb.calls_of("codex")), 1)
         self.assertEqual(len(self.sb.calls_of("claude")), 1)
 
@@ -201,8 +201,8 @@ class Fallback(Base):
         self.sb.stub("claude", answer=approve())
         r = self.dry()
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("(reviewer: haiku)", r.stdout)
-        self.assertEqual(self.only_log()["reviewer"], "haiku")
+        self.assertIn("(reviewer: opus)", r.stdout)
+        self.assertEqual(self.only_log()["reviewer"], "opus")
 
     def test_a_codex_answer_means_claude_is_never_called(self):
         self.sb.stub("codex", answer=approve())
@@ -218,7 +218,7 @@ class Fallback(Base):
         r = self.sb.boss_run("--why", WHY, "--dry-run", "--", CMD, timeout=30,
                              extra_env={"BOSS_RUN_REVIEW_TIMEOUT": "1"})
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("(reviewer: haiku)", r.stdout)
+        self.assertIn("(reviewer: opus)", r.stdout)
         self.assertEqual(len(self.sb.calls_of("codex")), 1)
         self.assertEqual(len(self.sb.calls_of("claude")), 1)
         pid = int((self.sb.root / "child.pid").read_text())
@@ -229,7 +229,7 @@ class Fallback(Base):
 
 
 class NoReviewer(Base):
-    EXPECTED = ("boss-run: no reviewer answered (codex and claude-haiku-4-5-20251001 "
+    EXPECTED = ("boss-run: no reviewer answered (codex and claude-opus-5-5 "
                 "both silent or absent).\n"
                 "  Nothing was run. Retry, or hand the command to the owner.\n")
 
@@ -402,7 +402,7 @@ class ReviewerIsolation(Base):
         self.assertQuiet(self.dry())
         self.sb.stub("codex", answer=RAMBLE, out="NOISE-CODEX-OUT", err="NOISE-CODEX-ERR")
         r = self.dry()
-        self.assertIn("(reviewer: haiku)", r.stdout)
+        self.assertIn("(reviewer: opus)", r.stdout)
         self.assertQuiet(r)
 
     def test_reviewer_noise_stays_out_of_a_reject(self):
@@ -460,10 +460,10 @@ class MoreCharacterization(Base):
                 self.assertEqual(self.sb.log_lines()[-1]["verdict"], verdict)
 
     def test_a_nul_byte_inside_codexs_verdict_is_dropped_so_its_reject_stands(self):
-        # bash's $(...) dropped NUL bytes from a reviewer's answer: `RE\0JECT` was a REJECT, and Haiku
-        # was never asked. Parsed raw it was no verdict and Haiku's APPROVE would have run the command.
+        # bash's $(...) dropped NUL bytes from a reviewer's answer: `RE\0JECT` was a REJECT, and Opus
+        # was never asked. Parsed raw it was no verdict and Opus's APPROVE would have run the command.
         self.sb.stub("codex", answer="VERDICT: RE\0JECT\nREASON: nul")
-        self.sb.stub("claude", answer=approve("haiku would approve"))
+        self.sb.stub("claude", answer=approve("opus would approve"))
         r = self.dry()
         self.assertEqual(r.returncode, 3, r.stderr)
         self.assertNotCalled("claude")
@@ -471,10 +471,10 @@ class MoreCharacterization(Base):
 
     def test_a_nul_byte_inside_a_multibyte_space_before_the_verdict_is_dropped_first(self):
         # bash's $(...) dropped the NUL from the bytes and grep then read U+3000 (a space) before
-        # VERDICT: so Codex's REJECT stood and Haiku was never asked. Decoding first would have cut
-        # the character into replacement characters and handed the decision to Haiku.
+        # VERDICT: so Codex's REJECT stood and Opus was never asked. Decoding first would have cut
+        # the character into replacement characters and handed the decision to Opus.
         self.sb.stub("codex", answer=b"\xe3\x80\0\x80VERDICT: REJECT\nREASON: nul")
-        self.sb.stub("claude", answer=approve("haiku would approve"))
+        self.sb.stub("claude", answer=approve("opus would approve"))
         r = self.dry()
         self.assertEqual(r.returncode, 3, r.stderr)
         self.assertNotCalled("claude")
@@ -488,17 +488,17 @@ class MoreCharacterization(Base):
         self.assertNotCalled("claude")
         sb2 = Sandbox()
         self.addCleanup(sb2.cleanup)
-        sb2.stub("claude", answer=reject("haiku said so"), rc=2)
+        sb2.stub("claude", answer=reject("opus said so"), rc=2)
         r = sb2.boss_run("--why", WHY, "--dry-run", "--", CMD)
         self.assertEqual(r.returncode, 3, r.stderr)
-        self.assertEqual(sb2.log_lines()[0]["reviewer"], "haiku")
+        self.assertEqual(sb2.log_lines()[0]["reviewer"], "opus")
 
     def test_codex_progress_on_stdout_is_never_read_as_the_answer(self):
         self.sb.stub("codex", out=approve("progress, not an answer"))   # no answer in the -o file
         self.sb.stub("claude", answer=reject("the real answer"))
         r = self.dry()
         self.assertEqual(r.returncode, 3, r.stderr)
-        self.assertEqual(self.only_log()["reviewer"], "haiku")
+        self.assertEqual(self.only_log()["reviewer"], "opus")
         sb2 = Sandbox()
         self.addCleanup(sb2.cleanup)
         sb2.stub("codex", out=approve("progress, not an answer"))
@@ -506,10 +506,10 @@ class MoreCharacterization(Base):
         self.assertEqual(r.returncode, 4, r.stderr)
 
     def test_the_nine_log_fields_and_their_values_for_haiku_none_and_a_hard_rule(self):
-        self.sb.stub("claude", answer=approve("haiku agrees"))
+        self.sb.stub("claude", answer=approve("opus agrees"))
         self.assertEqual(self.dry().returncode, 0)
-        self.assertEntry(self.sb, self.sb.log_lines()[-1], reviewer="haiku", verdict="APPROVE",
-                         reason="haiku agrees", exit=0)
+        self.assertEntry(self.sb, self.sb.log_lines()[-1], reviewer="opus", verdict="APPROVE",
+                         reason="opus agrees", exit=0)
 
         sb2 = Sandbox()
         self.addCleanup(sb2.cleanup)
@@ -607,14 +607,14 @@ class FailClosed(Base):
         path.chmod(0o755)
 
     def test_an_approving_chain_runs_the_command_and_boss_run_logs_what_the_chain_said(self):
-        self.chain_says(reviewer="haiku", reason="by the chain")
+        self.chain_says(reviewer="opus", reason="by the chain")
         r = self.live("touch ran.flag")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertTrue((self.sb.work / "ran.flag").exists())
-        self.assertTrue(r.stdout.startswith("boss-run: APPROVE (reviewer: haiku) — by the chain\n"))
+        self.assertTrue(r.stdout.startswith("boss-run: APPROVE (reviewer: opus) — by the chain\n"))
         entry = self.only_log()
         self.assertEqual((entry["reviewer"], entry["verdict"], entry["reason"], entry["exit"]),
-                         ("haiku", "APPROVE", "by the chain", 0))
+                         ("opus", "APPROVE", "by the chain", 0))
 
     def test_a_rejecting_chain_exits_3_and_nothing_runs(self):
         self.chain_says(reviewer="codex", word="REJECT", reason="too wide")
@@ -665,7 +665,7 @@ class FailClosed(Base):
             "no attempts field": lambda r: r.pop("attempts"),
             "attempts not a list": lambda r: r.update(attempts="answered"),
             "no attempts": lambda r: r.update(attempts=[]),
-            "only another reviewer's attempt": lambda r: r.update(attempts=[dict(other, reviewer="haiku")]),
+            "only another reviewer's attempt": lambda r: r.update(attempts=[dict(other, reviewer="opus")]),
             "the attempt did not answer": lambda r: r.update(attempts=[dict(other, reason="noverdict")]),
             "attempts that are not objects": lambda r: r.update(attempts=["codex"]),
         }
@@ -678,7 +678,7 @@ class FailClosed(Base):
                 (self.sb.cfg / "pm" / "boss-run.log").unlink()
 
     def test_either_reviewer_boss_run_asks_for_is_accepted_when_its_attempt_answered(self):
-        for reviewer in ("codex", "haiku"):
+        for reviewer in ("codex", "opus"):
             with self.subTest(reviewer):
                 self.chain_says(reviewer=reviewer)
                 r = self.dry()
@@ -712,8 +712,8 @@ class FailClosed(Base):
         flags = dict(zip(argv[3::2], argv[4::2]))
         self.assertEqual(argv[1], "--prompt-file")
         self.assertEqual(flags, {"--words": "APPROVE,REJECT", "--match": "prefix", "--effort": "medium",
-                                 "--codex-timeout": "17", "--fallback-name": "haiku",
-                                 "--fallback-model": HAIKU, "--fallback-timeout": "17"})
+                                 "--codex-timeout": "17", "--fallback-name": "opus",
+                                 "--fallback-model": OPUS, "--fallback-timeout": "34"})
         self.assertEqual(call.stdin, "")
 
     def test_no_temporary_prompt_file_is_left_behind(self):

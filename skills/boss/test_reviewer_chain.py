@@ -25,7 +25,7 @@ sys.path.insert(0, str(HERE))
 import reviewer_chain as rc  # noqa: E402
 from hermetic import Sandbox, alive  # noqa: E402
 
-HAIKU_ID = "claude-haiku-4-5-20251001"
+OPUS_ID = "claude-opus-5-5"
 CODEX_FIXED = ["exec", "-s", "read-only", "--skip-git-repo-check",
                "-c", 'model_reasoning_effort="medium"', "-o"]
 
@@ -76,24 +76,24 @@ class CodexAnswers(Base):
 class Fallbacks(Base):
     def test_codex_absent_then_the_fallback_answers_and_claude_is_called_as_before(self):
         self.sb.stub("claude", answer=reject("too wide"))
-        result = self.chain("PROMPT TEXT", fallback=rc.HAIKU)
-        self.assertEqual(result.reviewer, "haiku")
+        result = self.chain("PROMPT TEXT", fallback=rc.OPUS)
+        self.assertEqual(result.reviewer, "opus")
         self.assertEqual(result.parsed, rc.Verdict("REJECT", "too wide"))
         self.assertEqual(result.output, reject("too wide"))
-        codex, haiku = result.attempts
+        codex, opus = result.attempts
         self.assertEqual((codex.reviewer, codex.reason, codex.exit_code, codex.model),
                          ("codex", "absent", None, None))
-        self.assertEqual((haiku.reviewer, haiku.reason, haiku.exit_code, haiku.model),
-                         ("haiku", "answered", 0, HAIKU_ID))
+        self.assertEqual((opus.reviewer, opus.reason, opus.exit_code, opus.model),
+                         ("opus", "answered", 0, OPUS_ID))
         (call,) = self.sb.calls_of("claude")
-        self.assertEqual(call.argv, ["-p", "--model", HAIKU_ID, "PROMPT TEXT"])
+        self.assertEqual(call.argv, ["-p", "--model", OPUS_ID, "PROMPT TEXT"])
         self.assertEqual(call.stdin, "")
 
     def test_both_absent_is_none_with_both_attempts_kept(self):
-        result = self.chain(fallback=rc.HAIKU)
+        result = self.chain(fallback=rc.OPUS)
         self.assertEqual((result.reviewer, result.output, result.parsed), ("none", "", None))
         self.assertEqual([(a.reviewer, a.reason) for a in result.attempts],
-                         [("codex", "absent"), ("haiku", "absent")])
+                         [("codex", "absent"), ("opus", "absent")])
 
     def test_without_a_fallback_the_chain_is_codex_only(self):
         self.sb.stub("claude", answer=approve())
@@ -110,11 +110,11 @@ class Reasons(Base):
     def test_a_non_zero_exit_without_a_verdict_is_error_and_the_fallback_runs(self):
         self.sb.stub("codex", rc=3, err="codex: model overloaded")
         self.sb.stub("claude", answer=approve())
-        result = self.chain(fallback=rc.HAIKU)
+        result = self.chain(fallback=rc.OPUS)
         codex = result.attempts[0]
         self.assertEqual((codex.reason, codex.exit_code, codex.output), ("error", 3, ""))
         self.assertEqual(codex.stderr_tail, "codex: model overloaded\n")
-        self.assertEqual(result.reviewer, "haiku")
+        self.assertEqual(result.reviewer, "opus")
 
     def test_the_stderr_tail_is_kept_whole_at_2048_characters_and_cut_at_2049(self):
         for body_len, expect_dropped in ((2047, False), (2048, True)):
@@ -136,10 +136,10 @@ class Reasons(Base):
     def test_exit_zero_and_no_usable_verdict_is_noverdict_and_the_raw_answer_is_kept(self):
         self.sb.stub("codex", answer=RAMBLE)
         self.sb.stub("claude", answer=approve())
-        result = self.chain(fallback=rc.HAIKU)
+        result = self.chain(fallback=rc.OPUS)
         codex = result.attempts[0]
         self.assertEqual((codex.reason, codex.exit_code, codex.output), ("noverdict", 0, RAMBLE))
-        self.assertEqual(result.reviewer, "haiku")
+        self.assertEqual(result.reviewer, "opus")
 
     def test_codexs_answer_file_is_read_with_the_bounded_read_too(self):
         # A child of Codex may keep appending to the -o file after Codex exits; reading it to end of
@@ -160,16 +160,16 @@ class Reasons(Base):
         self.assertTrue(mark.exists())
 
     def test_a_codex_answer_file_that_is_gone_is_an_empty_answer_and_the_chain_goes_on(self):
-        # boss-run's old `cat "$last" 2>/dev/null` carried on to Haiku; an exception would not.
+        # boss-run's old `cat "$last" 2>/dev/null` carried on to Opus; an exception would not.
         gone = self.sb.stubs / "codex"
         gone.write_text('#!/bin/bash\nprev=""; dest=""\nfor a in "$@"; do [ "$prev" = "-o" ] && dest=$a; prev=$a; done\n'
                         'rm -f "$dest"\n')
         gone.chmod(0o755)
         self.sb.stub("claude", answer=approve("fallback"))
-        result = self.chain(fallback=rc.HAIKU)
+        result = self.chain(fallback=rc.OPUS)
         codex = result.attempts[0]
         self.assertEqual((codex.reason, codex.output, codex.exit_code), ("noverdict", "", 0))
-        self.assertEqual(result.reviewer, "haiku")
+        self.assertEqual(result.reviewer, "opus")
 
     def test_an_empty_answer_with_exit_zero_is_noverdict(self):
         self.sb.stub("codex")
@@ -179,7 +179,7 @@ class Reasons(Base):
     def test_a_fallback_whose_when_leaves_out_noverdict_is_not_called_after_one(self):
         self.sb.stub("codex", answer=RAMBLE)
         self.sb.stub("claude", answer=approve())
-        fb = rc.Fallback("haiku", HAIKU_ID, when=("absent", "timeout", "error"))
+        fb = rc.Fallback("opus", OPUS_ID, when=("absent", "timeout", "error"))
         result = self.chain(fallback=fb)
         self.assertEqual(result.reviewer, "none")
         self.assertEqual([(a.reviewer, a.reason) for a in result.attempts],
@@ -201,10 +201,10 @@ class Reasons(Base):
     def test_both_down_with_errors_is_none_and_each_attempt_says_why(self):
         self.sb.stub("codex", rc=2, err="boom")
         self.sb.stub("claude", answer=RAMBLE)
-        result = self.chain(fallback=rc.HAIKU)
+        result = self.chain(fallback=rc.OPUS)
         self.assertEqual((result.reviewer, result.output, result.parsed), ("none", "", None))
         self.assertEqual([(a.reviewer, a.reason) for a in result.attempts],
-                         [("codex", "error"), ("haiku", "noverdict")])
+                         [("codex", "error"), ("opus", "noverdict")])
 
 
 class Timeouts(Base):
@@ -215,11 +215,11 @@ class Timeouts(Base):
         self.sb.stub("codex", hang=True)
         self.sb.stub("claude", answer=approve())
         started = time.monotonic()
-        result = self.chain(codex_timeout=1, fallback=rc.HAIKU)
+        result = self.chain(codex_timeout=1, fallback=rc.OPUS)
         self.assertLess(time.monotonic() - started, 20)
         codex = result.attempts[0]
         self.assertEqual((codex.reason, codex.exit_code, codex.output), ("timeout", None, ""))
-        self.assertEqual(result.reviewer, "haiku")
+        self.assertEqual(result.reviewer, "opus")
 
     def test_a_timeout_kills_the_reviewer_and_everything_it_started(self):
         self.sb.stub("codex", hang=True, child=True)
@@ -242,11 +242,11 @@ class Timeouts(Base):
 
     def test_a_fallback_that_answered_before_hanging_is_answered_with_exit_code_none(self):
         self.sb.stub("claude", answer=reject("early"), hang_after=True)
-        fb = rc.Fallback("haiku", HAIKU_ID, timeout=1)
+        fb = rc.Fallback("opus", OPUS_ID, timeout=1)
         result = self.chain(fallback=fb)
-        haiku = result.attempts[-1]
-        self.assertEqual((haiku.reason, haiku.exit_code), ("answered", None))
-        self.assertEqual(result.reviewer, "haiku")
+        opus = result.attempts[-1]
+        self.assertEqual((opus.reason, opus.exit_code), ("answered", None))
+        self.assertEqual(result.reviewer, "opus")
 
     def test_a_descendant_that_escaped_the_group_does_not_hold_up_an_answered_reviewer(self):
         self.sb.stub("codex", answer=approve("done"), detached=True)
@@ -262,7 +262,7 @@ class Timeouts(Base):
         # must not run because a grandchild kept the reviewer's output open.
         self.sb.stub("codex", detached=True)
         self.sb.stub("claude", answer=approve())
-        fb = rc.Fallback("haiku", HAIKU_ID, when=("absent", "timeout", "error"))
+        fb = rc.Fallback("opus", OPUS_ID, when=("absent", "timeout", "error"))
         started = time.monotonic()
         result = self.chain(codex_timeout=8, fallback=fb)
         self.assertLess(time.monotonic() - started, 5)
@@ -274,10 +274,10 @@ class Timeouts(Base):
     def test_each_reviewer_has_its_own_timeout(self):
         self.sb.stub("codex", answer=approve(), delay=3)
         self.sb.stub("claude", answer=approve(), delay=3)
-        fb = rc.Fallback("haiku", HAIKU_ID, timeout=6)
+        fb = rc.Fallback("opus", OPUS_ID, timeout=6)
         result = self.chain(codex_timeout=1, fallback=fb)
         self.assertEqual([(a.reviewer, a.reason) for a in result.attempts],
-                         [("codex", "timeout"), ("haiku", "answered")])
+                         [("codex", "timeout"), ("opus", "answered")])
 
 
 class Matching(Base):
@@ -354,8 +354,8 @@ class Matching(Base):
         self.assertEqual(result.attempts[0].output, raw.decode("utf-8", "replace"))
         self.sb.stub("codex", answer=b"")
         self.sb.stub("claude", answer=raw.replace(b"REJECT", b"APPROVE"))
-        result = self.chain(fallback=rc.HAIKU)
-        self.assertEqual((result.reviewer, result.parsed.word), ("haiku", "APPROVE"))
+        result = self.chain(fallback=rc.OPUS)
+        self.assertEqual((result.reviewer, result.parsed.word), ("opus", "APPROVE"))
 
     def test_an_invisible_character_after_the_word_continues_a_token_too(self):
         # Marks and every control or format character (zero-width joiner and space, soft hyphen,
@@ -498,26 +498,26 @@ class FallbackSpec(Base):
     def test_allowed_tools_reach_claude_ahead_of_print_so_the_prompt_is_not_swallowed(self):
         # `--allowedTools <tools...>` is variadic: a prompt placed after it would be read as a tool.
         self.sb.stub("claude", answer=approve())
-        fb = rc.Fallback("haiku", HAIKU_ID, allowed_tools=("Read", "Grep"))
+        fb = rc.Fallback("opus", OPUS_ID, allowed_tools=("Read", "Grep"))
         self.chain("PROMPT TEXT", fallback=fb)
         (call,) = self.sb.calls_of("claude")
-        self.assertEqual(call.argv, ["--allowedTools", "Read,Grep", "-p", "--model", HAIKU_ID,
+        self.assertEqual(call.argv, ["--allowedTools", "Read,Grep", "-p", "--model", OPUS_ID,
                                      "PROMPT TEXT"])
 
     def test_a_name_the_result_already_uses_for_something_else_is_refused(self):
         # "none" would make an answering fallback look like no answer; "codex" would be mistaken for Codex.
         for name in ("codex", "CODEX", "none", "None", "", "  "):
             with self.subTest(name=name), self.assertRaises(ValueError):
-                rc.Fallback(name, HAIKU_ID)
+                rc.Fallback(name, OPUS_ID)
 
     def test_an_empty_tool_list_is_refused_because_it_would_read_as_no_restriction(self):
         with self.assertRaises(ValueError):
-            rc.Fallback("haiku", HAIKU_ID, allowed_tools=())
+            rc.Fallback("opus", OPUS_ID, allowed_tools=())
 
     def test_a_when_naming_a_reason_codex_cannot_have_is_refused(self):
         for bad in (("answered",), ("absent", "timeouts")):
             with self.subTest(when=bad), self.assertRaises(ValueError):
-                rc.Fallback("haiku", HAIKU_ID, when=bad)
+                rc.Fallback("opus", OPUS_ID, when=bad)
 
     def test_the_fallback_name_and_exact_model_id_come_from_the_spec(self):
         self.sb.stub("claude", answer=approve("by sonnet"))
@@ -561,11 +561,11 @@ class Unrunnable(Base):
         broken.write_text("#!/nonexistent/interpreter\n")
         broken.chmod(0o755)
         self.sb.stub("claude", answer=approve())
-        result = self.chain(fallback=rc.HAIKU)
+        result = self.chain(fallback=rc.OPUS)
         codex = result.attempts[0]
         self.assertEqual((codex.reason, codex.exit_code), ("error", None))
         self.assertIn("No such file or directory", codex.stderr_tail)   # the OSError, as Python words it
-        self.assertEqual(result.reviewer, "haiku")
+        self.assertEqual(result.reviewer, "opus")
 
 
 class Cli(Base):
@@ -614,8 +614,8 @@ class Cli(Base):
             ("no prompt file", good, {"prompt_file": False}),
             ("no words", [], {}),
             ("prompt file missing", good + ["--prompt-file", "/nonexistent/prompt.txt"], {"prompt_file": False}),
-            ("fallback name without model", good + ["--fallback-name", "haiku"], {}),
-            ("fallback model without name", good + ["--fallback-model", HAIKU_ID], {}),
+            ("fallback name without model", good + ["--fallback-name", "opus"], {}),
+            ("fallback model without name", good + ["--fallback-model", OPUS_ID], {}),
             ("no-fallback with a fallback", good + ["--no-fallback", "--fallback-name", "h",
                                                     "--fallback-model", "m"], {}),
             ("bad match rule", good + ["--match", "fuzzy"], {}),
@@ -698,7 +698,7 @@ class Cli(Base):
     def test_fallback_when_keeps_the_fallback_out_after_a_noverdict(self):
         self.sb.stub("codex", answer=RAMBLE)
         self.sb.stub("claude", answer=approve())
-        r = self.cli("--words", "GO,NO-GO", "--fallback-name", "haiku", "--fallback-model", HAIKU_ID,
+        r = self.cli("--words", "GO,NO-GO", "--fallback-name", "opus", "--fallback-model", OPUS_ID,
                      "--fallback-when", "absent,timeout,error")
         self.assertEqual(r.returncode, 1)
         self.assertNotCalled("claude")

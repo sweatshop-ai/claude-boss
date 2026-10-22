@@ -62,7 +62,7 @@ too small to dispatch.** You may run only: `boss-lifecycle.sh`, `boss-tracker`,
 `~/.claude/pm/` or `${CLAUDE_PLUGIN_ROOT}/skills/boss/`, and `boss-run` for a write the
 mission needs that you would otherwise hand to the owner's clipboard — a PR
 comment, a PR creation, a file outside `pm/`, a dev restart. `boss-run` asks
-Codex (Haiku if Codex is down) to read your intent and your command, and executes
+Codex (Opus if Codex is down) to read your intent and your command, and executes
 only on APPROVE. **A REJECT is final for that command**: escalate it to the owner
 with the reason. The non-delegable list is refused before any reviewer sees it.
 **Never run the underlying command bare after a REJECT.**
@@ -368,7 +368,7 @@ and one sweep, which does not hold up dispatch:
 boss-goal premortem <track> [repo-dir]   # how could this go wrong? a numbered list
 ```
 
-`check` is a lint. `review` sends the objective to Codex (Haiku as fallback) against
+`check` is a lint. `review` sends the objective to Codex (Opus as fallback) against
 `references/boss-goal-review.md` and gets back `COMPLETE` / `INCOMPLETE` plus up to
 three `MISSING:` lines, each phrased as the criterion that closes the gap. It is
 good at the structural omissions — a deliverable no criterion tests, a deploy with
@@ -383,7 +383,7 @@ start). So the pre-mortem is a safety step the boss runs on its own: a model
 imagines the failures, the boss covers every one, and the owner sees the result
 in a report, not in a question.
 
-`premortem` puts the objective to Codex (Haiku as fallback) against
+`premortem` puts the objective to Codex (Opus as fallback) against
 `references/boss-goal-premortem.md`: it is a week later, the track failed, list
 every concrete way that happened. It prints `R1.`…`R25.`, one risk per line, with
 no filtering and no fixes; an answer with fewer than 8 falls through to the next
