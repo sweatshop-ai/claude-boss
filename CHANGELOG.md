@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.11.6 — 2026-10-22
+
+- **P16: on a small shared runner pool, push only gate-ready heads** (owner,
+  2026-10-22). Three self-hosted runners and a three-job matrix meant one suite at a
+  time while four waited, one branch having started six runs in 14 minutes. Every
+  dispatch that pushes now carries three rules: push once, when the head is the one
+  to gate; cancel only your own superseded queued runs before a re-run; never re-run
+  a queued job. The boss checks `gh run list --status queued` before adding parallel
+  PR work.
+
 ## 0.11.5 — 2026-10-22
 
 - **The reviewer fallback is Opus, not Haiku** (Thierry, 2026-10-22). When Codex is
