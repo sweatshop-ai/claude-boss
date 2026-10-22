@@ -389,7 +389,7 @@ every concrete way that happened. It prints `R1.`…`R25.`, one risk per line, w
 no filtering and no fixes; an answer with fewer than 8 falls through to the next
 model. Pass the repository the track works on as `repo-dir` and the model reads
 the code there and marks what it saw (`[seen: <path>]`). It takes one to five
-minutes: run it in the background straight after `review`, and dispatch the
+minutes (up to fifteen if Codex is out and Opus reads the code): run it in the background straight after `review`, and dispatch the
 first Next item while it runs.
 
 When it returns, **every risk is real**; there is no strike-out step. Cover

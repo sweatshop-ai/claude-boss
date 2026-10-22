@@ -164,7 +164,7 @@ class Reject(Base):
 
 
 class Fallback(Base):
-    def test_without_codex_haiku_through_claude_answers(self):
+    def test_without_codex_opus_through_claude_answers(self):
         self.sb.stub("claude", answer=approve("opus agrees"))
         r = self.dry()
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -180,14 +180,14 @@ class Fallback(Base):
         self.assertEqual(len(argv), 4, argv)
         self.assertIn("INTENT: %s\n" % WHY, argv[3])
 
-    def test_a_haiku_reject_is_final_too(self):
+    def test_a_opus_reject_is_final_too(self):
         self.sb.stub("claude", answer=reject("not what was asked"))
         r = self.live("touch must-not-run.flag")
         self.assertEqual(r.returncode, 3)
         self.assertTrue(r.stderr.startswith("boss-run: REJECTED by opus — not what was asked\n"))
         self.assertFalse((self.sb.work / "must-not-run.flag").exists())
 
-    def test_codex_that_fails_without_an_answer_falls_to_haiku(self):
+    def test_codex_that_fails_without_an_answer_falls_to_opus(self):
         self.sb.stub("codex", rc=1)
         self.sb.stub("claude", answer=approve())
         r = self.dry()
@@ -196,7 +196,7 @@ class Fallback(Base):
         self.assertEqual(len(self.sb.calls_of("codex")), 1)
         self.assertEqual(len(self.sb.calls_of("claude")), 1)
 
-    def test_codex_that_rambles_without_a_verdict_falls_to_haiku(self):
+    def test_codex_that_rambles_without_a_verdict_falls_to_opus(self):
         self.sb.stub("codex", answer=RAMBLE)
         self.sb.stub("claude", answer=approve())
         r = self.dry()
@@ -210,7 +210,7 @@ class Fallback(Base):
         self.assertEqual(self.dry().returncode, 0)
         self.assertNotCalled("claude")
 
-    def test_a_hung_codex_is_cut_off_with_its_children_and_haiku_answers(self):
+    def test_a_hung_codex_is_cut_off_with_its_children_and_opus_answers(self):
         # Needs BOSS_RUN_REVIEW_TIMEOUT; boss-run's fixed 120 s would outlast the
         # 30 s allowed here.
         self.sb.stub("codex", hang=True, child=True)
@@ -383,7 +383,7 @@ class ReviewerIsolation(Base):
         self.assertEqual(self.dry(stdin="leak-sentinel").returncode, 0)
         self.assertEqual(self.sb.calls_of("codex")[0].stdin, "")
 
-    def test_the_haiku_reviewer_gets_a_closed_stdin(self):
+    def test_the_opus_reviewer_gets_a_closed_stdin(self):
         self.sb.stub("claude", answer=approve())
         self.assertEqual(self.dry(stdin="leak-sentinel").returncode, 0)
         self.assertEqual(self.sb.calls_of("claude")[0].stdin, "")
@@ -460,8 +460,8 @@ class MoreCharacterization(Base):
                 self.assertEqual(self.sb.log_lines()[-1]["verdict"], verdict)
 
     def test_a_nul_byte_inside_codexs_verdict_is_dropped_so_its_reject_stands(self):
-        # bash's $(...) dropped NUL bytes from a reviewer's answer: `RE\0JECT` was a REJECT, and Opus
-        # was never asked. Parsed raw it was no verdict and Opus's APPROVE would have run the command.
+        # bash's $(...) dropped NUL bytes from a reviewer's answer: `RE\0JECT` was a REJECT, and Haiku
+        # was never asked. Parsed raw it was no verdict and Haiku's APPROVE would have run the command.
         self.sb.stub("codex", answer="VERDICT: RE\0JECT\nREASON: nul")
         self.sb.stub("claude", answer=approve("opus would approve"))
         r = self.dry()
@@ -471,8 +471,8 @@ class MoreCharacterization(Base):
 
     def test_a_nul_byte_inside_a_multibyte_space_before_the_verdict_is_dropped_first(self):
         # bash's $(...) dropped the NUL from the bytes and grep then read U+3000 (a space) before
-        # VERDICT: so Codex's REJECT stood and Opus was never asked. Decoding first would have cut
-        # the character into replacement characters and handed the decision to Opus.
+        # VERDICT: so Codex's REJECT stood and Haiku was never asked. Decoding first would have cut
+        # the character into replacement characters and handed the decision to Haiku.
         self.sb.stub("codex", answer=b"\xe3\x80\0\x80VERDICT: REJECT\nREASON: nul")
         self.sb.stub("claude", answer=approve("opus would approve"))
         r = self.dry()
@@ -505,7 +505,7 @@ class MoreCharacterization(Base):
         r = sb2.boss_run("--why", WHY, "--dry-run", "--", CMD)
         self.assertEqual(r.returncode, 4, r.stderr)
 
-    def test_the_nine_log_fields_and_their_values_for_haiku_none_and_a_hard_rule(self):
+    def test_the_nine_log_fields_and_their_values_for_opus_none_and_a_hard_rule(self):
         self.sb.stub("claude", answer=approve("opus agrees"))
         self.assertEqual(self.dry().returncode, 0)
         self.assertEntry(self.sb, self.sb.log_lines()[-1], reviewer="opus", verdict="APPROVE",

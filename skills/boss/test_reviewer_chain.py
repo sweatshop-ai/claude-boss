@@ -160,7 +160,7 @@ class Reasons(Base):
         self.assertTrue(mark.exists())
 
     def test_a_codex_answer_file_that_is_gone_is_an_empty_answer_and_the_chain_goes_on(self):
-        # boss-run's old `cat "$last" 2>/dev/null` carried on to Opus; an exception would not.
+        # boss-run's old `cat "$last" 2>/dev/null` carried on to Haiku; an exception would not.
         gone = self.sb.stubs / "codex"
         gone.write_text('#!/bin/bash\nprev=""; dest=""\nfor a in "$@"; do [ "$prev" = "-o" ] && dest=$a; prev=$a; done\n'
                         'rm -f "$dest"\n')

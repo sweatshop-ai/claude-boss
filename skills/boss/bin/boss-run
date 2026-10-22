@@ -40,7 +40,10 @@ FALLBACK_NAME="opus"      # what the log and the chain call the Opus fallback re
 # Seconds each reviewer gets, whole numbers. Tests set it short so a hung reviewer is cut off at once.
 TIMEOUT="${BOSS_RUN_REVIEW_TIMEOUT:-120}"
 # Opus answers slower than Haiku did, so the fallback gets twice the Codex budget unless set.
-FALLBACK_TIMEOUT="${BOSS_RUN_REVIEW_FALLBACK_TIMEOUT:-$((TIMEOUT * 2))}"
+if [[ -n "${BOSS_RUN_REVIEW_FALLBACK_TIMEOUT:-}" ]]; then FALLBACK_TIMEOUT="$BOSS_RUN_REVIEW_FALLBACK_TIMEOUT"
+elif [[ "$TIMEOUT" =~ ^[0-9]+$ ]]; then FALLBACK_TIMEOUT=$((TIMEOUT * 2))
+else FALLBACK_TIMEOUT="$TIMEOUT"   # not a number: let the chain reject it, as before
+fi
 
 WHY="" ; CWD="$PWD" ; DRY=0 ; CMD="" ; FLAT=""
 REVIEWER="none" ; VERDICT="" ; REASON=""
