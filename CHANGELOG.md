@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- **The reviewer fallback is Opus, not Haiku** (Thierry, 2026-10-22). When Codex is
+  absent, silent or at its usage limit, `boss-run`, `reviewer_chain.py` and
+  `boss-goal review` / `premortem` ask `claude-opus-5-5`. The log's `reviewer` field
+  reads `opus` instead of `haiku`. Opus answers slower, so in `boss-run` and
+  `boss-goal` the fallback gets twice Codex's time (`reviewer_chain.py`'s own
+  `--fallback-timeout` default is still 120 s): `boss-run` uses `BOSS_RUN_REVIEW_FALLBACK_TIMEOUT` (default 2 x
+  `BOSS_RUN_REVIEW_TIMEOUT`), `boss-goal` 240 s (600 s when it reads code). Also fixed: `boss-goal premortem
+  <track> <repo-dir>` passed `--allowedTools` after `-p`, which swallowed the prompt, so
+  the fallback never answered for that form.
+
 ## 0.11.4 — 2026-10-21
 
 - **A worker that left background work running can be retired again.** Its `/exit`
