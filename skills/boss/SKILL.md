@@ -686,6 +686,30 @@ every review GO. If any of the four checks fails, the full suite runs on the
 worker's machine, as before. Either way, look at `uptime` before any full local
 run: above the core count, the local run is the slowest path.
 
+### P16. A small shared runner pool: push only gate-ready heads
+
+P15 moves the suite to the CI, which turns the runners into the shared resource.
+Measured 2026-10-22: an org with three self-hosted runners, all busy, and a suite
+that is a three-job Python matrix, so one suite took all three and only one ran
+at a time, 10–30 minutes each. Four suites were queued, the oldest for 36 minutes,
+and one worker branch alone had started six runs in 14 minutes. The owner saw four
+workers waiting and asked why; the runners were the bottleneck, not the workers.
+
+When CI runs on a pool that small, **every dispatch that pushes carries three rules**:
+
+1. Push to a PR branch only when the head is the one you intend to gate and merge.
+   Batch fixes locally (only the touched test files, and only at load under 8),
+   then push once.
+2. Before a re-run, check `gh run list --status queued` and cancel your own
+   superseded runs (`gh run cancel <id>`). Never cancel another worker's run or a
+   run on main.
+3. Never re-run a job that is still queued.
+
+And the boss counts queued suites as part of the pulse: before adding parallel PR
+work, `gh run list --status queued` on the repo. When suites are already queued,
+another pushing worker adds wait, not throughput; give it work that does not push
+yet, or hold it.
+
 ### Messaging discipline
 
 - **One message per topic.** There is a per-session cap (~50) and identical
@@ -739,7 +763,8 @@ Parse `$ARGUMENTS`: empty or `status` → **A** · `dispatch <task> [worker]` �
    teammates instead only when the parts must talk to each other. Their reports
    count against your 150k."* The worker decides; `references/models.md` has the
    criteria. For a branch that deploys nothing, add: *"Run only the test files your
-   change touches; the CI runs the full suite (P15)."*
+   change touches; the CI runs the full suite (P15)."* When that CI runs on a
+   small shared runner pool, add P16's three push rules word for word.
 5. **Verification is the tool result.** An error means it didn't land. If the
    dispatch only lands after a GitHub write the classifier blocks in the worker,
    do it yourself through `boss-run --why ... -- gh ...` instead of handing the
