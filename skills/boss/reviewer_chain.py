@@ -4,7 +4,7 @@
 One place decides which reviewer answers, so `boss-run` and every other caller
 cannot drift apart. Standard library only.
 
-    run_chain(prompt, words=..., fallback=HAIKU) -> Result
+    run_chain(prompt, words=..., fallback=OPUS) -> Result
 
 `Result.reviewer` is "codex", the fallback's name, or "none". Every attempt is
 kept on `Result.attempts` with a reason from a closed set:
@@ -84,7 +84,7 @@ class Fallback:
             raise ValueError("when names reasons Codex cannot fail with: %s" % sorted(unknown))
 
 
-HAIKU = Fallback("haiku", "claude-haiku-4-5-20251001")
+OPUS = Fallback("opus", "claude-opus-5-5")
 
 
 @dataclass(frozen=True)
@@ -344,7 +344,7 @@ def _parser() -> argparse.ArgumentParser:
                          "Default: prefix for APPROVE,REJECT, token for any other words")
     ap.add_argument("--effort", default="medium", help="Codex model_reasoning_effort")
     ap.add_argument("--codex-timeout", type=int, default=DEFAULT_TIMEOUT, metavar="SECONDS")
-    ap.add_argument("--fallback-name", help="what the result calls the fallback, e.g. haiku")
+    ap.add_argument("--fallback-name", help="what the result calls the fallback, e.g. opus")
     ap.add_argument("--fallback-model", help="exact model id for `claude --model`")
     ap.add_argument("--fallback-timeout", type=int, metavar="SECONDS",
                     help="default %d" % DEFAULT_TIMEOUT)
