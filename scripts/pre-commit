@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Fast checks on staged files only (target: under 3 s). The slow ones (pytest) run in CI.
+# Install: ln -sf ../../scripts/pre-commit .git/hooks/pre-commit
+set -u
+cd "$(git rev-parse --show-toplevel)" || exit 1
+fail=0
+mapfile -t py < <(git diff --cached --name-only --diff-filter=ACM -- '*.py')
+mapfile -t sh < <(git diff --cached --name-only --diff-filter=ACM -- '*.sh')
+mapfile -t js < <(git diff --cached --name-only --diff-filter=ACM -- '*.json')
+if [ "${#py[@]}" -gt 0 ] && command -v ruff >/dev/null; then
+  ruff check --no-cache --select E9,F "${py[@]}" || fail=1
+fi
+for f in "${sh[@]}"; do bash -n "$f" || fail=1; done
+for f in "${js[@]}"; do python3 -m json.tool "$f" >/dev/null || { echo "invalid JSON: $f" >&2; fail=1; }; done
+exit $fail
