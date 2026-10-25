@@ -68,7 +68,6 @@ def read_goal(track):
         return None
 
 
-
 # ------------------------------------------------------------------ fleet
 
 def team(sid):
@@ -99,7 +98,6 @@ def team(sid):
 # ------------------------------------------------------------- ticket graph
 
 FRONTIER_PY = Path(__file__).resolve().parent.parent / "hand-to-boss" / "frontier.py"
-
 
 
 GH_CACHE_S = 30         # a GitHub frontier older than this is read again

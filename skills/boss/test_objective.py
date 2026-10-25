@@ -53,6 +53,15 @@ class SetStatus(unittest.TestCase):
         self.assertEqual(objective.set_status(body, "OPEN"),
                          "# Objective — t\n_Status: OPEN_\n## Outcome\nx\n")
 
+    def test_the_heading_need_not_be_the_first_line(self):
+        self.assertEqual(objective.set_status("\n# Objective — t\n## Outcome\n", "OPEN"),
+                         "\n# Objective — t\n_Status: OPEN_\n## Outcome\n")
+
+    def test_a_value_with_a_newline_is_refused(self):
+        # It would write a status line that reads as "", and turn the pulse off.
+        with self.assertRaises(ValueError):
+            objective.set_status("# O\n_Status: OPEN_\n", "PAUSED — a\nb")
+
     def test_with_no_heading_either_it_goes_first(self):
         self.assertEqual(objective.set_status("## Outcome\nx\n", "OPEN"),
                          "_Status: OPEN_\n## Outcome\nx\n")
@@ -63,6 +72,20 @@ class WithBody(unittest.TestCase):
         old = "# Objective — t\nstray line\n_Status: PAUSED — away_\n## Outcome\nold\n"
         self.assertEqual(objective.with_body(old, "## Outcome\nnew\n"),
                          "# Objective — t\n_Status: PAUSED — away_\n## Outcome\nnew\n")
+
+    def test_a_heading_below_the_status_is_kept_in_its_place(self):
+        self.assertEqual(objective.with_body("_Status: OPEN_\n# Objective — x\n", "b"),
+                         "_Status: OPEN_\n# Objective — x\nb\n")
+
+    def test_the_header_of_a_body_from_show_is_dropped(self):
+        # On 2026-10-02 six objectives had their header twice: `set` kept the one
+        # that came along on stdin.
+        new, dropped = objective.strip_header("\n# Objective — t\n_Status: OPEN_\n## Outcome\nx\n")
+        self.assertEqual((new, dropped), ("## Outcome\nx\n", True))
+
+    def test_a_body_heading_that_is_not_the_header_stays(self):
+        self.assertEqual(objective.strip_header("# Objectives and constraints\nx\n"),
+                         ("# Objectives and constraints\nx\n", False))
 
     def test_a_file_with_no_status_keeps_none(self):
         self.assertEqual(objective.with_body("# Objective — t\n## Outcome\nold\n", "## Outcome\nnew\n"),
@@ -109,8 +132,34 @@ class Sections(unittest.TestCase):
         self.assertEqual(objective.next_count(body), 3)
         self.assertEqual(objective.next_count(GOAL), 2)
 
+    def test_an_indented_first_line_of_next_is_not_an_item(self):
+        # Codex: section() strips, so `  - detail` lost its indent and counted.
+        self.assertEqual(objective.next_count("## Next, in priority order\n  - detail\n1. real\n"), 1)
+
     def test_unmet_is_the_unticked_criteria(self):
         self.assertEqual(objective.unmet(GOAL), ["`gh pr view 3` says MERGED"])
+
+    def test_criteria_are_the_boxes_under_done_when_only(self):
+        body = GOAL + "\n## Later\n- [ ] not a criterion\n"
+        self.assertEqual(objective.criteria(body),
+                         [(True, "built"), (False, "`gh pr view 3` says MERGED")])
+
+    def test_tick_marks_criteria_done_and_nothing_outside_the_section(self):
+        body = GOAL + "\n## Later\n- [ ] `gh pr view 3` says MERGED\n"
+        new, n = objective.tick(body, ["`gh pr view 3` says MERGED", "no such"])
+        self.assertEqual(n, 1)
+        self.assertEqual(objective.criteria(new), [(True, "built"), (True, "`gh pr view 3` says MERGED")])
+        self.assertTrue(new.endswith("## Later\n- [ ] `gh pr view 3` says MERGED\n"))
+
+    def test_set_next_replaces_its_section_and_keeps_the_ones_after(self):
+        new = objective.set_next(GOAL, "1. only this\n")
+        self.assertEqual(objective.next_items(new), ["1. only this"])
+        self.assertEqual(objective.section(new, "Notes"), "3. not in Next")
+        self.assertEqual(objective.section(new, "Tickets"), "`/w/.scratch/t/issues`")
+
+    def test_set_next_adds_the_section_when_missing(self):
+        self.assertEqual(objective.set_next("# O\n_Status: OPEN_\n", "1. a\n"),
+                         "# O\n_Status: OPEN_\n\n## Next, in priority order\n1. a\n")
 
 
 class CommandLine(unittest.TestCase):
@@ -146,6 +195,44 @@ class CommandLine(unittest.TestCase):
         r = self.call("set-body", str(self.f), stdin="## Outcome\nnew\n")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(self.f.read_text(), "# Objective — t\n_Status: OPEN_\n## Outcome\nnew\n")
+
+    def test_set_body_says_when_it_drops_a_header_and_refuses_a_header_alone(self):
+        r = self.call("set-body", str(self.f), stdin="# Objective — t\n_Status: MET x — y_\n## Outcome\nn\n")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("dropped the header", r.stderr)
+        self.assertEqual(objective.status(self.f.read_text()), "OPEN")
+        before = self.f.read_text()
+        r = self.call("set-body", str(self.f), stdin="# Objective — t\n_Status: OPEN_\n")
+        self.assertEqual(r.returncode, 1)
+        self.assertEqual(self.f.read_text(), before)
+
+    def test_a_symlinked_objective_stays_a_symlink(self):
+        real = self.dir / "real.goal.md"
+        self.f.rename(real)
+        self.f.symlink_to(real)
+        self.assertEqual(self.call("set-status", str(self.f), "OPEN — again").returncode, 0)
+        self.assertTrue(self.f.is_symlink())
+        self.assertEqual(objective.status(real.read_text()), "OPEN — again")
+
+    def test_a_write_keeps_the_file_mode(self):
+        self.f.chmod(0o600)
+        self.assertEqual(self.call("set-status", str(self.f), "OPEN — x").returncode, 0)
+        self.assertEqual(self.f.stat().st_mode & 0o777, 0o600)
+
+    def test_a_newline_in_the_status_is_a_bad_call(self):
+        before = self.f.read_text()
+        self.assertEqual(self.call("set-status", str(self.f), "PAUSED — a\nb").returncode, 2)
+        self.assertEqual(self.f.read_text(), before)
+
+    def test_criteria_set_next_and_tick(self):
+        self.assertEqual(self.call("criteria", str(self.f)).stdout,
+                         "- [x] built\n- [ ] `gh pr view 3` says MERGED\n")
+        r = self.call("tick", str(self.f), stdin="`gh pr view 3` says MERGED\n")
+        self.assertEqual(r.stdout, "ticked 1\n")
+        self.assertEqual(objective.unmet(self.f.read_text()), [])
+        self.assertEqual(self.call("set-next", str(self.f), stdin="1. new\n").returncode, 0)
+        self.assertEqual(objective.next_items(self.f.read_text()), ["1. new"])
+        self.assertEqual(objective.section(self.f.read_text(), "Notes"), "3. not in Next")
 
     def test_a_missing_file_is_exit_one_and_a_bad_call_exit_two(self):
         r = self.call("status", str(self.dir / "nope.goal.md"))

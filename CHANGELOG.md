@@ -10,10 +10,22 @@
   was lost and the status left untouched. `skills/boss/objective.py` now reads
   and writes the format, and `boss-goal` goes through its command line. All 44
   objectives on the author's machine had the status on line 2, so nothing read
-  differently before; the gap was in hand-edited files.
+  differently before; the gap was in hand-edited files. The only format the
+  script still writes itself is the `init` template.
 - `boss-goal status` rewrites the first status line (or inserts one under the
-  heading); `set` keeps the heading and that status line; both write through a
-  temp file.
+  heading, and refuses a note with a newline in it, which would have written a
+  status that reads as nothing). `set` keeps the heading and that status line.
+  `next` replaces only its own section: it used to cut every section after
+  `## Next` too. Every write goes through a temp file and keeps the file's mode.
+- The criteria are the boxes under `## Done when`, for `check` and `verify`
+  as for the pulse. `check` and `verify` took every `- [ ]` line in the file.
+  One live objective (`tiroir-groups`, paused) keeps its boxes under a bold
+  `**Done when:**` instead of a heading: the pulse never saw them, and now
+  `check` says so.
+- `boss-goal` finds its neighbours (`objective.py`, `reviewer_chain.py`, the
+  prompt templates, `frontier.py`) through its real path. Run through the
+  `install.sh BIN=1` symlink in `~/.local/bin`, `review` and `premortem` looked
+  for them under `~/.local` (found by the Codex review).
 - `boss-goal check` counts the items of `## Next` only (a numbered or bulleted
   line at the margin; a wrapped line belongs to its item). It counted numbered
   lines up to the end of the file, so a numbered list in a later section was
