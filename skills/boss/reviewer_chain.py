@@ -1,15 +1,20 @@
 #!/usr/bin/env python3
 """The reviewer chain: Codex first, an optional fallback model next, else nobody.
 
-One place decides which reviewer answers, so `boss-run` and every other caller
-cannot drift apart. Standard library only.
+One place decides which reviewer answers, so `boss-run`, `boss-goal review` and
+`boss-goal premortem` cannot drift apart. Standard library only.
 
     run_chain(prompt, words=..., fallback=OPUS) -> Result
+    run_chain(prompt, lines=Shape("RISK", min=8), fallback=FABLE) -> Result
+
+What makes an answer usable is one of two rules: a `VERDICT:` line in `words`, or
+`lines.min` lines under `lines.label`. The fallbacks a caller names by preset
+(`PRESETS`: opus, fable) are the only place the model ids are written.
 
 `Result.reviewer` is "codex", the fallback's name, or "none". Every attempt is
 kept on `Result.attempts` with a reason from a closed set:
 
-    answered   a usable VERDICT line was in the reviewer's answer
+    answered   a usable VERDICT line (or enough labelled lines) was in the answer
     absent     the reviewer is not on PATH
     timeout    it ran past its timeout and gave no usable verdict
     error      it exited non-zero (or could not be started) and gave none
@@ -69,7 +74,7 @@ RESERVED_NAMES = frozenset(("codex", "none"))   # a Result already says these; a
 class Fallback:
     name: str
     model: str
-    timeout: int = DEFAULT_TIMEOUT
+    timeout: int | None = None     # None: twice the Codex timeout, as every caller gave it
     allowed_tools: tuple[str, ...] | None = None
     when: tuple[str, ...] = ("absent", "timeout", "error", "noverdict")
 
@@ -85,12 +90,36 @@ class Fallback:
 
 
 OPUS = Fallback("opus", "claude-opus-5-5")
+FABLE = Fallback("fable", "claude-fable-5-1")
+# The fallbacks a caller names by preset (`--fallback opus`), so the model ids live only here.
+PRESETS = {fb.name: fb for fb in (OPUS, FABLE)}
 
 
 @dataclass(frozen=True)
 class Verdict:
     word: str
     reason: str
+
+
+@dataclass(frozen=True)
+class Shape:
+    """The other acceptance rule: a usable answer is `min` or more lines that start
+    with `label:` (`RISK:` for a premortem). The parsed value keeps what follows the
+    label on each such line, at most `max` of them."""
+    label: str
+    min: int = 1
+    max: int | None = None
+
+    def __post_init__(self):
+        if not self.label.strip() or ":" in self.label:
+            raise ValueError("a line label is one word without a colon, not %r" % (self.label,))
+        if self.min < 1 or (self.max is not None and self.max < self.min):
+            raise ValueError("min must be at least 1 and max at least min: %r" % (self,))
+
+
+@dataclass(frozen=True)
+class Lines:
+    lines: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -184,6 +213,25 @@ def _parse(output: str, words: tuple[str, ...], strict: bool = False) -> Verdict
     return Verdict(found[0], _reason(lines))
 
 
+def _parse_lines(output: str, shape: Shape) -> Lines | None:
+    """The lines under `shape.label`, or None when there are fewer than `shape.min`."""
+    pattern = re.compile(_SPACE + re.escape(shape.label) + ":" + _SPACE + "(.*)", re.IGNORECASE)
+    found = [m.group(1).rstrip() for m in map(pattern.match, output.split("\n")) if m]
+    if len(found) < shape.min:
+        return None
+    return Lines(tuple(found[:shape.max]))
+
+
+def _acceptance(words, lines, strict):
+    """One rule for "is this answer usable": `words` (a VERDICT: line) or `lines` (a Shape)."""
+    if (words is None) == (lines is None):
+        raise ValueError("give exactly one of words (a verdict vocabulary) and lines (a Shape)")
+    if words is not None:
+        _check_words(words)
+        return lambda text: _parse(text, words, strict)
+    return lambda text: _parse_lines(text, lines)
+
+
 TERM_GRACE = 2   # seconds between SIGTERM and SIGKILL when a reviewer is stopped
 STDERR_TAIL = 2048
 
@@ -233,7 +281,7 @@ def _read(f, tail: int | None = None) -> str:
     return _snapshot(f, tail).decode("utf-8", "replace")
 
 
-def _run(argv: list[str], timeout: int, keep_stdout: bool = True) -> _Run:
+def _run(argv: list[str], timeout: int, keep_stdout: bool = True, cwd: str | None = None) -> _Run:
     """Run one reviewer with a closed stdin.
 
     Its output goes to anonymous temporary files, not pipes, so the wait is on the
@@ -247,7 +295,7 @@ def _run(argv: list[str], timeout: int, keep_stdout: bool = True) -> _Run:
             (tempfile.TemporaryFile() if keep_stdout else open(os.devnull, "wb")) as out:
         try:
             proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=out, stderr=err,
-                                    start_new_session=True)
+                                    start_new_session=True, cwd=cwd)
         except OSError as exc:
             return _Run(None, b"", str(exc), False)
         code: int | None = None
@@ -263,13 +311,13 @@ def _run(argv: list[str], timeout: int, keep_stdout: bool = True) -> _Run:
         return _Run(code, _snapshot(out) if keep_stdout else b"", _read(err, tail=4 * STDERR_TAIL), timed_out)
 
 
-def _turn(reviewer, model, raw: bytes, run: _Run, words, strict) -> _Turn:
+def _turn(reviewer, model, raw: bytes, run: _Run, parse) -> _Turn:
     """Decide the reason: a usable verdict beats everything, then timeout, error, noverdict."""
     # bash's $(...) dropped NUL bytes, and grep decoded what was left: RE\0JECT was REJECT, and a NUL
     # inside the bytes of one character gave that character back. So the NULs go before the decode.
     # The attempt keeps the output as the reviewer wrote it.
     output = raw.decode("utf-8", "replace")
-    verdict = _parse(raw.replace(b"\0", b"").decode("utf-8", "replace"), words, strict)
+    verdict = parse(raw.replace(b"\0", b"").decode("utf-8", "replace"))
     if verdict:
         reason = "answered"
     elif run.timed_out:
@@ -281,13 +329,14 @@ def _turn(reviewer, model, raw: bytes, run: _Run, words, strict) -> _Turn:
     return _Turn(Attempt(reviewer, reason, output, run.code, run.err[-STDERR_TAIL:], model), verdict)
 
 
-def _codex(prompt, effort, timeout, words, strict) -> _Turn:
+def _codex(prompt, effort, timeout, parse, cwd) -> _Turn:
     if shutil.which("codex") is None:
         return _Turn(Attempt("codex", "absent", "", None, "", None), None)
     fd, last = tempfile.mkstemp(prefix="reviewer-chain-")
     try:
         os.close(fd)
         run = _run(["codex", "exec", "-s", "read-only", "--skip-git-repo-check",
+                    *(["-C", cwd] if cwd else []),
                     "-c", 'model_reasoning_effort="%s"' % effort, "-o", last, prompt], timeout,
                    keep_stdout=False)
         try:
@@ -295,32 +344,39 @@ def _codex(prompt, effort, timeout, words, strict) -> _Turn:
                 raw = _snapshot(f)
         except OSError:            # the answer file was removed: no answer, as `cat 2>/dev/null` saw it
             raw = b""
-        return _turn("codex", None, raw, run, words, strict)
+        return _turn("codex", None, raw, run, parse)
     finally:
         Path(last).unlink(missing_ok=True)
 
 
-def _claude(prompt, fb: Fallback, words, strict) -> _Turn:
+def _claude(prompt, fb: Fallback, timeout, parse, cwd) -> _Turn:
     if shutil.which("claude") is None:
         return _Turn(Attempt(fb.name, "absent", "", None, "", fb.model), None)
     # --allowedTools takes a variable number of values, so it goes ahead of -p:
     # after it, the prompt would be read as one more tool name.
     tools = ["--allowedTools", ",".join(fb.allowed_tools)] if fb.allowed_tools else []
-    run = _run(["claude", *tools, "-p", "--model", fb.model, prompt], fb.timeout)
-    return _turn(fb.name, fb.model, run.out, run, words, strict)
+    run = _run(["claude", *tools, "-p", "--model", fb.model, prompt], timeout, cwd=cwd)
+    return _turn(fb.name, fb.model, run.out, run, parse)
 
 
-def run_chain(prompt: str, *, words: tuple[str, ...], effort: str = "medium",
-              codex_timeout: int = DEFAULT_TIMEOUT, fallback: Fallback | None = None,
-              strict: bool = False) -> Result:
+def run_chain(prompt: str, *, words: tuple[str, ...] | None = None, lines: Shape | None = None,
+              effort: str = "medium", codex_timeout: int = DEFAULT_TIMEOUT,
+              fallback: Fallback | None = None, strict: bool = False,
+              cwd: str | None = None) -> Result:
     """Ask Codex, then the fallback if one is given and Codex's reason is in its `when`.
 
-    The first attempt with a usable verdict answers; if none has one, the reviewer is "none".
+    A usable answer is a VERDICT: line in `words`, or `lines.min` lines under `lines.label`;
+    give one of the two. The first attempt with a usable answer answers; if none has one,
+    the reviewer is "none". With `cwd`, both reviewers run in that directory and may read
+    it. A fallback without a timeout of its own gets twice `codex_timeout`.
     """
-    _check_words(words)
-    tried = [_codex(prompt, effort, codex_timeout, words, strict)]
+    parse = _acceptance(words, lines, strict)
+    if cwd is not None and not os.path.isdir(cwd):
+        raise ValueError("cwd is not a directory: %s" % cwd)
+    tried = [_codex(prompt, effort, codex_timeout, parse, cwd)]
     if fallback is not None and tried[0].attempt.reason in fallback.when:
-        tried.append(_claude(prompt, fallback, words, strict))
+        timeout = 2 * codex_timeout if fallback.timeout is None else fallback.timeout
+        tried.append(_claude(prompt, fallback, timeout, parse, cwd))
     attempts = tuple(turn.attempt for turn in tried)
     for turn in tried:
         if turn.verdict:
@@ -338,16 +394,24 @@ def _parser() -> argparse.ArgumentParser:
         description="Ask Codex, then an optional fallback model, for a VERDICT. Writes one JSON "
                     "object (the Result) to stdout. Exit 0: a reviewer answered. 1: none did. 2: usage.")
     ap.add_argument("--prompt-file", required=True, help="the prompt, passed to the reviewers as is")
-    ap.add_argument("--words", required=True, type=_csv, help="verdict words, e.g. APPROVE,REJECT")
+    ap.add_argument("--words", type=_csv, help="verdict words, e.g. APPROVE,REJECT")
     ap.add_argument("--match", choices=("prefix", "token"),
                     help="prefix: APPROVED is APPROVE (boss-run). token: whole words. "
                          "Default: prefix for APPROVE,REJECT, token for any other words")
+    ap.add_argument("--lines", metavar="LABEL",
+                    help="instead of --words: a usable answer is --min-lines lines starting `LABEL:`")
+    ap.add_argument("--min-lines", type=int, metavar="N", help="with --lines; default 1")
+    ap.add_argument("--max-lines", type=int, metavar="N", help="with --lines: keep at most N lines")
     ap.add_argument("--effort", default="medium", help="Codex model_reasoning_effort")
+    ap.add_argument("--cwd", metavar="DIR", help="run both reviewers in DIR (Codex -C), so they may read it")
     ap.add_argument("--codex-timeout", type=int, default=DEFAULT_TIMEOUT, metavar="SECONDS")
+    ap.add_argument("--fallback", choices=sorted(PRESETS), metavar="PRESET",
+                    help="a named fallback (%s); its name and model come from this module"
+                         % ", ".join(sorted(PRESETS)))
     ap.add_argument("--fallback-name", help="what the result calls the fallback, e.g. opus")
     ap.add_argument("--fallback-model", help="exact model id for `claude --model`")
     ap.add_argument("--fallback-timeout", type=int, metavar="SECONDS",
-                    help="default %d" % DEFAULT_TIMEOUT)
+                    help="default: twice --codex-timeout")
     ap.add_argument("--fallback-tools", type=_csv, help="comma list for `claude --allowedTools`")
     ap.add_argument("--fallback-when", type=_csv, metavar="REASONS",
                     help="Codex reasons that let the fallback run (default: all four)")
@@ -364,26 +428,42 @@ def main(argv: list[str] | None = None) -> int:
                "--fallback-timeout": args.fallback_timeout, "--fallback-tools": args.fallback_tools,
                "--fallback-when": args.fallback_when}
     given = [flag for flag, value in options.items() if value is not None]
-    if args.no_fallback and given:
-        ap.error("--no-fallback conflicts with %s" % ", ".join(given))
-    if given and not (args.fallback_name and args.fallback_model):
-        ap.error("%s need both --fallback-name and --fallback-model" % ", ".join(given))
+    if args.no_fallback and (given or args.fallback):
+        ap.error("--no-fallback conflicts with %s" % ", ".join(given or ["--fallback"]))
+    if args.fallback and (args.fallback_name or args.fallback_model):
+        ap.error("--fallback %s already names the fallback and its model" % args.fallback)
+    if given and not args.fallback and not (args.fallback_name and args.fallback_model):
+        ap.error("%s need --fallback or both --fallback-name and --fallback-model" % ", ".join(given))
+    if (args.words is None) == (args.lines is None):
+        ap.error("give --words or --lines, not both and not neither")
+    if args.lines is None and (args.min_lines is not None or args.max_lines is not None):
+        ap.error("--min-lines and --max-lines go with --lines")
+    if args.words is None and args.match is not None:
+        ap.error("--match goes with --words")
     try:
-        words = Words(args.words, match=args.match)
-        _check_words(words)
+        words = lines = None
+        if args.words is not None:
+            words = Words(args.words, match=args.match)
+            _check_words(words)
+        else:
+            lines = Shape(args.lines, 1 if args.min_lines is None else args.min_lines, args.max_lines)
         fallback = None
-        if args.fallback_name:
+        if args.fallback or args.fallback_name:
+            preset = PRESETS.get(args.fallback)
             extra = {} if args.fallback_when is None else {"when": args.fallback_when}
-            fallback = Fallback(args.fallback_name, args.fallback_model,
-                                DEFAULT_TIMEOUT if args.fallback_timeout is None else args.fallback_timeout,
-                                args.fallback_tools, **extra)
+            fallback = Fallback(preset.name if preset else args.fallback_name,
+                                preset.model if preset else args.fallback_model,
+                                args.fallback_timeout, args.fallback_tools, **extra)
         # surrogateescape, so that bytes that are not UTF-8 come back out of argv as the same bytes:
         # the reviewer must be shown the command that will run, not a lossy copy of it.
         prompt = os.fsdecode(Path(args.prompt_file).read_bytes())
+        if args.cwd is not None and not os.path.isdir(args.cwd):
+            raise ValueError("--cwd is not a directory: %s" % args.cwd)
     except (ValueError, OSError) as exc:
         ap.error(str(exc))
-    result = run_chain(prompt, words=words, effort=args.effort, codex_timeout=args.codex_timeout,
-                       fallback=fallback, strict=args.strict)
+    result = run_chain(prompt, words=words, lines=lines, effort=args.effort,
+                       codex_timeout=args.codex_timeout, fallback=fallback, strict=args.strict,
+                       cwd=args.cwd)
     print(json.dumps(dataclasses.asdict(result)))
     return 0 if result.reviewer != "none" else 1
 
