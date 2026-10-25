@@ -21,6 +21,8 @@
   (tmux not answering, boss-panes failing), `retire`/`restart`/`move`/`claim`
   refuse instead of treating the pane as unowned. A stamp tmux refuses fails
   the claim instead of passing silently.
+- When tmux does not answer, `list` says so and exits 1 instead of printing an
+  empty fleet (found by the Codex review).
 - Tests: `test_fleet.py` (rules and the tmux adapter); `test_boss_lifecycle.py`
   gained the bash side (`get`, `list`, `claim`).
 

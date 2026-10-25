@@ -77,8 +77,11 @@ def seats():
 
 
 def resolve():
-    """(pane_id, session) for every pane a live session runs in."""
-    return [(s.pane.id, s.session) for s in seats() if s.session]
+    """(pane_id, session) for every pane a live session runs in; none without tmux."""
+    try:
+        return [(s.pane.id, s.session) for s in seats() if s.session]
+    except fleet.TmuxUnavailable:
+        return []
 
 
 def usage(rec):
@@ -108,7 +111,11 @@ def cmd_get(pane, names):
         print("boss-panes get: unknown field %s; known: %s" % (
             ", ".join(bad) or "(none given)", " ".join(FIELDS)), file=sys.stderr)
         return 2
-    seat = fleet.seat_of(seats(), pane=pane) or fleet.Seat(fleet.Pane(pane))
+    try:
+        seat = fleet.seat_of(seats(), pane=pane) or fleet.Seat(fleet.Pane(pane))
+    except fleet.TmuxUnavailable:
+        print("boss-panes get: tmux did not answer", file=sys.stderr)
+        return 1
     print("\t".join(str(FIELDS[n](seat) or "-") for n in names))
     return 0 if seat.pane.coord else 1
 
@@ -117,8 +124,14 @@ def cmd_list(boss, mine_only):
     """Columns: pane, coord, name, state, ctx, cost/turn + flags, owner tag, path.
     The coordinate is session-qualified on purpose: pane INDEXES collide across
     tmux sessions, so a bare index sends the owner to the wrong terminal."""
+    try:
+        all_seats = seats()
+    except fleet.TmuxUnavailable:
+        print("boss-panes list: tmux did not answer; the fleet is unknown, not empty",
+              file=sys.stderr)
+        return 1
     print("PANE\tCOORD\tNAME\tSTATE\tCTX\tCOST/TURN\tOWNER\tPATH")
-    for s in seats():
+    for s in all_seats:
         p = s.pane
         if p.id == boss and boss:
             tag = "self"
@@ -216,7 +229,11 @@ def main():
         return 1
 
     want = args[0] if args else None
-    for seat in seats():
+    try:
+        all_seats = seats()
+    except fleet.TmuxUnavailable:
+        all_seats = []
+    for seat in all_seats:
         pane_id, rec = seat.pane.id, seat.session
         if not rec or (want and pane_id != want):
             continue
