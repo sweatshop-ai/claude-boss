@@ -22,11 +22,7 @@ HERE = Path(__file__).resolve().parent
 BIN = HERE / "bin"
 sys.path.insert(0, str(HERE))
 import tracker as tracker_mod  # noqa: E402
-from hermetic import Sandbox  # noqa: E402
-
-
-def risks(n):
-    return "\n".join("RISK: risk number %d" % i for i in range(1, n + 1))
+from hermetic import Sandbox, risks  # noqa: E402
 
 
 class GoalReviewers(unittest.TestCase):
@@ -51,6 +47,26 @@ class GoalReviewers(unittest.TestCase):
         self.assertNotIn("-C", call.argv)
         self.assertIn("demo", call.argv[-1])            # {{TRACK}} filled
         self.assertNotIn("{{GOAL}}", call.argv[-1])
+
+    def test_review_keeps_the_old_prefix_match_so_completed_still_counts(self):
+        # The bash copy's grep took `VERDICT: COMPLETED` as COMPLETE; the chain's default
+        # for these words would be whole tokens, so review asks for the prefix rule.
+        self.sb.stub("codex", answer="VERDICT: COMPLETED\nREASON: fine")
+        self.sb.stub("claude", answer="VERDICT: INCOMPLETE\nREASON: never asked")
+        r = self.goal("review", "demo")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(self.sb.calls_of("claude"), [])
+
+    def test_review_says_so_when_the_chain_itself_did_not_run(self):
+        # A chain that exits without a Result (a usage error) is not "both silent".
+        chain = HERE / "reviewer_chain.py"
+        (self.sb.stubs / "python3").write_text('#!/bin/bash\n[[ "$1" == *reviewer_chain.py ]] && exit 2\nexec %s "$@"\n'
+                                               % (self.sb.tools / "python3"))
+        (self.sb.stubs / "python3").chmod(0o755)
+        self.assertTrue(chain.is_file())
+        r = self.goal("review", "demo")
+        self.assertEqual(r.returncode, 4, r.stderr)
+        self.assertIn("reviewer chain exited 2 without a result", r.stdout)
 
     def test_review_incomplete_is_exit_three_and_opus_is_the_fallback(self):
         self.sb.stub("codex", answer="I cannot say.")
