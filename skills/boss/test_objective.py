@@ -151,6 +151,13 @@ class Sections(unittest.TestCase):
         self.assertEqual(objective.criteria(new), [(True, "built"), (True, "`gh pr view 3` says MERGED")])
         self.assertTrue(new.endswith("## Later\n- [ ] `gh pr view 3` says MERGED\n"))
 
+    def test_a_criterion_with_a_trailing_hard_break_can_be_ticked(self):
+        # Codex: section() stripped the last line's two spaces, so tick missed it.
+        body = "## Done when\n- [ ] `a.py` passes  \n"
+        (c,) = objective.unmet(body)
+        new, n = objective.tick(body, [c])
+        self.assertEqual((n, objective.unmet(new)), (1, []))
+
     def test_set_next_replaces_its_section_and_keeps_the_ones_after(self):
         new = objective.set_next(GOAL, "1. only this\n")
         self.assertEqual(objective.next_items(new), ["1. only this"])
@@ -222,6 +229,7 @@ class CommandLine(unittest.TestCase):
     def test_a_newline_in_the_status_is_a_bad_call(self):
         before = self.f.read_text()
         self.assertEqual(self.call("set-status", str(self.f), "PAUSED — a\nb").returncode, 2)
+        self.assertEqual(self.call("set-status", str(self.f), "PAUSED — a\rb").returncode, 2)
         self.assertEqual(self.f.read_text(), before)
 
     def test_criteria_set_next_and_tick(self):
