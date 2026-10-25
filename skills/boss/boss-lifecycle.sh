@@ -68,17 +68,26 @@ die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
 pane_prop() { tmux display-message -p -t "$1" "$2"; }
 
-pane_owner() { pane_prop "$1" '#{@boss_pane}' 2>/dev/null || true; }
-
 PANES_PY="$(dirname "${BASH_SOURCE[0]}")/boss-panes.py"
+
+# Which session runs in a pane and which boss owns it are fleet.py's rules;
+# boss-panes.py is its command line. Fields are asked for by name, "-" if empty.
+pane_field() { python3 "$PANES_PY" get "$1" "$2" 2>/dev/null || true; }
+# The owner fails closed: an empty answer would read as "unowned", which the
+# cross-boss guard in resolve_pane lets through.
+pane_owner() {
+  local o; o=$(python3 "$PANES_PY" get "$1" owner 2>/dev/null) || true
+  [[ -n "$o" ]] || die "cannot read the owner of $1 (boss-panes.py get failed); not touching it"
+  [[ "$o" == "-" ]] || printf '%s' "$o"
+}
 
 # A worker has ONE name: the one the claude-agent-names plugin gave it, which is
 # also what ListAgents shows and SendMessage resolves. This script used to keep a
 # second name in @worker_name and the skill carried a page of prose about
 # reconciling the two when they disagreed. They cannot disagree now: @worker_name
 # is a mirror the watchdog reads, and the plugin is the store.
-agent_name() { python3 "$PANES_PY" "$1" 2>/dev/null | cut -f2; }
-agent_status() { python3 "$PANES_PY" "$1" 2>/dev/null | cut -f4; }
+agent_name() { pane_field "$1" name; }
+agent_status() { pane_field "$1" status; }
 set_agent_name() { python3 "$PANES_PY" --set-name "$1" "$2" 2>/dev/null || true; }
 
 # Mirror the plugin's name onto the pane. The boss-workers-watch routine only
@@ -112,11 +121,11 @@ assert_not_busy() {
 # Runs on every invocation, so a boss claims itself by doing anything at all.
 self_register() {
   [[ -n "$BOSS_PANE" ]] || return 0
-  tmux set-option -p -t "$BOSS_PANE" @boss_pane "$BOSS_PANE" 2>/dev/null || true
+  python3 "$PANES_PY" stamp "$BOSS_PANE" "$BOSS_PANE" 2>/dev/null || true
 }
 
 claim_pane() {
-  tmux set-option -p -t "$1" @boss_pane "$BOSS_PANE"
+  python3 "$PANES_PY" stamp "$1" "$BOSS_PANE"
 }
 
 # tmux exits 0 with empty output for a nonexistent %N target, which would
@@ -128,7 +137,8 @@ resolve_pane() {
   [[ -n "$BOSS_PANE" && "$id" == "$BOSS_PANE" ]] && die "refusing to operate on the boss's own pane ($id)"
 
   # Cross-boss guard. Empty owner = unowned, allowed (adoption still works).
-  owner=$(pane_owner "$id")
+  # resolve_pane runs inside $(...), where bash ignores set -e: exit by hand.
+  owner=$(pane_owner "$id") || exit 1
   if [[ -n "$owner" && -n "$BOSS_PANE" && "$owner" != "$BOSS_PANE" ]]; then
     if [[ -z "$FORCE" ]]; then
       die "$id belongs to another boss (pane $owner), not you ($BOSS_PANE).
@@ -360,60 +370,12 @@ cmd_move() {
   printf 'moved %s to %s as %s\n' "$pane" "$dir" "${keep:-unnamed}"
 }
 
-# Columns: pane-id, session:window.pane, command, worker name, owner, path.
-# The coordinate is session-qualified on purpose — pane INDEXES collide across
-# tmux sessions (three separate "pane 0" is normal with two bosses running), so
-# a bare index sends the owner to the wrong terminal.
+# The roster: boss-panes.py list prints it, one row per pane, and under a pane
+# that more than one live session names, a line saying who else is there.
 cmd_list() {
-  local mine_only=""
-  [[ "${1:-}" == "--mine" ]] && mine_only=1
-
-  # One pass over the resolver, cached: it walks /proc and reads transcripts,
-  # so calling it per pane would make `list` cost seconds.
-  local meta; meta=$(python3 "$PANES_PY" 2>/dev/null || true)
-
-  # `IFS=$'\t' read` COLLAPSES runs of tabs (tab is IFS whitespace), so an unset
-  # option in the middle of the format silently shifts every later field left and
-  # The owner ends up printed as the worker's name. Never emit an empty field:
-  # the #{?opt,...} conditionals substitute a literal "-" instead.
-  local fmt=$'#{pane_id}\t#{session_name}:#{window_index}.#{pane_index}\t#{pane_current_command}\t#{pane_current_path}\t#{?@worker_name,#{@worker_name},-}\t#{?@boss_pane,#{@boss_pane},-}'
-
-  printf 'PANE\tCOORD\tNAME\tSTATE\tCTX\tCOST/TURN\tOWNER\tPATH\n'
-  tmux list-panes -a -F "$fmt" | while IFS=$'\t' read -r id coord cmd path mirror owner; do
-    local tag mark=""
-    if [[ "$id" == "$BOSS_PANE" ]]; then
-      tag="self"; mark=" <- you"
-    elif [[ "$owner" == "-" || -z "$owner" ]]; then
-      tag="unowned"
-    elif [[ "$owner" == "$BOSS_PANE" ]]; then
-      tag="mine"
-    else
-      tag="other($owner)"
-    fi
-    if [[ -n "$mine_only" && "$tag" != "mine" && "$tag" != "self" ]]; then
-      continue
-    fi
-
-    # Live name/status/context from the plugin + transcript; fall back to the
-    # pane mirror only when the session is gone (a crashed worker still shows
-    # the name it had, which is what makes it recognisable in the watchdog).
-    local row name state ctx cpt turns flags
-    row=$(printf '%s\n' "$meta" | awk -F'\t' -v p="$id" '$1==p{print;exit}')
-    if [[ -n "$row" ]]; then
-      name=$(cut -f2 <<<"$row"); state=$(cut -f4 <<<"$row")
-      ctx=$(cut -f5 <<<"$row"); cpt=$(cut -f6 <<<"$row"); turns=$(cut -f7 <<<"$row")
-      flags=$(cut -f8 <<<"$row")
-    else
-      name="$mirror"; state="$cmd"; ctx="-"; cpt="-"; turns=""; flags="-"
-    fi
-
-    # Flags come from boss-panes, which reads them from policy.py by role.
-    local flag=""
-    if [[ -n "$flags" && "$flags" != "-" ]]; then flag=" $flags"; fi
-
-    printf '%s\t%s\t%s\t%s\t%sk\t%sk%s\t%s\t%s%s\n' \
-      "$id" "$coord" "$name" "$state" "$ctx" "$cpt" "$flag" "$tag" "$path" "$mark"
-  done
+  local mine=""
+  [[ "${1:-}" == "--mine" ]] && mine="--mine"
+  python3 "$PANES_PY" list --boss "$BOSS_PANE" $mine
 }
 
 [[ -n "${TMUX:-}" ]] || die "not running inside tmux"
