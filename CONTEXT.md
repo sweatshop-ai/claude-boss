@@ -68,7 +68,10 @@ heading. Something is blocked on the owner.
 blocker. The ladder escalates that line from it, with no boss turn.
 
 **Objective status**: the first `_Status: …_` line of `pm/<track>.goal.md`,
-line 2 as `boss-goal` writes it. A track is open when it starts with OPEN.
+wherever it sits; `boss-goal status` rewrites that same line. A track is open
+when it starts with OPEN. The objective's format — status, sections, ticket
+source — lives in `skills/boss/objective.py`; `boss-goal` reads and writes it
+through that module's command line.
 
 **Reviewer chain**: the order in which a second model is asked for an answer:
 Codex first, then an optional fallback model through `claude`, otherwise

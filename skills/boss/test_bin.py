@@ -21,6 +21,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 BIN = HERE / "bin"
 sys.path.insert(0, str(HERE))
+import objective  # noqa: E402
 import tracker as tracker_mod  # noqa: E402
 from hermetic import Sandbox, risks  # noqa: E402
 
@@ -160,6 +161,97 @@ class Tools(unittest.TestCase):
             {"enabledPlugins": {"claude-boss@sweatshop-ai": False}}))
         out = self.run_tool("boss-goal", "check", "demo")
         self.assertIn("NOT ARMED", out.stdout)
+
+    def goal_status_off_line_two(self):
+        """An objective whose status sits on line 3, under a hand-written note."""
+        self.run_tool("boss-goal", "init", "demo")
+        goal = self.cfg / "pm" / "demo.goal.md"
+        head, rest = goal.read_text().split("\n", 1)
+        goal.write_text("%s\nnote kept by hand\n%s" % (head, rest))
+        return goal
+
+    def test_status_rewrites_the_status_line_not_whatever_is_on_line_two(self):
+        goal = self.goal_status_off_line_two()
+        out = self.run_tool("boss-goal", "status", "demo", "paused", "away")
+        self.assertEqual(out.returncode, 0, out.stderr)
+        lines = goal.read_text().splitlines()
+        self.assertEqual(lines[1], "note kept by hand")
+        self.assertTrue(lines[2].startswith("_Status: PAUSED — away (since "), lines[2])
+        self.assertEqual(sum(ln.startswith("_Status:") for ln in lines), 1)
+
+    def test_list_and_check_show_the_status_the_pulse_reads(self):
+        self.goal_status_off_line_two()
+        self.assertEqual(self.run_tool("boss-goal", "list").stdout.split(), ["demo", "OPEN"])
+        self.assertIn("status: OPEN |", self.run_tool("boss-goal", "check", "demo").stdout)
+
+    def test_set_keeps_the_status_line_even_off_line_two(self):
+        goal = self.goal_status_off_line_two()
+        out = self.run_tool("boss-goal", "set", "demo", stdin="## Outcome\nnew\n")
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertEqual(goal.read_text(), "# Objective — demo\n_Status: OPEN_\n## Outcome\nnew\n")
+
+    def test_check_counts_next_the_way_the_pulse_hands_it_out(self):
+        self.run_tool("boss-goal", "init", "demo")
+        goal = self.cfg / "pm" / "demo.goal.md"
+        goal.write_text(goal.read_text().split("## Next, in priority order")[0]
+                        + "## Next, in priority order\n- a bullet\n")
+        out = self.run_tool("boss-goal", "check", "demo")
+        self.assertIn("| 1 queued |", out.stdout)
+
+    def ok(self, tool, *args, stdin=""):
+        out = self.run_tool(tool, *args, stdin=stdin)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        return out
+
+    def test_status_written_by_boss_goal_is_read_back(self):
+        self.ok("boss-goal", "init", "demo")
+        goal = self.cfg / "pm" / "demo.goal.md"
+        self.assertEqual(objective.status(goal.read_text()).upper(), "OPEN")
+        self.ok("boss-goal", "status", "demo", "paused", "waiting on the owner")
+        self.assertTrue(objective.status(goal.read_text()).upper().startswith("PAUSED — WAITING ON THE OWNER"))
+        self.ok("boss-goal", "status", "demo", "met", "PR merged")
+        self.assertFalse(objective.is_open(goal.read_text()))
+
+    def test_set_with_the_header_on_stdin_keeps_one_status(self):
+        # What happened to six objectives before 2026-10-02: the body came from
+        # `show`, header included, and `set` kept both.
+        self.ok("boss-goal", "init", "demo")
+        goal = self.cfg / "pm" / "demo.goal.md"
+        shown = self.ok("boss-goal", "show", "demo").stdout
+        out = self.ok("boss-goal", "set", "demo", stdin=shown.replace("<REPLACE", "<FILLED"))
+        self.assertIn("dropped the header", out.stderr)
+        body = goal.read_text()
+        self.assertEqual(body.count("_Status:"), 1, body)
+        self.assertEqual(body.count("# Objective"), 1, body)
+        self.assertIn("<FILLED", body)
+        self.ok("boss-goal", "status", "demo", "met", "done")
+        self.assertFalse(objective.is_open(goal.read_text()))
+
+    def test_boss_goal_reads_the_status_the_module_reads(self):
+        # Before objective.py, boss-goal list read line 2 with sed and the pulse
+        # the first _Status: line. The same file must give the same answer.
+        self.ok("boss-goal", "init", "demo")
+        goal = self.cfg / "pm" / "demo.goal.md"
+        for args in (("paused", "waiting on the owner"), ("met", "PR merged"), ("open",)):
+            self.ok("boss-goal", "status", "demo", *args)
+            listed = self.ok("boss-goal", "list").stdout.split(None, 1)[1].strip()
+            self.assertEqual(listed.upper(), objective.status(goal.read_text()).upper(), args)
+
+    def test_set_keeps_a_body_heading_and_skips_leading_blanks(self):
+        self.ok("boss-goal", "init", "demo")
+        goal = self.cfg / "pm" / "demo.goal.md"
+        self.ok("boss-goal", "set", "demo", stdin="# Objectives and constraints\nx\n")
+        self.assertIn("# Objectives and constraints", goal.read_text())
+        self.ok("boss-goal", "set", "demo",
+                      stdin="\n# Objective — demo\n_Status: OPEN_\n## Outcome\ny\n")
+        self.assertEqual(goal.read_text().count("_Status:"), 1)
+
+    def test_set_without_a_header_is_left_alone(self):
+        self.ok("boss-goal", "init", "demo")
+        out = self.ok("boss-goal", "set", "demo", stdin="## Outcome\nx\n")
+        self.assertNotIn("dropped", out.stderr)
+        self.assertEqual((self.cfg / "pm" / "demo.goal.md").read_text(),
+                         "# Objective — demo\n_Status: OPEN_\n## Outcome\nx\n")
 
     def goal_with_tickets(self, issues):
         self.run_tool("boss-goal", "init", "demo")

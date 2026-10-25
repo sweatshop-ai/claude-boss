@@ -9,6 +9,8 @@
 #
 #   ~/.claude/pm/<track>.goal.md
 #
+# The format (which line is the status, what the sections hold) is
+# ../objective.py's; this script reads and writes it through that module.
 # Two things read this file besides the boss:
 #   boss-pulse.py    after every turn: objective still OPEN + a worker idle
 #                    => the turn continues instead of ending
@@ -35,6 +37,10 @@ set -euo pipefail
 PM="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/pm"
 CAP=4096
 mkdir -p "$PM"
+# The one reader and writer of the format (../objective.py): which line is the
+# status, what the sections hold. Nothing below parses the file itself.
+OBJ="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/../objective.py"
+obj() { python3 "$OBJ" "$@"; }
 
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 # A track becomes a file name under pm/: a plain name only (boss_store.TRACK_RE).
@@ -139,8 +145,7 @@ set)
     printf 'dropped the header from stdin; the status stays as it was (boss-goal status to change it)\n' >&2
   fi
   [[ -n "$body" ]] || die "nothing on stdin but a header"
-  hdr=$(sed -n '1,2p' "$f")
-  printf '%s\n%s\n' "$hdr" "$body" > "$f"
+  printf '%s\n' "$body" | obj set-body "$f" || die "could not write $f"
   sz=$(stat -c%s "$f")
   (( sz > CAP )) && printf 'WARN: %s B, over the %s B cap — this file is read on every turn.\n' "$sz" "$CAP" >&2
   printf 'wrote %s (%s B)\n' "$f" "$sz" ;;
@@ -163,15 +168,15 @@ status)
   st=${3:-}; shift 3 2>/dev/null || true
   note=${*:-}
   case "$st" in
-    open)   line="_Status: OPEN_" ;;
+    open)   val="OPEN" ;;
     paused) [[ -n "$note" ]] || die "paused needs a reason: boss-goal status $t paused \"<why>\""
-            line="_Status: PAUSED — $note (since $(date +%F\ %H:%M))_" ;;
+            val="PAUSED — $note (since $(date +%F\ %H:%M))" ;;
     met)    [[ -n "$note" ]] || die "met needs the evidence: boss-goal status $t met \"<what proves it>\""
-            line="_Status: MET $(date +%F) — ${note}_" ;;
+            val="MET $(date +%F) — ${note}" ;;
     *) die "usage: status <track> open|paused|met [note]" ;;
   esac
-  sed -i "2s@.*@$line@" "$f"
-  printf '%s\n' "$line"
+  obj set-status "$f" "$val" || die "could not write $f"
+  printf '_Status: %s_\n' "$val"
   [[ "$st" == open ]] || printf '(the pulse is now off for %s)\n' "$t" ;;
 
 check)
@@ -192,7 +197,7 @@ check)
     printf 'WEAK: not obviously checkable — %s\n' "${c:0:90}"
   done < <(grep '^- \[ \]' "$f" || true)
   # A ticket graph replaces Next: the pulse hands out its frontier.
-  tk=$(awk '/^## Tickets[[:space:]]*$/{f=1;next} /^## /{f=0} f&&NF{gsub(/`/,""); print; exit}' "$f")
+  tk=$(obj tickets "$f")
   if [[ -n "$tk" ]]; then
     fr="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/../../hand-to-boss/frontier.py"
     if out=$(python3 "$fr" "$tk" 2>&1); then
@@ -210,11 +215,11 @@ check)
       printf 'TICKET GRAPH BROKEN (%s):\n%s\n' "$tk" "$out"; rc=1
     fi
   else
-    nxt=$(awk '/^## Next, in priority order/{f=1;next} f&&/^[0-9]+\./{n++} END{print n+0}' "$f")
+    nxt=$(obj next-count "$f")
     (( nxt < 1 )) && printf 'WARN: nothing under "Next, in priority order" — an idle worker has nowhere to go.\n'
   fi
   (( sz > CAP )) && { printf 'OVER CAP: %s B > %s B. Move the reasoning to the tracker.\n' "$sz" "$CAP"; rc=1; }
-  st=$(sed -n '2s/_Status: \(.*\)_/\1/p' "$f")
+  st=$(obj status "$f")
   # An objective nothing reads is a note to self. Say plainly whether the pulse
   # that reads it is armed, rather than letting the skill assume it.
   # Armed when the plugin is enabled (it declares the pulse in hooks/hooks.json),
@@ -374,7 +379,7 @@ premortem)
 list)
   shopt -s nullglob
   for f in "$PM"/*.goal.md; do
-    printf '%-28s %s\n' "$(basename "${f%.goal.md}")" "$(sed -n '2s/_Status: \(.*\)_/\1/p' "$f")"
+    printf '%-28s %s\n' "$(basename "${f%.goal.md}")" "$(obj status "$f")"
   done ;;
 
 *) die "usage: boss-goal {init|set|next|show|check|verify|review|premortem|status|list} <track>" ;;
