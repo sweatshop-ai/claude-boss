@@ -39,12 +39,13 @@ class PanesState(unittest.TestCase):
             (tmp / "sessions").mkdir()
             bp = self.load_panes(tmp)
             os.environ["CLAUDE_CONFIG_DIR"] = str(tmp)
-            bp.panes = lambda: [("%7", kid.pid)]          # tmux, the one thing faked
+            bp.TMUX = bp.fleet.MemoryTmux([bp.fleet.Pane("%7")])   # tmux, the one thing faked
             stat = Path("/proc/%d/stat" % kid.pid).read_text()
             real = stat[stat.rindex(")") + 2:].split()[19]
             outs = []
             for ps in (None, "1", real):
-                rec = {"pid": kid.pid, "sessionId": "s1", "status": "idle", "cwd": str(tmp)}
+                rec = {"pid": kid.pid, "sessionId": "s1", "status": "idle", "cwd": str(tmp),
+                       "tmux": "w:@1.%7"}
                 if ps is not None:
                     rec["procStart"] = ps
                 (tmp / "sessions" / ("%d.json" % kid.pid)).write_text(json.dumps(rec))
@@ -74,7 +75,7 @@ class PanesState(unittest.TestCase):
             (tmp / "sessions").mkdir()
             stat = Path("/proc/%d/stat" % kid.pid).read_text()
             (tmp / "sessions" / ("%d.json" % kid.pid)).write_text(json.dumps(
-                {"pid": kid.pid, "sessionId": "s1", "cwd": str(tmp), "name": "derived",
+                {"pid": kid.pid, "sessionId": "s1", "cwd": str(tmp), "name": "derived", "tmux": "w:@1.%7",
                  "nameSource": "derived", "procStart": stat[stat.rindex(")") + 2:].split()[19]}))
             bindir = tmp / "bin"
             bindir.mkdir()
@@ -85,7 +86,7 @@ class PanesState(unittest.TestCase):
                 fake.chmod(0o755)
             os.environ["PATH"] = str(bindir) + os.pathsep + "/usr/bin:/bin"
             bp = self.load_panes(tmp)
-            bp.panes = lambda: [("%7", kid.pid)]
+            bp.TMUX = bp.fleet.MemoryTmux([bp.fleet.Pane("%7")])
             import io, contextlib
             with contextlib.redirect_stdout(io.StringIO()):
                 sys.argv = ["boss-panes.py", "--set-name", "%7", "reviewer-1"]
@@ -151,8 +152,13 @@ if sys.argv[1:2] == ["--state"]:
     else:
         open(seen, "w").close()
         print(os.environ["STUB_ROW"])
-else:
-    print("%5\tWanda\tw-sid\t" + os.environ["STUB_ROW"].split("\t")[1] + "\t1\t1\t1")
+elif sys.argv[1:2] == ["get"]:
+    if os.path.exists(os.path.join(os.environ["STUB_DIR"], "get-fails")):
+        sys.exit(1)                                   # a crash: no output at all
+    row = os.environ["STUB_ROW"].split("\t")
+    known = {"name": "Wanda", "session": "w-sid", "owner": "-",
+             "status": row[1] if len(row) > 1 else "-"}
+    print("\t".join(known.get(f, "-") for f in sys.argv[3:]))
 '''
 
 
@@ -183,6 +189,14 @@ class RequireIdle(unittest.TestCase):
         calls = (self.tmp / "calls").read_text() if (self.tmp / "calls").exists() else ""
         keys = [l for l in calls.splitlines() if l.startswith("send-keys")]
         return r, keys
+
+    def test_an_unreadable_owner_refuses_instead_of_reading_as_unowned(self):
+        # An empty owner means "unowned", which the cross-boss guard lets through.
+        (self.tmp / "get-fails").touch()
+        r, keys = self.run_retire("w-sid\tidle\tpin1")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("cannot read the owner of %5", r.stderr)
+        self.assertEqual(keys, [])
 
     def test_idle_exits_with_no_escape(self):
         r, keys = self.run_retire("w-sid\tidle\tpin1", "--expect-session", "w-sid", "--expect-last", "pin1")
@@ -257,6 +271,98 @@ class RequireIdle(unittest.TestCase):
                            env=env, capture_output=True, text=True, timeout=30)
         self.assertEqual(r.returncode, 1)
         self.assertIn("only apply with --require-idle", r.stderr)
+
+
+# ------------------------------------------- list and fields, through fleet.py
+
+# Answers list-panes from $STUB_DIR/panes (in fleet.FORMAT's field order),
+# display-message with the target itself, and logs everything else.
+STUB_TMUX_FLEET = r'''#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$STUB_DIR/calls"
+case "$1" in
+  list-panes) cat "$STUB_DIR/panes" ;;
+  display-message) echo "$4" ;;
+esac
+exit 0
+'''
+
+
+class ListAndFields(unittest.TestCase):
+    """boss-lifecycle.sh and boss-panes.py with real fleet.py, a stub tmux and
+    live peer files: the sessions are `sleep` children with a matching procStart."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        (self.tmp / "sessions").mkdir()
+        bindir = self.tmp / "bin"
+        bindir.mkdir()
+        (bindir / "tmux").write_text(STUB_TMUX_FLEET)
+        os.chmod(bindir / "tmux", 0o755)
+        self.kids = []
+        self.env = dict(os.environ, PATH="%s:%s" % (bindir, os.environ["PATH"]), TMUX="stub",
+                        TMUX_PANE="%1", STUB_DIR=str(self.tmp), CLAUDE_CONFIG_DIR=str(self.tmp))
+        (self.tmp / "panes").write_text(
+            "%1\tboss:0.0\t%1\tclaude\t/w/boss\t-\n"
+            "%5\tboss:0.1\t%1\tclaude\t/w/api\tWanda\n"
+            "%6\tmail:1.0\t-\tbash\t/w/mail\tGone\n")
+
+    def tearDown(self):
+        for k in self.kids:
+            k.kill()
+            k.wait()
+        shutil.rmtree(self.tmp)
+
+    def session(self, sid, pane, name, started, status="idle"):
+        kid = subprocess.Popen(["sleep", "60"])
+        self.kids.append(kid)
+        stat = Path("/proc/%d/stat" % kid.pid).read_text()
+        (self.tmp / "sessions" / ("%d.json" % kid.pid)).write_text(json.dumps(
+            {"pid": kid.pid, "sessionId": sid, "name": name, "status": status,
+             "startedAt": started, "tmux": "boss:@1.%s" % pane, "entrypoint": "sdk-cli",
+             "cwd": str(self.tmp), "procStart": stat[stat.rindex(")") + 2:].split()[19]}))
+
+    def call(self, *args, script="boss-lifecycle.sh"):
+        cmd = ["bash", str(HERE / script)] if script.endswith(".sh") else [sys.executable, str(HERE / script)]
+        return subprocess.run(cmd + list(args), env=self.env, capture_output=True, text=True, timeout=60)
+
+    def test_fields_are_asked_for_by_name(self):
+        self.session("s-wanda", "%5", "Wanda", 1000, status="busy")
+        r = self.call("get", "%5", "status", "name", "owner", "session", script="boss-panes.py")
+        self.assertEqual(r.stdout, "busy\tWanda\t%1\ts-wanda\n")
+        r = self.call("get", "%6", "name", "owner", script="boss-panes.py")
+        self.assertEqual(r.stdout, "-\t-\n")
+
+    def test_an_unknown_field_is_an_error_not_a_dash(self):
+        r = self.call("get", "%5", "nmae", script="boss-panes.py")
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("nmae", r.stderr)
+
+    def test_list_reads_names_from_sessions_and_explains_a_shared_pane(self):
+        self.session("s-lucas", "%1", "Lucas", 500)
+        self.session("s-wanda", "%5", "Wanda", 1000)
+        self.session("s-casimir", "%5", "Casimir", 2000, status="busy")
+        r = self.call("list")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        lines = r.stdout.splitlines()
+        rows = {ln.split("\t")[0]: ln.split("\t") for ln in lines if ln.startswith("%")}
+        self.assertEqual(rows["%5"][1:4], ["boss:0.1", "Wanda", "idle"])
+        self.assertIn("shared-pane", rows["%5"][5])
+        self.assertEqual(rows["%5"][6], "mine")
+        # a pane with no live session keeps its mirrored name and shows its command
+        self.assertEqual(rows["%6"][2:4], ["Gone", "bash"])
+        self.assertEqual(rows["%1"][6], "self")
+        why = lines[lines.index("\t".join(rows["%5"])) + 1]
+        self.assertTrue(why.startswith("  shared-pane: 2 live sessions name pane %5"), why)
+        self.assertIn("Casimir (s-casimir", why)
+
+    def test_list_mine_keeps_only_the_boss_and_its_panes(self):
+        r = self.call("list", "--mine")
+        self.assertEqual([ln.split("\t")[0] for ln in r.stdout.splitlines()[1:]], ["%1", "%5"])
+
+    def test_claim_stamps_through_the_fleet(self):
+        self.session("s-x", "%6", "Xavi", 1000)
+        self.call("claim", "%6")
+        self.assertIn("set-option -p -t %6 @boss_pane %1", (self.tmp / "calls").read_text())
 
 
 if __name__ == "__main__":
