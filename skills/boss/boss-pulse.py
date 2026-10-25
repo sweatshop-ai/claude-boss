@@ -45,11 +45,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import boss_store  # noqa: E402
+import fleet  # noqa: E402
 import policy  # noqa: E402
 import registry  # noqa: E402
 import tracker  # noqa: E402
 
-CFG = Path(os.environ.get("CLAUDE_CONFIG_DIR", str(Path.home() / ".claude")))
+CFG = registry.config_dir()
 PM = CFG / "pm"
 STATE = PM / ".pulse"
 
@@ -74,60 +75,25 @@ def section(body, title):
 
 # ------------------------------------------------------------------ fleet
 
-def live_sessions():
-    """Every live peer session in a tmux pane, keyed by pane id."""
-    out = {}
-    for rec in registry.live(CFG):
-        tm = rec.get("tmux") or ""
-        if "%" in tm:
-            out[tm.rsplit(".", 1)[-1]] = rec
-    return out
-
-
-def owned_panes(boss_pane):
-    """Panes this boss stamped @boss_pane on, as (pane_id, coordinate).
+def team(sid):
+    """This boss's live workers: (the idle ones as (name, coordinate), how many in all).
 
     The coordinate is the session:window.pane INDEX form, because that is the
     only shape the boss may quote to the owner — it is what they see on the pane
     and what `boss-lifecycle.sh list` prints. A raw `%4` is banned by safety
     rule 15, so the pulse must not hand one over.
     """
-    if not boss_pane:
-        return []
-    fmt = "#{pane_id}\t#{@boss_pane}\t#{session_name}:#{window_index}.#{pane_index}"
-    try:
-        raw = subprocess.run(
-            ["tmux", "list-panes", "-a", "-F", fmt],
-            capture_output=True, text=True, timeout=3,
-        ).stdout
-    except (OSError, subprocess.SubprocessError):
-        return []
-    mine = []
-    for line in raw.splitlines():
-        parts = line.split("\t")
-        if len(parts) < 3:
-            continue
-        pane, owner, coord = parts[0], parts[1].strip(), parts[2]
-        if owner == boss_pane and pane != boss_pane:
-            mine.append((pane, coord))
-    return mine
-
-
-def team(sid):
-    """This boss's live workers: (the idle ones as (name, coordinate), how many in all)."""
-    live = live_sessions()
-    me = next((r for r in live.values() if r.get("sessionId") == sid), None)
+    seats = fleet.view(fleet.Tmux(timeout=3), registry.live(CFG))
+    me = fleet.seat_of(seats, sid=sid)
     if not me:
         return [], 0
-    boss_pane = (me.get("tmux") or "").rsplit(".", 1)[-1]
     idle, size = [], 0
-    for pane, coord in owned_panes(boss_pane):
-        rec = live.get(pane)
-        if not rec:
+    for seat in fleet.owned(seats, me.pane.id):
+        if not seat.session:
             continue
         size += 1
-        if (rec.get("status") or "") == "idle":
-            idle.append((rec.get("name") or coord, coord))
+        if (seat.session.get("status") or "") == "idle":
+            idle.append((seat.session.get("name") or seat.pane.coord, seat.pane.coord))
     return idle, size
 
 

@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.14.0 — 2026-10-25
+
+- **One fleet view** (architecture review, candidate 2). Which pane runs which
+  session was worked out twice: `boss-panes.py` walked `/proc` ancestry,
+  `boss-pulse.py` sliced the registry's `tmux` field, and the tmux format string
+  and the `@boss_pane` stamp were spelled in three files. `skills/boss/fleet.py`
+  now owns both rules, behind a tmux adapter and an in-memory one for tests.
+  The rule is the registry's `tmux` field (on the live fleet it matched the
+  `/proc` walk on 15 of 15 panes, without the walk).
+- **`shared-pane`**: when two live sessions name one pane (a claude started
+  inside another inherits its pane), the oldest wins, the row is flagged, and
+  `list` prints a line under it naming the others and which one to talk to.
+- `boss-lifecycle.sh` asks `boss-panes.py get <pane> <field>...` for fields by
+  name instead of cutting TSV columns by position, and `list` and the stamp go
+  through `boss-panes.py list` / `stamp`. Output of `list` is unchanged (27 of
+  27 rows identical on the live fleet).
+- The cross-boss guard fails closed: when the owner of a pane cannot be read,
+  `retire`/`restart`/`move`/`claim` refuse instead of treating the pane as
+  unowned.
+- Tests: `test_fleet.py` (rules and the tmux adapter); `test_boss_lifecycle.py`
+  gained the bash side (`get`, `list`, `claim`).
+
 ## 0.13.0 — 2026-10-25
 
 - **Jev is gone** (the owner, 2026-10-25). The `UserPromptSubmit` hook

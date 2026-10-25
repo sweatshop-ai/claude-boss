@@ -272,6 +272,11 @@ dispatch the remainder with the handoff as its input. At **250k** it shows
 `list` also flags `heavy` at 60k and `RECYCLE` at 90k cost per turn; under this
 rule they mean a task that ran long, the same remedy as `CTX-SPLIT`.
 
+`shared-pane` means more than one live session names that pane: a claude started
+from inside it (a tool call, a nested shell) inherits it. The row shows the
+oldest, which is the pane's own session, and the line under it names the others.
+Send work and keystrokes to the one in the row.
+
 Two limits:
 - **A finished worker with its handoff on disk is yours to restart** (the owner,
   2026-09-17 and again 2026-09-18: "This should be your task as a boss"). Do it,

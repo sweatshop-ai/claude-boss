@@ -42,6 +42,13 @@ transcript. A worker that took input after the boss looked has a newer one.
 Worker: `CTX-SPLIT` (cut the task at its next boundary), `CTX-OVER` (overdue).
 Boss: `CTX-EVAL`, `CTX-RESTART`. Either: `heavy`, `RECYCLE` (cost per turn).
 
+**Stamp**: the `@boss_pane` option on a tmux pane, naming the pane of the boss
+that owns it. Only the stamp makes a pane a boss's; `fleet.py` reads and writes it.
+
+**Shared pane**: a pane that more than one live session names in its registry
+record. The oldest is the pane's own session; the flag `shared-pane` and the line
+under the row in `list` name the others.
+
 **Handoff**: the file a worker writes before a restart — branch, what was tried
 and rejected, live constraints, next step.
 

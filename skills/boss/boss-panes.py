@@ -13,6 +13,9 @@ One place answers all the questions the boss keeps asking badly:
                         session transcript, plus a priced cost-per-turn over
                         the last 200 turns (transcript.py).
 
+Which session runs in which pane, and who owns a pane, is fleet.py's to say;
+this is its command line.
+
 Output is TSV, one line per resolved pane:
 
     pane_id  name  session_id  status  ctx_k  cost_per_turn_k  turns  flags
@@ -20,10 +23,19 @@ Output is TSV, one line per resolved pane:
 `turns` counts the turns in the transcript's last 4 MB, not the whole session.
 
 `flags` is policy.flag_for() for the session's role (boss when it holds a boss
-marker, worker otherwise), space-separated, or "-".
+marker, worker otherwise), plus `shared-pane` when more than one live session
+names the pane, space-separated, or "-".
 
-Panes with no Claude session are omitted. Nothing here writes; --set-name is the
-one exception. It calls cc-agent-names' `agent-name set` when that is on PATH,
+Panes with no Claude session are omitted from it.
+
+    get <pane> <field>...     the named fields, tab-separated, "-" when empty;
+                              an unknown field exits 2 (fields: see FIELDS)
+    list --boss <pane> [--mine]
+                              the roster boss-lifecycle.sh list prints, with a
+                              line under a shared pane saying who else is there
+    stamp <pane> <boss-pane>  mark the pane as owned by that boss
+
+Nothing here writes; --set-name and stamp are the exceptions. --set-name calls cc-agent-names' `agent-name set` when that is on PATH,
 and writes the peer file atomically when it is not.
 """
 import json
@@ -35,33 +47,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import boss_store  # noqa: E402
+import fleet  # noqa: E402
 import policy  # noqa: E402
 import registry  # noqa: E402
 import transcript  # noqa: E402
 
-CFG = Path(os.environ.get("CLAUDE_CONFIG_DIR", str(Path.home() / ".claude")))
+CFG = registry.config_dir()
 
-
-
-def ppid_of(pid):
-    try:
-        with open(f"/proc/{pid}/stat", "rb") as fh:
-            data = fh.read()
-        # comm can contain spaces and parens; everything after the LAST ')'.
-        return int(data[data.rindex(b")") + 2:].split()[1])
-    except (OSError, ValueError, IndexError):
-        return 0
-
-
-def ancestors(pid, stop_at, limit=40):
-    """Walk up from pid looking for stop_at. Panes nest a shell then claude."""
-    seen = 0
-    while pid > 1 and seen < limit:
-        if pid == stop_at:
-            return True
-        pid = ppid_of(pid)
-        seen += 1
-    return False
 
 
 def transcript_for(rec):
@@ -77,36 +69,103 @@ def load_sessions():
     return out
 
 
-def panes():
-    try:
-        out = subprocess.run(
-            ["tmux", "list-panes", "-a", "-F", "{}\t{}".format("#{pane_id}", "#{pane_pid}")],
-            capture_output=True, text=True, timeout=10)
-    except (OSError, subprocess.SubprocessError):
-        return []
-    rows = []
-    for line in out.stdout.splitlines():
-        pid_s, _, pane_pid = line.partition("\t")
-        try:
-            rows.append((pid_s, int(pane_pid)))
-        except ValueError:
-            continue
-    return rows
+TMUX = fleet.Tmux(timeout=10)
+
+
+def seats():
+    return fleet.view(TMUX, load_sessions())
 
 
 def resolve():
-    sess = load_sessions()
-    rows = []
-    for pane_id, pane_pid in panes():
-        for rec in sess:
-            if ancestors(rec["pid"], pane_pid):
-                rows.append((pane_id, rec))
-                break
-    return rows
+    """(pane_id, session) for every pane a live session runs in."""
+    return [(s.pane.id, s.session) for s in seats() if s.session]
+
+
+def usage(rec):
+    t = transcript_for(rec)
+    return transcript.usage(transcript.tail(t)) if t else (0, 0, 0)
+
+
+def flags_of(seat, ctx, cost):
+    rec = seat.session
+    role = policy.BOSS if boss_store.is_boss(rec.get("sessionId") or "", CFG) else policy.WORKER
+    pol = policy.flag_for(ctx, cost, role) if transcript_for(rec) else []
+    return pol + seat.flags()
+
+
+# Every field `get` knows, and how to read it off a seat. Usage fields read the
+# transcript, so they are computed only when asked for.
+FIELDS = {
+    "name": lambda s: (s.session or {}).get("name"),
+    "status": lambda s: (s.session or {}).get("status"),
+    "session": lambda s: (s.session or {}).get("sessionId"),
+    "owner": lambda s: s.pane.owner,
+    "coord": lambda s: s.pane.coord,
+    "command": lambda s: s.pane.command,
+    "path": lambda s: s.pane.path,
+    "mirror": lambda s: s.pane.mirror,
+    "flags": lambda s: " ".join(flags_of(s, *usage(s.session)[:2])) if s.session else "",
+    "ctx": lambda s: "%.0f" % (usage(s.session)[0] / 1000) if s.session else "",
+    "explain": lambda s: s.explain(),
+}
+
+
+def cmd_get(pane, names):
+    bad = [n for n in names if n not in FIELDS]
+    if bad or not names:
+        print("boss-panes get: unknown field %s; known: %s" % (
+            ", ".join(bad) or "(none given)", " ".join(FIELDS)), file=sys.stderr)
+        return 2
+    seat = fleet.seat_of(seats(), pane=pane) or fleet.Seat(fleet.Pane(pane))
+    print("\t".join(str(FIELDS[n](seat) or "-") for n in names))
+    return 0 if seat.pane.coord else 1
+
+
+def cmd_list(boss, mine_only):
+    """Columns: pane, coord, name, state, ctx, cost/turn + flags, owner tag, path.
+    The coordinate is session-qualified on purpose: pane INDEXES collide across
+    tmux sessions, so a bare index sends the owner to the wrong terminal."""
+    print("PANE\tCOORD\tNAME\tSTATE\tCTX\tCOST/TURN\tOWNER\tPATH")
+    for s in seats():
+        p = s.pane
+        if p.id == boss and boss:
+            tag = "self"
+        elif not p.owner:
+            tag = "unowned"
+        elif p.owner == boss:
+            tag = "mine"
+        else:
+            tag = "other(%s)" % p.owner
+        if mine_only and tag not in ("mine", "self"):
+            continue
+        if s.session:
+            # Live name and status from the session; a crashed worker has none
+            # and keeps the name mirrored on its pane, which is what makes it
+            # recognisable in the watchdog.
+            ctx, cost, _ = usage(s.session)
+            flags = flags_of(s, ctx, cost)
+            name, state = s.session.get("name") or "-", s.session.get("status") or "-"
+            ctx_s, cost_s = "%.0f" % (ctx / 1000), "%.0f" % (cost / 1000)
+        else:
+            flags, name, state, ctx_s, cost_s = [], p.mirror or "-", p.command, "-", "-"
+        print("\t".join([p.id, p.coord, name, state, ctx_s + "k",
+                         cost_s + "k" + "".join(" " + f for f in flags), tag,
+                         p.path + (" <- you" if tag == "self" else "")]))
+        if s.explain():
+            print("  " + s.explain())
+    return 0
 
 
 def main():
     args = sys.argv[1:]
+    if args and args[0] == "get":
+        return cmd_get(args[1] if len(args) > 1 else "", args[2:])
+    if args and args[0] == "list":
+        boss = args[args.index("--boss") + 1] if "--boss" in args[:-1] else ""
+        return cmd_list(boss, "--mine" in args)
+    if args and args[0] == "stamp":
+        TMUX.stamp(args[1], args[2])
+        return 0
     if args and args[0] == "--set-name":
         # boss-lifecycle spawn/claim/restart/move name a worker through here.
         # With cc-agent-names installed, `agent-name set` is the one way in: it
@@ -162,13 +221,12 @@ def main():
         return 1
 
     want = args[0] if args else None
-    for pane_id, rec in resolve():
-        if want and pane_id != want:
+    for seat in seats():
+        pane_id, rec = seat.pane.id, seat.session
+        if not rec or (want and pane_id != want):
             continue
-        t = transcript_for(rec)
-        ctx, cost, turns = transcript.usage(transcript.tail(t)) if t else (0, 0, 0)
-        role = policy.BOSS if boss_store.is_boss(rec.get("sessionId") or "", CFG) else policy.WORKER
-        flags = policy.flag_for(ctx, cost, role) if t else []
+        ctx, cost, turns = usage(rec)
+        flags = flags_of(seat, ctx, cost)
         print("\t".join([
             pane_id,
             rec.get("name") or "-",
