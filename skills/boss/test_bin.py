@@ -126,6 +126,11 @@ class Tools(unittest.TestCase):
         return subprocess.run([str(BIN / tool), *args], input=stdin, env=self.env,
                               capture_output=True, text=True, timeout=timeout)
 
+    def ok(self, tool, *args, stdin=""):
+        out = self.run_tool(tool, *args, stdin=stdin)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        return out
+
     def test_the_tracker_lands_in_the_config_dir_the_hooks_read(self):
         out = self.run_tool("boss-tracker", "init", "demo", "Boss")
         self.assertEqual(out.returncode, 0, out.stderr)
@@ -198,11 +203,6 @@ class Tools(unittest.TestCase):
         out = self.run_tool("boss-goal", "check", "demo")
         self.assertIn("| 1 queued |", out.stdout)
 
-    def ok(self, tool, *args, stdin=""):
-        out = self.run_tool(tool, *args, stdin=stdin)
-        self.assertEqual(out.returncode, 0, out.stderr)
-        return out
-
     def test_status_written_by_boss_goal_is_read_back(self):
         self.ok("boss-goal", "init", "demo")
         goal = self.cfg / "pm" / "demo.goal.md"
@@ -243,7 +243,7 @@ class Tools(unittest.TestCase):
         self.ok("boss-goal", "set", "demo", stdin="# Objectives and constraints\nx\n")
         self.assertIn("# Objectives and constraints", goal.read_text())
         self.ok("boss-goal", "set", "demo",
-                      stdin="\n# Objective — demo\n_Status: OPEN_\n## Outcome\ny\n")
+                stdin="\n# Objective — demo\n_Status: OPEN_\n## Outcome\ny\n")
         self.assertEqual(goal.read_text().count("_Status:"), 1)
 
     def test_set_without_a_header_is_left_alone(self):
@@ -252,6 +252,39 @@ class Tools(unittest.TestCase):
         self.assertNotIn("dropped", out.stderr)
         self.assertEqual((self.cfg / "pm" / "demo.goal.md").read_text(),
                          "# Objective — demo\n_Status: OPEN_\n## Outcome\nx\n")
+
+    def test_through_a_symlink_as_bin_1_installs_it(self):
+        # install.sh BIN=1 symlinks bin/ into ~/.local/bin; objective.py must
+        # still be found next to the real script (Codex).
+        link = self.home / "bin" / "boss-goal"
+        link.parent.mkdir()
+        link.symlink_to(BIN / "boss-goal")
+        self.run_tool("boss-goal", "init", "demo")
+        out = subprocess.run([str(link), "status", "demo", "paused", "away"], env=self.env,
+                             capture_output=True, text=True, timeout=20)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("PAUSED — away", (self.cfg / "pm" / "demo.goal.md").read_text())
+
+    def test_next_replaces_its_section_and_keeps_the_ones_after(self):
+        self.ok("boss-goal", "init", "demo")
+        goal = self.cfg / "pm" / "demo.goal.md"
+        goal.write_text(goal.read_text() + "\n## Notes\nkept\n")
+        self.ok("boss-goal", "next", "demo", stdin="1. only this\n")
+        text = goal.read_text()
+        self.assertIn("## Next, in priority order\n1. only this\n", text)
+        self.assertTrue(text.endswith("## Notes\nkept\n"), text)
+
+    def test_check_counts_criteria_under_done_when_only(self):
+        # The pulse reads `## Done when`; a box elsewhere is not a criterion.
+        self.ok("boss-goal", "init", "demo")
+        goal = self.cfg / "pm" / "demo.goal.md"
+        text = goal.read_text()
+        done = text[text.index("## Done when"):text.index("## Deliverables")]
+        goal.write_text(text.replace(done, "## Done when\nnothing boxed\n\n")
+                        + "\n## Later\n- [ ] `x.py` passes\n")
+        out = self.run_tool("boss-goal", "check", "demo")
+        self.assertIn("UNUSABLE: no \"Done when\" criteria", out.stdout)
+        self.assertIn("| 0 criteria |", out.stdout)
 
     def goal_with_tickets(self, issues):
         self.run_tool("boss-goal", "init", "demo")

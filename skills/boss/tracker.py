@@ -260,4 +260,3 @@ def insert_in_section(body: str, title: str, line: str) -> str:
         at -= 1
     lines.insert(at, line)
     return "\n".join(lines)
-

@@ -28,7 +28,7 @@ BOSS_RUN = HERE / "bin" / "boss-run"
 
 # The real binaries a boss-run needs, and nothing else.
 TOOLS = ("bash sh env jq date mkdir mktemp cat grep sed tr head tail rm timeout "
-         "dirname sleep touch wc python3 sort cut setsid").split()
+         "dirname readlink sleep touch wc python3 sort cut setsid").split()
 # Names that must never resolve to a real binary inside the sandbox.
 FORBIDDEN = ("codex", "claude", "gh", "tmux")
 
