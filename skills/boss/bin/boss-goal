@@ -74,12 +74,14 @@ tpl, goal, track = (pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"),
 sys.stdout.write(tpl.replace("{{TRACK}}", track).replace("{{GOAL}}", goal))
 ' "$tpl" "$(goal "$t")" "$t" > "$prompt"
 
+  local rc=0
   json=$(python3 "$chain" --prompt-file "$prompt" --codex-timeout "$secs" --fallback "$fb" \
-           ${dir:+--cwd "$dir" --fallback-tools Read,Grep,Glob} "$@" </dev/null 2>/dev/null) || true
+           ${dir:+--cwd "$dir" --fallback-tools Read,Grep,Glob} "$@" </dev/null 2>/dev/null) || rc=$?
   rm -f "$prompt"
   who=$(jq -r '.reviewer // "none"' <<<"$json" 2>/dev/null) || who="none"
   why=$(jq -r '[.attempts[] | "\(.reviewer): \(.reason)"] | join(", ")' <<<"$json" 2>/dev/null) || why=""
   out=$(jq -r '.output // ""' <<<"$json" 2>/dev/null) || out=""
+  [[ -n "$json" ]] || why="reviewer chain exited $rc without a result"
   [[ "$who" != "none" ]] || out=""
 }
 
@@ -337,7 +339,8 @@ review)
   # missing. Same two-model path as boss-run. A reviewer that does not answer is
   # not a pass; it says so.
   t=${2:-}; need "$t" >/dev/null
-  ask_second_model boss-goal-review.md "$t" opus "" --words COMPLETE,INCOMPLETE
+  # prefix: COMPLETED counts as COMPLETE, as the grep this replaced took it.
+  ask_second_model boss-goal-review.md "$t" opus "" --words COMPLETE,INCOMPLETE --match prefix
   if [[ -z "$out" ]]; then
     printf 'no reviewer answered (%s).\n' "${why:-codex and opus both silent or absent}"
     printf 'That is not a pass — read the objective yourself against references/boss-goal-review.md.\n'

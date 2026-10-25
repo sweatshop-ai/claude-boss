@@ -136,7 +136,7 @@ class Attempt:
 class Result:
     reviewer: str
     output: str
-    parsed: Verdict | None
+    parsed: Verdict | Lines | None     # what the acceptance rule took from the answer
     attempts: tuple[Attempt, ...]
 
 
@@ -222,8 +222,9 @@ def _parse_lines(output: str, shape: Shape) -> Lines | None:
     return Lines(tuple(found[:shape.max]))
 
 
-def _acceptance(words, lines, strict):
-    """One rule for "is this answer usable": `words` (a VERDICT: line) or `lines` (a Shape)."""
+def _acceptance(words: tuple[str, ...] | None, lines: Shape | None, strict: bool):
+    """One rule for "is this answer usable": `words` (a VERDICT: line) or `lines` (a Shape).
+    Returns text -> Verdict | Lines | None."""
     if (words is None) == (lines is None):
         raise ValueError("give exactly one of words (a verdict vocabulary) and lines (a Shape)")
     if words is not None:
@@ -263,7 +264,7 @@ class _Run(NamedTuple):
 
 class _Turn(NamedTuple):
     attempt: Attempt
-    verdict: Verdict | None
+    answer: Verdict | Lines | None
 
 
 def _snapshot(f, tail: int | None = None) -> bytes:
@@ -317,8 +318,8 @@ def _turn(reviewer, model, raw: bytes, run: _Run, parse) -> _Turn:
     # inside the bytes of one character gave that character back. So the NULs go before the decode.
     # The attempt keeps the output as the reviewer wrote it.
     output = raw.decode("utf-8", "replace")
-    verdict = parse(raw.replace(b"\0", b"").decode("utf-8", "replace"))
-    if verdict:
+    answer = parse(raw.replace(b"\0", b"").decode("utf-8", "replace"))
+    if answer:
         reason = "answered"
     elif run.timed_out:
         reason = "timeout"
@@ -326,7 +327,7 @@ def _turn(reviewer, model, raw: bytes, run: _Run, parse) -> _Turn:
         reason = "error"
     else:
         reason = "noverdict"
-    return _Turn(Attempt(reviewer, reason, output, run.code, run.err[-STDERR_TAIL:], model), verdict)
+    return _Turn(Attempt(reviewer, reason, output, run.code, run.err[-STDERR_TAIL:], model), answer)
 
 
 def _codex(prompt, effort, timeout, parse, cwd) -> _Turn:
@@ -379,8 +380,8 @@ def run_chain(prompt: str, *, words: tuple[str, ...] | None = None, lines: Shape
         tried.append(_claude(prompt, fallback, timeout, parse, cwd))
     attempts = tuple(turn.attempt for turn in tried)
     for turn in tried:
-        if turn.verdict:
-            return Result(turn.attempt.reviewer, turn.attempt.output, turn.verdict, attempts)
+        if turn.answer:
+            return Result(turn.attempt.reviewer, turn.attempt.output, turn.answer, attempts)
     return Result("none", "", None, attempts)
 
 

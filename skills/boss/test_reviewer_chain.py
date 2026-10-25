@@ -23,7 +23,7 @@ from unittest import mock
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import reviewer_chain as rc  # noqa: E402
-from hermetic import Sandbox, alive  # noqa: E402
+from hermetic import Sandbox, alive, risks  # noqa: E402
 
 OPUS_ID = "claude-opus-5-5"
 CODEX_FIXED = ["exec", "-s", "read-only", "--skip-git-repo-check",
@@ -566,10 +566,6 @@ class Unrunnable(Base):
         self.assertEqual((codex.reason, codex.exit_code), ("error", None))
         self.assertIn("No such file or directory", codex.stderr_tail)   # the OSError, as Python words it
         self.assertEqual(result.reviewer, "opus")
-
-
-def risks(n, label="RISK"):
-    return "\n".join("%s: risk number %d" % (label, i) for i in range(1, n + 1))
 
 
 class LineShapes(Base):
