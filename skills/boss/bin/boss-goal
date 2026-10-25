@@ -37,10 +37,10 @@ set -euo pipefail
 PM="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/pm"
 CAP=4096
 mkdir -p "$PM"
-# The one reader and writer of the format (../objective.py): which line is the
-# status, what the sections hold. Nothing below parses the file itself.
-OBJ="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/../objective.py"
-obj() { python3 "$OBJ" "$@"; }
+# The real directory of this script: install.sh BIN=1 runs it through a
+# symlink in ~/.local/bin, and its neighbours are found from here.
+HERE="$(cd -- "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")" && pwd)"
+obj() { python3 "$HERE/../objective.py" "$@"; }
 
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 # A track becomes a file name under pm/: a plain name only (boss_store.TRACK_RE).
@@ -65,10 +65,9 @@ need() {
 # when nobody answered).
 ask_second_model() {
   local tpl=$1 t=$2 fb=$3 dir=$4; shift 4
-  local here chain prompt secs=120
+  local chain prompt secs=120
   [[ -n "$dir" ]] && secs=300   # reading code takes longer than reading the file
-  here="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-  tpl="${here}/../references/${tpl}"; chain="${here}/../reviewer_chain.py"
+  tpl="${HERE}/../references/${tpl}"; chain="${HERE}/../reviewer_chain.py"
   [[ -f "$tpl" ]] || die "prompt missing: $tpl"
   [[ -z "$dir" || -d "$dir" ]] || die "not a directory: $dir"
   prompt=$(mktemp)
@@ -130,22 +129,9 @@ set)
   t=${2:-}; f=$(need "${2:-}")
   body=$(cat)
   [[ -n "$body" ]] || die "nothing on stdin"
-  # A body edited from `show` brings the header along. Kept, it sat under ours
-  # as a second `_Status:` line that `status` never rewrote: on 2026-10-02 three
-  # objectives said MET or PAUSED on line 2 and OPEN on line 4.
-  # Only the header `init` writes: `# Objective — <track>` then `_Status:`,
-  # after any blank lines. A body heading like `# Objectives` stays.
-  stripped=$(printf '%s\n' "$body" | awk '
-    h == 0 && /^[[:space:]]*$/      { next }
-    h == 0 && /^# Objective — /     { h = 1; next }
-    h <= 1 && /^_Status:/           { h = 2; next }
-    { h = 2; print }')
-  if [[ "$stripped" != "$body" ]]; then
-    body=$stripped
-    printf 'dropped the header from stdin; the status stays as it was (boss-goal status to change it)\n' >&2
-  fi
-  [[ -n "$body" ]] || die "nothing on stdin but a header"
-  printf '%s\n' "$body" | obj set-body "$f" || die "could not write $f"
+  # A body edited from `show` brings the header along; objective.py drops it
+  # and says so, or the copy sits under ours as a second `_Status:` line.
+  printf '%s\n' "$body" | obj set-body "$f" || exit 1
   sz=$(stat -c%s "$f")
   (( sz > CAP )) && printf 'WARN: %s B, over the %s B cap — this file is read on every turn.\n' "$sz" "$CAP" >&2
   printf 'wrote %s (%s B)\n' "$f" "$sz" ;;
@@ -154,10 +140,7 @@ next)
   t=${2:-}; f=$(need "${2:-}")
   body=$(cat)
   [[ -n "$body" ]] || die "nothing on stdin"
-  tmp=$(mktemp)
-  awk '/^## Next, in priority order/{exit} {print}' "$f" > "$tmp"
-  printf '## Next, in priority order\n%s\n' "$body" >> "$tmp"
-  mv "$tmp" "$f"
+  printf '%s\n' "$body" | obj set-next "$f" || exit 1
   printf 'priority list replaced in %s\n' "$f" ;;
 
 show)
@@ -175,7 +158,7 @@ status)
             val="MET $(date +%F) — ${note}" ;;
     *) die "usage: status <track> open|paused|met [note]" ;;
   esac
-  obj set-status "$f" "$val" || die "could not write $f"
+  obj set-status "$f" "$val" || exit 1
   printf '_Status: %s_\n' "$val"
   [[ "$st" == open ]] || printf '(the pulse is now off for %s)\n' "$t" ;;
 
@@ -186,7 +169,7 @@ check)
   if grep -q '<REPLACE' "$f"; then
     printf 'UNUSABLE: still holds template placeholders — the pulse will inject them verbatim.\n'; rc=1
   fi
-  crit=$(grep -c '^- \[[ x]\]' "$f" || true)
+  crit=$(obj criteria "$f" | grep -c . || true)
   if (( crit < 1 )); then
     printf 'UNUSABLE: no "Done when" criteria. An objective with no test never completes.\n'; rc=1
   fi
@@ -195,11 +178,11 @@ check)
   while IFS= read -r c; do
     grep -qE '`|https?://|#[0-9]+|\.(py|sh|md|ts|js|yml)' <<<"$c" && continue
     printf 'WEAK: not obviously checkable — %s\n' "${c:0:90}"
-  done < <(grep '^- \[ \]' "$f" || true)
+  done < <(obj criteria "$f" | grep '^- \[ \]' || true)
   # A ticket graph replaces Next: the pulse hands out its frontier.
   tk=$(obj tickets "$f")
   if [[ -n "$tk" ]]; then
-    fr="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/../../hand-to-boss/frontier.py"
+    fr="$HERE/../../hand-to-boss/frontier.py"
     if out=$(python3 "$fr" "$tk" 2>&1); then
       printf 'TICKETS: %s\n' "$(head -1 <<<"$out")"
       nxt=$(head -1 <<<"$out" | sed 's/^Ready now: //; s/^none$//' | tr ',' '\n' | grep -c '[0-9]' || true)
@@ -310,22 +293,11 @@ verify)
       UNKNOWN) printf 'UNKNOWN   %s  (%s)\n' "${body:0:80}" "$detail"; unknown=$((unknown+1)) ;;
       *)       printf 'HUMAN     %s\n' "${body:0:80}"; human=$((human+1)) ;;
     esac
-  done < <(grep -E '^- \[[ x]\]' "$f" || true)
+  done < <(obj criteria "$f")
 
-  # Ticking is a literal-string edit, done in python so no part of the criterion
-  # is ever read as a pattern.
+  # Ticking is a literal match on the whole criterion, never a pattern.
   if (( tick )) && (( ${#ticked[@]} )); then
-    printf '%s\n' "${ticked[@]}" | python3 -c '
-import sys, pathlib
-f = pathlib.Path(sys.argv[1])
-s = f.read_text(encoding="utf-8")
-n = 0
-for b in sys.stdin.read().splitlines():
-    old = "- [ ] " + b
-    if old in s:
-        s = s.replace(old, "- [x] " + b, 1); n += 1
-f.write_text(s, encoding="utf-8")
-print("ticked %d" % n)' "$f"
+    printf '%s\n' "${ticked[@]}" | obj tick "$f" || exit 1
   fi
 
   printf -- '---\n%s met by query, %s not met, %s unknown, %s need a human' \
