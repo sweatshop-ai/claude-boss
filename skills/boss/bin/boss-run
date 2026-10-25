@@ -35,15 +35,12 @@ PM="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/pm"
 LOG="${PM}/boss-run.log"
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 PROMPT_FILE="${HERE}/../references/boss-run-review.md"
-FALLBACK_MODEL="claude-opus-5-5"
-FALLBACK_NAME="opus"      # what the log and the chain call the Opus fallback reviewer
+# The fallback reviewer, by the preset name reviewer_chain.py knows; the model id lives there.
+FALLBACK_NAME="opus"
 # Seconds each reviewer gets, whole numbers. Tests set it short so a hung reviewer is cut off at once.
+# The chain gives the fallback twice the Codex budget; the owner may set it outright.
 TIMEOUT="${BOSS_RUN_REVIEW_TIMEOUT:-120}"
-# Opus answers slower than Haiku did, so the fallback gets twice the Codex budget unless set.
-if [[ -n "${BOSS_RUN_REVIEW_FALLBACK_TIMEOUT:-}" ]]; then FALLBACK_TIMEOUT="$BOSS_RUN_REVIEW_FALLBACK_TIMEOUT"
-elif [[ "$TIMEOUT" =~ ^[0-9]+$ ]]; then FALLBACK_TIMEOUT=$((TIMEOUT * 2))
-else FALLBACK_TIMEOUT="$TIMEOUT"   # not a number: let the chain reject it, as before
-fi
+FALLBACK_TIMEOUT="${BOSS_RUN_REVIEW_FALLBACK_TIMEOUT:-}"
 
 WHY="" ; CWD="$PWD" ; DRY=0 ; CMD="" ; FLAT=""
 REVIEWER="none" ; VERDICT="" ; REASON=""
@@ -180,7 +177,7 @@ run_reviewer() {
   json=$(python3 "$CHAIN" --prompt-file "$PROMPT_TMP" \
            --words APPROVE,REJECT --match prefix --effort medium \
            --codex-timeout "$TIMEOUT" \
-           --fallback-name "$FALLBACK_NAME" --fallback-model "$FALLBACK_MODEL" --fallback-timeout "$FALLBACK_TIMEOUT" \
+           --fallback "$FALLBACK_NAME" ${FALLBACK_TIMEOUT:+--fallback-timeout "$FALLBACK_TIMEOUT"} \
            </dev/null 2>/dev/null); rc=$?
   rm -f -- "$PROMPT_TMP"; PROMPT_TMP=""
   [[ $rc -eq 0 ]] || return 1
@@ -249,7 +246,7 @@ PROMPT=$(render_prompt && printf .) || finish 2
 PROMPT=${PROMPT%.}
 if ! run_reviewer "$PROMPT"; then
   REVIEWER="none"; VERDICT=""; REASON="no reviewer answered"
-  printf 'boss-run: no reviewer answered (codex and %s both silent or absent).\n' "$FALLBACK_MODEL" >&2
+  printf 'boss-run: no reviewer answered (codex and %s both silent or absent).\n' "$FALLBACK_NAME" >&2
   printf '  Nothing was run. Retry, or hand the command to the owner.\n' >&2
   finish 4
 fi

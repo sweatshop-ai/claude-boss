@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.12.0 — 2026-10-25
+
+- **One reviewer chain** (architecture review, the owner, 2026-10-25). `boss-goal
+  review` and `premortem` carried a second copy of the chain in bash: it counted
+  prose mentions of `VERDICT:` as an answer, ignored Codex's exit status and kept no
+  attempt record. Both now call `reviewer_chain.py` like `boss-run`, and when nobody
+  answers they print each reviewer's reason (`codex: timeout, opus: absent`). The
+  chain grew what they needed: a second acceptance rule (`--lines RISK --min-lines 8
+  --max-lines 25`: enough labelled lines, returned stripped), `--cwd` (Codex `-C`,
+  the fallback run in that directory), fallback presets (`--fallback opus|fable`,
+  the only place the model ids are written; `boss-run` lost its copy), and a
+  fallback timeout that defaults to twice Codex's, as every caller set it.
+- **Premortem falls back to Fable** (`claude-fable-5-1`), the strongest model, for
+  the widest risk sweep; `review` and `boss-run` stay on Opus. Codex is still asked
+  first everywhere.
+- Tests: `review` and `premortem` had none; they now run hermetically in
+  `test_bin.py` through the sandbox's `codex`/`claude` stubs.
+
 ## 0.11.6 — 2026-10-22
 
 - **P16: on a small shared runner pool, push only gate-ready heads** (owner,

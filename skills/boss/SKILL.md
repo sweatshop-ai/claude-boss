@@ -383,14 +383,16 @@ start). So the pre-mortem is a safety step the boss runs on its own: a model
 imagines the failures, the boss covers every one, and the owner sees the result
 in a report, not in a question.
 
-`premortem` puts the objective to Codex (Opus as fallback) against
+`premortem` puts the objective to Codex (Fable as fallback, the strongest model
+for the widest sweep) against
 `references/boss-goal-premortem.md`: it is a week later, the track failed, list
 every concrete way that happened. It prints `R1.`…`R25.`, one risk per line, with
 no filtering and no fixes; an answer with fewer than 8 falls through to the next
 model. Pass the repository the track works on as `repo-dir` and the model reads
 the code there and marks what it saw (`[seen: <path>]`). It takes one to five
-minutes (up to fifteen if Codex is out and Opus reads the code): run it in the background straight after `review`, and dispatch the
-first Next item while it runs.
+minutes (up to fifteen if Codex is out and Fable reads the code): run it in the background straight after `review`, and dispatch the
+first Next item while it runs. Both commands go through `reviewer_chain.py`, the
+same chain as `boss-run`; when nobody answers they print each reviewer's reason.
 
 When it returns, **every risk is real**; there is no strike-out step. Cover
 each one: a Done-when criterion that would catch it, a Constraint that forbids

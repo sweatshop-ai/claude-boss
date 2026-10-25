@@ -48,40 +48,39 @@ need() {
   printf '%s' "$f"
 }
 
-# Fill a references/ prompt template with the objective and put it to a second
-# model: Codex first, Opus if Codex is absent or silent. Sets $out and $who;
-# $out stays empty unless the answer carries at least $5 (default 1) lines
-# matching $3, so a thin answer falls through to the next model. With $4, the
-# model runs in that directory and may read the files there.
+# Fill a references/ prompt template with the objective and put it to the reviewer
+# chain (../reviewer_chain.py, the one place that decides who answers): Codex first,
+# then the preset fallback $3 (opus, fable). What counts as a usable answer is the
+# chain's acceptance flags after the fixed arguments (--words ..., or --lines ...).
+# With $4 both reviewers run in that directory and may read the files there, and
+# Codex gets 300 s instead of 120 (the chain gives the fallback twice that).
+# Sets $json (the chain's Result), $who (codex, the fallback, or none), $why (each
+# attempt's reason, "codex: timeout, opus: absent") and $out (the raw answer, empty
+# when nobody answered).
 ask_second_model() {
-  local tpl=$1 t=$2 shape=$3 dir=${4:-} min=${5:-1} prompt last secs=120 fbsecs=240
-  [[ -n "$dir" ]] && { secs=300; fbsecs=600; }   # reading code takes longer than reading the file
-  local here; here="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-  tpl="${here}/../references/${tpl}"
+  local tpl=$1 t=$2 fb=$3 dir=$4; shift 4
+  local here chain prompt secs=120
+  [[ -n "$dir" ]] && secs=300   # reading code takes longer than reading the file
+  here="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+  tpl="${here}/../references/${tpl}"; chain="${here}/../reviewer_chain.py"
   [[ -f "$tpl" ]] || die "prompt missing: $tpl"
   [[ -z "$dir" || -d "$dir" ]] || die "not a directory: $dir"
-  prompt=$(python3 -c '
+  prompt=$(mktemp)
+  python3 -c '
 import pathlib, sys
 tpl, goal, track = (pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"),
                     pathlib.Path(sys.argv[2]).read_text(encoding="utf-8"),
                     sys.argv[3])
 sys.stdout.write(tpl.replace("{{TRACK}}", track).replace("{{GOAL}}", goal))
-' "$tpl" "$(goal "$t")" "$t")
+' "$tpl" "$(goal "$t")" "$t" > "$prompt"
 
-  out=""; who="none"
-  if command -v codex >/dev/null 2>&1; then
-    last=$(mktemp)
-    timeout "$secs" codex exec -s read-only --skip-git-repo-check ${dir:+-C "$dir"} \
-      -c 'model_reasoning_effort="medium"' -o "$last" "$prompt" </dev/null >/dev/null 2>&1 || true
-    out=$(cat "$last" 2>/dev/null); rm -f "$last"
-    (( $(grep -ciE "$shape" <<<"$out" || true) >= min )) && who="codex" || out=""
-  fi
-  # --allowedTools takes several values: placed after -p it swallows the prompt as a tool name.
-  if [[ -z "$out" ]] && command -v claude >/dev/null 2>&1; then
-    out=$(cd "${dir:-.}" && timeout "$fbsecs" claude ${dir:+--allowedTools Read,Grep,Glob} -p --model claude-opus-5-5 \
-      "$prompt" </dev/null 2>/dev/null) || true
-    (( $(grep -ciE "$shape" <<<"$out" || true) >= min )) && who="opus" || out=""
-  fi
+  json=$(python3 "$chain" --prompt-file "$prompt" --codex-timeout "$secs" --fallback "$fb" \
+           ${dir:+--cwd "$dir" --fallback-tools Read,Grep,Glob} "$@" </dev/null 2>/dev/null) || true
+  rm -f "$prompt"
+  who=$(jq -r '.reviewer // "none"' <<<"$json" 2>/dev/null) || who="none"
+  why=$(jq -r '[.attempts[] | "\(.reviewer): \(.reason)"] | join(", ")' <<<"$json" 2>/dev/null) || why=""
+  out=$(jq -r '.output // ""' <<<"$json" 2>/dev/null) || out=""
+  [[ "$who" != "none" ]] || out=""
 }
 
 case "${1:-}" in
@@ -338,15 +337,15 @@ review)
   # missing. Same two-model path as boss-run. A reviewer that does not answer is
   # not a pass; it says so.
   t=${2:-}; need "$t" >/dev/null
-  ask_second_model boss-goal-review.md "$t" '^[[:space:]]*VERDICT:[[:space:]]*(COMPLETE|INCOMPLETE)'
+  ask_second_model boss-goal-review.md "$t" opus "" --words COMPLETE,INCOMPLETE
   if [[ -z "$out" ]]; then
-    printf 'no reviewer answered (codex and opus both silent or absent).\n'
+    printf 'no reviewer answered (%s).\n' "${why:-codex and opus both silent or absent}"
     printf 'That is not a pass — read the objective yourself against references/boss-goal-review.md.\n'
     exit 4
   fi
   printf '%s\n' "$out" | grep -iE '^[[:space:]]*(VERDICT|REASON|MISSING):' || printf '%s\n' "$out"
   printf -- '--- reviewer: %s\n' "$who"
-  grep -qiE '^[[:space:]]*VERDICT:[[:space:]]*INCOMPLETE' <<<"$out" && exit 3
+  [[ "$(jq -r '.parsed.word' <<<"$json")" == "INCOMPLETE" ]] && exit 3
   exit 0 ;;
 
 premortem)
@@ -355,17 +354,17 @@ premortem)
   # approved the list unchanged at every boss start). With [dir] the model reads
   # the code there and grounds the risks in it.
   # Fewer than 8 risks is a model that did not do the sweep; more than 25 is
-  # more than one objective can cover, so the list is cut there.
+  # more than one objective can cover, so the list is cut there. The fallback
+  # is Fable, the strongest model, for the widest sweep (the owner, 2026-10-25).
   t=${2:-}; need "$t" >/dev/null
-  risk='^[[:space:]]*RISK:'
-  ask_second_model boss-goal-premortem.md "$t" "$risk" "${3:-}" 8
+  ask_second_model boss-goal-premortem.md "$t" fable "${3:-}" --lines RISK --min-lines 8 --max-lines 25
   if [[ -z "$out" ]]; then
-    printf 'no model gave at least 8 risks (codex and opus silent, absent or thin).\n'
+    printf 'no model gave at least 8 risks (%s).\n' "${why:-codex and fable silent, absent or thin}"
     printf 'Write the risks yourself against references/boss-goal-premortem.md; never ask the owner for them.\n'
     exit 4
   fi
-  printf '%s\n' "$out" | grep -iE "$risk" | head -25 \
-    | sed -E 's/^[[:space:]]*[Rr][Ii][Ss][Kk]:[[:space:]]*//' | awk '{ printf "R%d. %s\n", NR, $0 }'
+  n=0
+  while IFS= read -r line; do n=$((n + 1)); printf 'R%d. %s\n' "$n" "$line"; done < <(jq -r '.parsed.lines[]' <<<"$json")
   printf -- '--- from: %s\n' "$who"
   exit 0 ;;
 

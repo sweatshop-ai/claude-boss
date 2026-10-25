@@ -568,6 +568,40 @@ class Unrunnable(Base):
         self.assertEqual(result.reviewer, "opus")
 
 
+def risks(n, label="RISK"):
+    return "\n".join("%s: risk number %d" % (label, i) for i in range(1, n + 1))
+
+
+class LineShapes(Base):
+    """The second acceptance rule: a usable answer is N or more lines under one label,
+    as `boss-goal premortem` wants eight `RISK:` lines, not a verdict."""
+
+    def test_enough_lines_are_the_answer_and_come_back_without_their_label(self):
+        self.sb.stub("codex", answer="Here is what could go wrong.\n  risk: first\n" + risks(8))
+        result = rc.run_chain("p", lines=rc.Shape("RISK", min=8))
+        self.assertEqual(result.reviewer, "codex")
+        self.assertEqual(result.parsed, rc.Lines(("first",) + tuple("risk number %d" % i for i in range(1, 9))))
+        (attempt,) = result.attempts
+        self.assertEqual(attempt.reason, "answered")
+
+    def test_too_few_lines_is_noverdict_and_the_fallback_runs(self):
+        self.sb.stub("codex", answer=risks(7))
+        self.sb.stub("claude", answer=risks(9))
+        result = rc.run_chain("p", lines=rc.Shape("RISK", min=8), fallback=rc.OPUS)
+        self.assertEqual([(a.reviewer, a.reason) for a in result.attempts],
+                         [("codex", "noverdict"), ("opus", "answered")])
+        self.assertEqual(len(result.parsed.lines), 9)
+
+    def test_lines_past_max_are_cut_and_a_verdict_vocabulary_cannot_be_given_as_well(self):
+        self.sb.stub("codex", answer=risks(30))
+        result = rc.run_chain("p", lines=rc.Shape("RISK", min=8, max=25))
+        self.assertEqual(len(result.parsed.lines), 25)
+        self.assertEqual(result.parsed.lines[-1], "risk number 25")
+        for bad in ({"words": rc.GO_NOGO, "lines": rc.Shape("RISK")}, {}):
+            with self.assertRaises(ValueError):
+                rc.run_chain("p", **bad)
+
+
 class Cli(Base):
     """`python3 reviewer_chain.py ...`, as boss-run calls it."""
 
@@ -709,6 +743,69 @@ class Cli(Base):
         r = self.cli("--words", "GO,NO-GO", "--no-fallback")
         self.assertEqual(r.returncode, 1)
         self.assertNotCalled("claude")
+
+    def test_lines_flags_give_the_shape_rule_and_the_json_carries_the_lines(self):
+        self.sb.stub("codex", answer=risks(30))
+        r = self.cli("--lines", "RISK", "--min-lines", "8", "--max-lines", "25")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        data = json.loads(r.stdout)
+        self.assertEqual(len(data["parsed"]["lines"]), 25)
+        self.assertEqual(data["parsed"]["lines"][0], "risk number 1")
+        for name, args in [("words and lines", ["--words", "GO,NO-GO", "--lines", "RISK"]),
+                           ("neither", []),
+                           ("min without lines", ["--words", "GO,NO-GO", "--min-lines", "3"]),
+                           ("match with lines", ["--lines", "RISK", "--match", "token"]),
+                           ("min of zero", ["--lines", "RISK", "--min-lines", "0"])]:
+            with self.subTest(name):
+                r = self.cli(*args)
+                self.assertEqual(r.returncode, 2, r.stderr)
+                self.assertEqual(r.stdout, "")
+
+    def test_a_fallback_preset_names_the_model_so_no_caller_carries_the_id(self):
+        self.sb.stub("claude", answer=approve("by fable"))
+        r = self.cli("--words", "APPROVE,REJECT", "--fallback", "fable")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        data = json.loads(r.stdout)
+        self.assertEqual((data["reviewer"], data["attempts"][1]["model"]), ("fable", "claude-fable-5-1"))
+        self.assertEqual(self.sb.calls_of("claude")[0].argv[:3], ["-p", "--model", "claude-fable-5-1"])
+        self.sb.stub("claude", answer=approve())
+        r = self.cli("--words", "APPROVE,REJECT", "--fallback", "opus", "--fallback-tools", "Read")
+        self.assertEqual(json.loads(r.stdout)["attempts"][1]["model"], OPUS_ID)
+        self.assertEqual(self.sb.calls_of("claude")[1].argv[:2], ["--allowedTools", "Read"])
+        for name, args in [("unknown preset", ["--fallback", "haiku"]),
+                           ("preset and a name", ["--fallback", "opus", "--fallback-name", "x"]),
+                           ("preset and a model", ["--fallback", "opus", "--fallback-model", "m"]),
+                           ("preset and no-fallback", ["--fallback", "opus", "--no-fallback"])]:
+            with self.subTest(name):
+                r = self.cli("--words", "GO,NO-GO", *args)
+                self.assertEqual(r.returncode, 2, r.stderr)
+
+    def test_cwd_sends_codex_to_the_directory_and_runs_the_fallback_inside_it(self):
+        repo = self.sb.work / "repo"
+        repo.mkdir()
+        self.sb.stub("codex", answer=RAMBLE)
+        # A stub that answers with the directory it runs in: the fallback must read the code there.
+        mark = self.sb.side / "claude.pwd"
+        stub = self.sb.stubs / "claude"
+        stub.write_text('#!/bin/bash\npwd > "%s"\nprintf "VERDICT: APPROVE\\nREASON: ok\\n"\n' % mark)
+        stub.chmod(0o755)
+        r = self.cli("--words", "APPROVE,REJECT", "--cwd", str(repo), "--fallback", "opus",
+                     "--fallback-tools", "Read,Grep,Glob")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        codex = self.sb.calls_of("codex")[0].argv
+        self.assertEqual(codex[:6], CODEX_FIXED[:4] + ["-C", str(repo)])
+        self.assertEqual(Path(mark.read_text().strip()).resolve(), repo.resolve())
+        r = self.cli("--words", "APPROVE,REJECT", "--cwd", str(self.sb.work / "nowhere"))
+        self.assertEqual((r.returncode, r.stdout), (2, ""))
+
+    def test_the_fallback_gets_twice_codexs_time_unless_told_otherwise(self):
+        self.sb.stub("claude", hang=True)
+        started = time.monotonic()
+        r = self.cli("--words", "GO,NO-GO", "--codex-timeout", "1", "--fallback", "opus")
+        self.assertLess(time.monotonic() - started, 20)
+        self.assertEqual([(a["reviewer"], a["reason"]) for a in json.loads(r.stdout)["attempts"]],
+                         [("codex", "absent"), ("opus", "timeout")])
+        self.assertIsNone(rc.Fallback("x", "m").timeout)
 
     def test_strict_reaches_the_chain(self):
         self.sb.stub("codex", answer="VERDICT: GO\nVERDICT: NO-GO")
