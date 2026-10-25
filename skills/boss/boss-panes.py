@@ -35,7 +35,8 @@ Panes with no Claude session are omitted from it.
                               line under a shared pane saying who else is there
     stamp <pane> <boss-pane>  mark the pane as owned by that boss
 
-Nothing here writes; --set-name and stamp are the exceptions. --set-name calls cc-agent-names' `agent-name set` when that is on PATH,
+Nothing here writes; --set-name and stamp are the exceptions. --set-name
+calls cc-agent-names' `agent-name set` when that is on PATH,
 and writes the peer file atomically when it is not.
 """
 import json
@@ -53,7 +54,6 @@ import registry  # noqa: E402
 import transcript  # noqa: E402
 
 CFG = registry.config_dir()
-
 
 
 def transcript_for(rec):
@@ -93,20 +93,12 @@ def flags_of(seat, ctx, cost):
     return pol + seat.flags()
 
 
-# Every field `get` knows, and how to read it off a seat. Usage fields read the
-# transcript, so they are computed only when asked for.
+# Every field `get` knows, and how to read it off a seat.
 FIELDS = {
     "name": lambda s: (s.session or {}).get("name"),
     "status": lambda s: (s.session or {}).get("status"),
     "session": lambda s: (s.session or {}).get("sessionId"),
     "owner": lambda s: s.pane.owner,
-    "coord": lambda s: s.pane.coord,
-    "command": lambda s: s.pane.command,
-    "path": lambda s: s.pane.path,
-    "mirror": lambda s: s.pane.mirror,
-    "flags": lambda s: " ".join(flags_of(s, *usage(s.session)[:2])) if s.session else "",
-    "ctx": lambda s: "%.0f" % (usage(s.session)[0] / 1000) if s.session else "",
-    "explain": lambda s: s.explain(),
 }
 
 
@@ -151,8 +143,9 @@ def cmd_list(boss, mine_only):
         print("\t".join([p.id, p.coord, name, state, ctx_s + "k",
                          cost_s + "k" + "".join(" " + f for f in flags), tag,
                          p.path + (" <- you" if tag == "self" else "")]))
-        if s.explain():
-            print("  " + s.explain())
+        why = s.explain()
+        if why:
+            print("  " + why)
     return 0
 
 
@@ -164,8 +157,10 @@ def main():
         boss = args[args.index("--boss") + 1] if "--boss" in args[:-1] else ""
         return cmd_list(boss, "--mine" in args)
     if args and args[0] == "stamp":
-        TMUX.stamp(args[1], args[2])
-        return 0
+        if len(args) != 3:
+            print("usage: boss-panes.py stamp <pane> <boss-pane>", file=sys.stderr)
+            return 2
+        return 0 if TMUX.stamp(args[1], args[2]) else 1
     if args and args[0] == "--set-name":
         # boss-lifecycle spawn/claim/restart/move name a worker through here.
         # With cc-agent-names installed, `agent-name set` is the one way in: it

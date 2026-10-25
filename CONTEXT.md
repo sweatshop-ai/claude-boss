@@ -45,6 +45,9 @@ Boss: `CTX-EVAL`, `CTX-RESTART`. Either: `heavy`, `RECYCLE` (cost per turn).
 **Stamp**: the `@boss_pane` option on a tmux pane, naming the pane of the boss
 that owns it. Only the stamp makes a pane a boss's; `fleet.py` reads and writes it.
 
+**Seat**: one tmux pane and the live session running in it, if any (`fleet.py`).
+A pane with no session is an empty seat; a crashed worker leaves one.
+
 **Shared pane**: a pane that more than one live session names in its registry
 record. The oldest is the pane's own session; the flag `shared-pane` and the line
 under the row in `list` name the others.

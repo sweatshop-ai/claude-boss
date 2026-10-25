@@ -76,8 +76,9 @@ pane_field() { python3 "$PANES_PY" get "$1" "$2" 2>/dev/null || true; }
 # The owner fails closed: an empty answer would read as "unowned", which the
 # cross-boss guard in resolve_pane lets through.
 pane_owner() {
-  local o; o=$(python3 "$PANES_PY" get "$1" owner 2>/dev/null) || true
-  [[ -n "$o" ]] || die "cannot read the owner of $1 (boss-panes.py get failed); not touching it"
+  local o
+  o=$(python3 "$PANES_PY" get "$1" owner 2>/dev/null) && [[ -n "$o" ]] ||
+    die "cannot read the owner of $1 (boss-panes.py get failed); not touching it"
   [[ "$o" == "-" ]] || printf '%s' "$o"
 }
 
@@ -86,7 +87,7 @@ pane_owner() {
 # second name in @worker_name and the skill carried a page of prose about
 # reconciling the two when they disagreed. They cannot disagree now: @worker_name
 # is a mirror the watchdog reads, and the plugin is the store.
-agent_name() { pane_field "$1" name; }
+agent_name() { local n; n=$(pane_field "$1" name); [[ "$n" == "-" ]] || printf '%s' "$n"; }
 agent_status() { pane_field "$1" status; }
 set_agent_name() { python3 "$PANES_PY" --set-name "$1" "$2" 2>/dev/null || true; }
 

@@ -280,7 +280,8 @@ class RequireIdle(unittest.TestCase):
 STUB_TMUX_FLEET = r'''#!/usr/bin/env bash
 printf '%s\n' "$*" >> "$STUB_DIR/calls"
 case "$1" in
-  list-panes) cat "$STUB_DIR/panes" ;;
+  list-panes) [[ -f "$STUB_DIR/tmux-fails" ]] && exit 1; cat "$STUB_DIR/panes" ;;
+  set-option) [[ -f "$STUB_DIR/tmux-fails" ]] && exit 1 ;;
   display-message) echo "$4" ;;
 esac
 exit 0
@@ -358,6 +359,25 @@ class ListAndFields(unittest.TestCase):
     def test_list_mine_keeps_only_the_boss_and_its_panes(self):
         r = self.call("list", "--mine")
         self.assertEqual([ln.split("\t")[0] for ln in r.stdout.splitlines()[1:]], ["%1", "%5"])
+
+    def test_an_owner_tmux_cannot_list_refuses_instead_of_reading_as_unowned(self):
+        self.session("s-wanda", "%5", "Wanda", 1000)
+        (self.tmp / "tmux-fails").touch()
+        r = self.call("retire", "%5")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("cannot read the owner of %5", r.stderr)
+        self.assertNotIn("send-keys", (self.tmp / "calls").read_text())
+
+    def test_a_stamp_that_fails_fails_the_claim(self):
+        self.session("s-x", "%6", "Xavi", 1000)
+        (self.tmp / "panes").write_text("%6\tmail:1.0\t-\tclaude\t/w/mail\t-\n")
+        r = self.call("stamp", "%6", "%1", script="boss-panes.py")
+        self.assertEqual(r.returncode, 0)
+        (self.tmp / "tmux-fails").touch()
+        r = self.call("stamp", "%6", "%1", script="boss-panes.py")
+        self.assertEqual(r.returncode, 1)
+        r = self.call("stamp", "%6", script="boss-panes.py")
+        self.assertEqual((r.returncode, "Traceback" in r.stderr), (2, False))
 
     def test_claim_stamps_through_the_fleet(self):
         self.session("s-x", "%6", "Xavi", 1000)

@@ -275,7 +275,9 @@ rule they mean a task that ran long, the same remedy as `CTX-SPLIT`.
 `shared-pane` means more than one live session names that pane: a claude started
 from inside it (a tool call, a nested shell) inherits it. The row shows the
 oldest, which is the pane's own session, and the line under it names the others.
-Send work and keystrokes to the one in the row.
+SendMessage reaches each by name. Keystrokes (`retire`, `restart`) reach whatever
+holds the pane's keyboard, which is the youngest when it is an interactive claude
+in a nested shell: look at the pane before you retire or restart it.
 
 Two limits:
 - **A finished worker with its handoff on disk is yours to restart** (the owner,
