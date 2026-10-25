@@ -71,8 +71,12 @@ FORMAT = "\t".join(["#{pane_id}", "#{session_name}:#{window_index}.#{pane_index}
 STAMP = "@boss_pane"
 
 
+class TmuxUnavailable(Exception):
+    """tmux did not answer: no server, a timeout, or no binary. Not an empty fleet."""
+
+
 class Tmux:
-    """The real tmux server. Every failure reads as "no panes" / does nothing."""
+    """The real tmux server."""
 
     def __init__(self, timeout=3):
         self.timeout = timeout
@@ -85,8 +89,11 @@ class Tmux:
         return r.stdout if r.returncode == 0 else None
 
     def panes(self):
+        raw = self._run(["list-panes", "-a", "-F", FORMAT])
+        if raw is None:
+            raise TmuxUnavailable("tmux list-panes failed")
         out = []
-        for line in (self._run(["list-panes", "-a", "-F", FORMAT]) or "").splitlines():
+        for line in raw.splitlines():
             f = line.split("\t")
             if len(f) != 6 or not f[0].startswith("%"):
                 continue

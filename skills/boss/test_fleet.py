@@ -79,6 +79,7 @@ class WhoOwnsAPane(unittest.TestCase):
 # expand #{...}, so it answers the one format fleet.Tmux sends.
 STUB_TMUX = r'''#!/usr/bin/env bash
 printf '%s\n' "$*" >> "$STUB_DIR/calls"
+[[ -f "$STUB_DIR/fails" ]] && exit 1
 [[ "$1" == list-panes ]] && cat "$STUB_DIR/panes"
 exit 0
 '''
@@ -116,9 +117,14 @@ class TheTmuxAdapter(unittest.TestCase):
         self.assertIn("#{?@boss_pane,#{@boss_pane},-}", fmt)
         self.assertIn("#{?@worker_name,#{@worker_name},-}", fmt)
 
-    def test_no_tmux_server_is_no_panes(self):
+    def test_a_server_with_no_panes_is_an_empty_fleet(self):
         (self.dir / "panes").write_text("")
         self.assertEqual(fleet.Tmux().panes(), [])
+
+    def test_a_tmux_that_fails_is_not_an_empty_fleet(self):
+        (self.dir / "fails").touch()
+        with self.assertRaises(fleet.TmuxUnavailable):
+            fleet.Tmux().panes()
 
     def test_a_stamp_sets_the_pane_option(self):
         fleet.Tmux().stamp("%5", "%1")

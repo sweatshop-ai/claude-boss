@@ -368,6 +368,12 @@ class ListAndFields(unittest.TestCase):
         self.assertIn("cannot read the owner of %5", r.stderr)
         self.assertNotIn("send-keys", (self.tmp / "calls").read_text())
 
+    def test_list_says_so_when_tmux_does_not_answer(self):
+        (self.tmp / "tmux-fails").touch()
+        r = self.call("list")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("tmux", r.stderr)
+
     def test_a_stamp_that_fails_fails_the_claim(self):
         self.session("s-x", "%6", "Xavi", 1000)
         (self.tmp / "panes").write_text("%6\tmail:1.0\t-\tclaude\t/w/mail\t-\n")

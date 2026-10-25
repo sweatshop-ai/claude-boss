@@ -83,7 +83,10 @@ def team(sid):
     and what `boss-lifecycle.sh list` prints. A raw `%4` is banned by safety
     rule 15, so the pulse must not hand one over.
     """
-    seats = fleet.view(fleet.Tmux(timeout=3), registry.live(CFG))
+    try:
+        seats = fleet.view(fleet.Tmux(timeout=3), registry.live(CFG))
+    except fleet.TmuxUnavailable:
+        return [], 0
     me = fleet.seat_of(seats, sid=sid)
     if not me:
         return [], 0
