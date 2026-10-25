@@ -180,8 +180,10 @@ BOX_RE = re.compile(r"^- \[([ x])\] (.*)$")
 
 def criteria(text: str) -> list:
     """(ticked, text) for each `- [ ]` / `- [x]` line under `## Done when`."""
+    lines = text.splitlines()
+    span = _section_span(lines, "Done when")
     return [(m.group(1) == "x", m.group(2))
-            for m in map(BOX_RE.match, section(text, "Done when").splitlines()) if m]
+            for m in map(BOX_RE.match, lines[slice(*span)] if span else []) if m]
 
 
 def unmet(text: str) -> list:
@@ -229,7 +231,7 @@ def main(argv) -> int:
     stdin_cmds = ("set-body", "set-next", "tick")
     cmd, args = (argv[0], argv[1:]) if argv else ("", [])
     if not ((cmd in reads or cmd in stdin_cmds) and len(args) == 1
-            or cmd == "set-status" and len(args) == 2 and "\n" not in args[1]):
+            or cmd == "set-status" and len(args) == 2 and not set(args[1]) & {"\n", "\r"}):
         print(USAGE, file=sys.stderr)
         return 2
     path = Path(args[0])
