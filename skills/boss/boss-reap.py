@@ -2,9 +2,9 @@
 """SessionEnd hook and sweeper for the boss's per-session state.
 
 Two things accumulate. `pm/.boss-sessions/<session_id>` marks a session as a
-boss and is what `boss-guard.py`, `boss-pulse.py` and `boss-jev.py` all check
+boss and is what `boss-guard.py` and `boss-pulse.py` check
 first; the installation audit of 2026-09-20 found 18 of 20 stale. And
-`pm/.pulse/` holds the rate-limit, jev and guard state keyed by session id —
+`pm/.pulse/` holds the rate-limit and guard state keyed by session id —
 measured the same evening, 9 of 17 files orphaned, the oldest 11 days.
 
 Nothing removed them because nothing was watching a session end. This is that
@@ -15,10 +15,8 @@ THIS IS THE ONE BOSS SCRIPT THAT DELETES THINGS, so it is deliberately timid:
   * It only ever looks in `pm/.boss-sessions/` and `pm/.pulse/`, never deeper,
     and never follows a symlink out of them.
   * A file is a candidate only if its NAME CONTAINS A SESSION UUID. That is
-    what protects `jev.mode`, `jev.log` and `jev.mode.bak-*`, which sit in
-    `pm/.pulse/` beside the per-session files. Reaping `jev.mode` would put jev
-    back to `armed` without anyone asking — a silent behaviour change, the
-    worst kind.
+    what protects files such as `jev.log` and `jev.mode`, left in `pm/.pulse/`
+    by the retired jev hook: they are the owner's to delete, not ours.
   * `--sweep` spares anything touched in the last GRACE_S. A session that has
     just started has no registry file yet, so "no session" and "not yet" look
     identical for the first minutes.

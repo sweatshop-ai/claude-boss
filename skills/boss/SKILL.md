@@ -257,10 +257,9 @@ over through git and a progress file. So (the owner, 2026-10-01):
 has written a handoff and pushed (Phase B asks for both in every dispatch); you
 `restart` it before its next dispatch. It keeps its name and its pane; the next
 task starts at ~30k instead of where the last one ended. Re-reading the repo is
-cheaper than carrying the last task's dead ends. When boss-jev proposes the
-restart (below, Phase D), it has already checked the handoff footer, git and the
-worker's child processes: run the command it gives you, which is
-`restart --require-idle` with the session and the last record pinned.
+cheaper than carrying the last task's dead ends. Restart with
+`restart --require-idle`: it refuses a worker that is not idle, so a turn that
+started after the report is never cut off.
 
 **A task bigger than one smart zone gets split.** Keep `CTX` in view on every
 `list` — `ListAgents` does not carry it. At **150k** a worker shows `CTX-SPLIT`:
@@ -749,13 +748,11 @@ Parse `$ARGUMENTS`: empty or `status` → **A** · `dispatch <task> [worker]` �
    target, project, rationale.
 4. **Send a self-contained prompt** — task and issue number, how to read it, the
    project path, branch instructions (P8), and that it reports back to you by name
-   when done or blocked. **Name the task as `Task #<N>` in the first line**:
-   boss-jev reads that number to tie a handoff to the dispatch. Every dispatch
-   ends with: *"When the task is done, or when I ask you to stop at a boundary,
-   write `handoff-<name>-<date>.md` in your cwd and end it with the line printed by
-   `python3 ${CLAUDE_PLUGIN_ROOT}/skills/boss/boss-jev.py footer --task <N> --repos <every repo
-   you touched>`, after committing and pushing, and after stopping every background
-   task you started (`/tasks`, or TaskStop). You will be restarted fresh after it."* A dispatch that continues a split task names the handoff to read
+   when done or blocked. **Name the task as `Task #<N>` in the first line.**
+   Every dispatch ends with: *"When the task is done, or when I ask you to stop at
+   a boundary, write `handoff-<name>-<date>.md` in your cwd, after committing and
+   pushing, and after stopping every background task you started (`/tasks`, or
+   TaskStop). You will be restarted fresh after it."* A dispatch that continues a split task names the handoff to read
    first. For a judgment task, add: *"Use a
    cheap subagent for the mechanical parts; keep for yourself only the steps where
    a plausible-looking wrong answer would pass."* Add too: *"If this ticket splits
@@ -829,19 +826,6 @@ Three sources. Turn all three on.
 3. **The escalation timer.** P12's ladder, `references/escalation.md`. A blocker
    waiting on the owner emits nothing at all; the detached `sleep` is what brings
    you back to it.
-
-4. **boss-jev — `boss-jev.py`, a `UserPromptSubmit` hook** (once the owner has
-   installed it; `references/boss-jev.md`). It sees each worker message and idle
-   notice before your turn starts. An idle notice that repeats a report you
-   already had is **absorbed**: you are not woken, the event goes to
-   `pm/<track>.jev-archive.md`. Everything else wakes you as before, with one
-   `[boss-jev]` line: Jev's three numbers and what code made of them. When that
-   line says **ESCALATION T+0**, the hook has already written the `[ladder`
-   line in Open blockers, set the pane emoji and posted `boss-alert 0`: say it,
-   put the one action into `ask="…"`, arm your timer. Until `ask=` is filled the
-   report comes back on your next wakes. When it says **RESTART
-   proposed**, run the command it gives. It runs in `advisory` mode (logs only)
-   until the mode file says `armed`.
 
 The remaining blind spot — a worker or boss frozen on an API error emits no event
 of any kind — is covered outside Claude by `boss-workers-watch` (systemd user

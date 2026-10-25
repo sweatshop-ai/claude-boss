@@ -189,12 +189,12 @@ class Tools(unittest.TestCase):
         self.assertNotEqual(out.returncode, 0)
 
     def test_append_waits_for_the_tracker_lock(self):
-        # boss-jev and the ladder routine rewrite the tracker by temp file and
+        # The ladder routine rewrites the tracker by temp file and
         # rename under pm/.<track>.md.lock. An append that ignores the lock can
         # land in the file the rename is about to replace.
         self.run_tool("boss-tracker", "init", "demo", "Boss")
         tracker = self.cfg / "pm" / "demo.md"
-        # The lock boss-jev and the ladder take, from the module they share.
+        # The lock the ladder takes, from the module they share.
         with open(tracker_mod.lock_path(tracker), "a") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
             proc = subprocess.Popen([str(BIN / "boss-tracker"), "append", "demo"],

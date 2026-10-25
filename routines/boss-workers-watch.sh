@@ -188,7 +188,7 @@ fi
 # does this for an orderly exit; a crash leaves no SessionEnd, which is why the
 # sweep exists here as well. boss-reap.py only ever removes a file whose NAME
 # carries a session UUID, and spares anything touched in the last 30 minutes,
-# so jev.mode and a session that has only just started are both safe.
+# so a file with no session id and a session that has only just started are both safe.
 BOSS_REAP="${BOSS_REAP:-$HERE/../skills/boss/boss-reap.py}"
 if [ -x "$BOSS_REAP" ]; then
     reaped=$(python3 "$BOSS_REAP" --sweep ${DRY_RUN:+--dry-run} 2>&1) || true
