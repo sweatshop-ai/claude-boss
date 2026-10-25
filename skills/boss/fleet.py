@@ -48,11 +48,13 @@ class Seat:
             return ""
         also = "; ".join(_who(r) for r in self.others)
         return ("shared-pane: %d live sessions name pane %s. This row is %s, the oldest, "
-                "which is the pane's own session. Also there: %s. A claude started from "
-                "inside a pane inherits it, so the younger ones run inside %s; send work "
-                "and keystrokes to %s only."
+                "which is the pane's own session. Also there: %s, started from inside it. "
+                "A headless `claude -p` from a tool call leaves the keyboard to %s; an "
+                "interactive claude in a nested shell takes it, and then keystrokes "
+                "(retire, restart) reach the youngest. Look at the pane before sending "
+                "keys; SendMessage reaches each by name."
                 % (1 + len(self.others), self.pane.id, _who(self.session), also,
-                   _name(self.session), _name(self.session)))
+                   _name(self.session)))
 
 
 def _opt(name):
@@ -92,7 +94,8 @@ class Tmux:
         return out
 
     def stamp(self, pane, boss):
-        self._run(["set-option", "-p", "-t", pane, STAMP, boss])
+        """True when tmux took the stamp."""
+        return self._run(["set-option", "-p", "-t", pane, STAMP, boss]) is not None
 
 
 class MemoryTmux:
@@ -106,6 +109,8 @@ class MemoryTmux:
         for p in self._panes:
             if p.id == pane:
                 p.owner = boss
+                return True
+        return False
 
 
 def pane_of(rec):
