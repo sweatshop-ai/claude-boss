@@ -11,14 +11,16 @@
   `/proc` walk on 15 of 15 panes, without the walk).
 - **`shared-pane`**: when two live sessions name one pane (a claude started
   inside another inherits its pane), the oldest wins, the row is flagged, and
-  `list` prints a line under it naming the others and which one to talk to.
+  `list` prints a line under it naming the others, and which of them a
+  keystroke reaches in each case.
 - `boss-lifecycle.sh` asks `boss-panes.py get <pane> <field>...` for fields by
   name instead of cutting TSV columns by position, and `list` and the stamp go
   through `boss-panes.py list` / `stamp`. Output of `list` is unchanged (27 of
   27 rows identical on the live fleet).
-- The cross-boss guard fails closed: when the owner of a pane cannot be read,
-  `retire`/`restart`/`move`/`claim` refuse instead of treating the pane as
-  unowned.
+- The cross-boss guard fails closed: when the owner of a pane cannot be read
+  (tmux not answering, boss-panes failing), `retire`/`restart`/`move`/`claim`
+  refuse instead of treating the pane as unowned. A stamp tmux refuses fails
+  the claim instead of passing silently.
 - Tests: `test_fleet.py` (rules and the tmux adapter); `test_boss_lifecycle.py`
   gained the bash side (`get`, `list`, `claim`).
 
