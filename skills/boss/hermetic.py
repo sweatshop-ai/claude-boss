@@ -35,6 +35,11 @@ FORBIDDEN = ("codex", "claude", "gh", "tmux")
 Call = namedtuple("Call", "argv stdin")
 
 
+def risks(n, label="RISK"):
+    """A premortem-shaped answer: `n` lines under one label."""
+    return "\n".join("%s: risk number %d" % (label, i) for i in range(1, n + 1))
+
+
 def alive(pid):
     """True while `pid` is a live process (a zombie is not)."""
     try:
