@@ -9,7 +9,6 @@
 
 Who reads and writes them:
 
-  boss-jev.py          writes the marker line under the lock, reads it back
   boss-pulse.py        reads the objective's status and the Open blockers
   boss_ladder_core.py  reads both, rewrites last= and next= under the lock
   bin/boss-tracker     writes the section template (bash), appends under the lock
@@ -64,8 +63,8 @@ from pathlib import Path
 
 # ---------------------------------------------------------------- the lock
 
-# Agreed with Berit 2026-09-18: boss-jev, the ladder and boss-tracker append
-# all take fcntl.flock on this sibling, because the first two write by temp
+# Agreed with Berit 2026-09-18: the ladder and boss-tracker append
+# both take fcntl.flock on this sibling, because the ladder writes by temp
 # file + rename and a lock on the tracker's own inode does not survive the
 # replace. bin/boss-tracker spells the same path in bash.
 def lock_path(path: Path) -> Path:

@@ -43,7 +43,7 @@ Worker: `CTX-SPLIT` (cut the task at its next boundary), `CTX-OVER` (overdue).
 Boss: `CTX-EVAL`, `CTX-RESTART`. Either: `heavy`, `RECYCLE` (cost per turn).
 
 **Handoff**: the file a worker writes before a restart — branch, what was tried
-and rejected, live constraints, next step — ending with the boss-jev footer.
+and rejected, live constraints, next step.
 
 **Rung**: a point on the escalation ladder, in minutes since a blocker's T+0,
 at which the blocker is raised to the owner again.

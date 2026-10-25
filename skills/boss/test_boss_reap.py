@@ -4,8 +4,8 @@
 Run: python3 skills/boss/test_boss_reap.py
 
 This is the one boss script that deletes things, so most of these tests are
-about what it must NOT touch. `pm/.pulse/` holds jev.mode beside the per-session
-files: reaping that would silently re-arm jev.
+about what it must NOT touch. `pm/.pulse/` holds files with no session id beside the
+per-session ones (the retired jev hook's log and mode): those are the owner's.
 """
 import json
 import os
@@ -103,8 +103,8 @@ class Sweep(ReapCase):
         self.assertFalse((self.markers / DEAD).exists())
         self.assertTrue((self.markers / LIVE).exists())
 
-    def test_sweep_never_touches_jev_mode(self):
-        """Deleting this silently re-arms jev. It has no session id in its name."""
+    def test_sweep_never_touches_a_file_without_a_session_id(self):
+        """The retired jev hook's files are the owner's to delete."""
         self.run_reap("--sweep")
         for keep in ("jev.mode", "jev.log", "jev.mode.bak-2026-09-20"):
             self.assertIn(keep, self.names(self.pulse))

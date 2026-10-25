@@ -16,7 +16,6 @@ one came from a measured failure rather than a guess.
 | `boss-guard.py` | PreToolUse | The boss implementing instead of delegating. Says so once, then keeps a running count — measured across 21 sessions, the old version repeated one sentence 2,589 times, about 215,000 tokens. |
 | `boss-pulse.py` | Stop | A boss going quiet with idle workers, an overdue escalation rung, or an open blocker it never put to anyone. |
 | `boss-compact.py` | PreCompact, SessionStart | Hands the tracker back after an autocompact, so a 450k compaction costs the boss nothing. |
-| `boss-jev.py` | UserPromptSubmit | Idle notices that carry no news, swallowed before they wake the boss. |
 | `boss-reap.py` | SessionEnd | Per-session state outliving its session. |
 
 They all early-exit unless the session registered itself as a boss, so an
@@ -52,7 +51,6 @@ Everything else is optional and degrades quietly:
 | | For | Move it with |
 |---|---|---|
 | a Slack credentials file | escalation alerts to a channel | `BOSS_SLACK_ENV` (default `~/.config/tiroir/slack.env`) |
-| a TypeSafe API key file | the TypeSafe half of the jev filter | `BOSS_TYPESAFE_ENV` (default `~/.config/tiroir/typesafe.env`) |
 | a session dashboard that watches `status: waiting` | the chime that rings when the boss is waiting on you | — |
 | [cc-agent-names](https://github.com/sweatshop-ai/cc-agent-names) | human names in the roster instead of machine strings | — |
 
@@ -63,15 +61,14 @@ worker (`spawn <dir> <name>`, `claim <pane> <name>`) goes through its
 `agent-name set` and survives the next prompt and a resume; without it the
 name is written straight into the session's peer file.
 
-Two more files are yours and deliberately not in this repo, because putting them
-here would publish what they exist to protect:
+One more file is yours and deliberately not in this repo, because putting it
+here would publish what it exists to protect:
 
 | File | What it holds |
 |---|---|
-| `$CLAUDE_CONFIG_DIR/boss-redact.json` | `hosts`, `persons` and `owner` — the names `tools/boss-event-jev.py` replaces with `<HOST>`, `<PERSON>` and `OWNER` before anything leaves the machine. `owner` is separate because the model is asked whether a step needs your own hand, so it has to tell you from everyone else. See `tools/boss-redact.example.json`. Absent, the pattern rules still run and no name is invented. |
 | `$CLAUDE_CONFIG_DIR/boss-hard-rules.tsv` | `name<TAB>regex` lines naming your own off-limits hosts, paths and services. `boss-run` checks them exactly like its built-in rules. Absent, only the generic rules apply. |
 
-Point `BOSS_REDACT_LIST` and `BOSS_HARD_RULES` elsewhere if you prefer.
+Point `BOSS_HARD_RULES` elsewhere if you prefer.
 
 ## Handing a plan to a boss
 
@@ -141,8 +138,7 @@ for t in skills/boss/test_*.py skills/hand-to-boss/test_*.py; do python3 "$t"; d
 ```
 
 They run each hook the way the harness does — as a process, JSON on stdin,
-against a throwaway `CLAUDE_CONFIG_DIR`. Nothing touches your real state, calls
-TypeSafe, posts to a channel or moves a tmux pane. The tests of `boss-run` and the
+against a throwaway `CLAUDE_CONFIG_DIR`. Nothing touches your real state, posts to a channel or moves a tmux pane. The tests of `boss-run` and the
 reviewer chain run them on a sealed `PATH` (`skills/boss/hermetic.py`) where
 `codex`, `claude`, `gh` and `tmux` are stubs that log their calls, so no real
 reviewer is asked. `boss-run --selftest` is not part of this: it calls real

@@ -40,7 +40,7 @@ SHELL_CMDS='^(bash|zsh|fish|sh|dash)$'
 # subcommand sees the args. MODEL selects the model the worker runs on:
 # see "Choosing a worker's model" in SKILL.md — the criterion is NOT task size.
 # --require-idle, --expect-session <id> and --expect-last <uuid> are the
-# boss-jev restart path (see retire_require_idle); --force does not relax them.
+# require-idle restart path (see retire_require_idle); --force does not relax them.
 FORCE=""
 MODEL=""
 REQUIRE_IDLE=""
@@ -235,8 +235,8 @@ stop_leftover_background() {
 }
 
 # --require-idle: stop the session only if it is idle at the last possible
-# moment, and never with Escape. Measured on Claude Code 2.1.276 (2026-09-18,
-# plans/2026-09-18-boss-jev-hook.md): /exit does not queue behind a busy turn.
+# moment, and never with Escape. Measured on Claude Code 2.1.276
+# (2026-09-18): /exit does not queue behind a busy turn.
 # With a tool running it opens a "Background work is running" dialog and the
 # turn goes on; one Escape closes that dialog and nothing else. With the model
 # generating and no tool yet, /exit exits at once and the turn is lost. Two

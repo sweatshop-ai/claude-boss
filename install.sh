@@ -80,6 +80,5 @@ then type /boss in the session it opens. It must run inside tmux.
 
 Optional, and the boss degrades quietly without each one:
   ~/.config/tiroir/slack.env   escalation alerts   (BOSS_SLACK_ENV to move it)
-  ~/.config/tiroir/typesafe.env  the jev experiment  (BOSS_TYPESAFE_ENV)
   a claude-team checkout       the dashboard chime that tells you it is waiting
 EOF

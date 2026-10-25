@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.13.0 — 2026-10-25
+
+- **Jev is gone** (the owner, 2026-10-25). The `UserPromptSubmit` hook
+  `boss-jev.py` was meant to keep the boss asleep for worker events that need
+  nothing. It ran in `advisory` mode with egress off, so on every boss prompt it
+  spawned a process, logged `pass: egress off` and decided nothing. Removed: the
+  hook, `tools/boss-event-jev.py`, the redact list example, `references/boss-jev.md`
+  and the handoff footer (`boss-jev.py footer --task N`), whose only reader was
+  Jev's restart gate. A dispatch still names `Task #<N>` and still asks for a
+  handoff file.
+- Kept: `boss-lifecycle.sh retire|restart --require-idle` and `boss-panes.py
+  --state`. Their tests moved from `test_boss_jev.py` to `test_boss_lifecycle.py`.
+- **Your old Jev files stay where they are.** Nothing deletes them. To clean up:
+  `rm -f ~/.claude/pm/.pulse/jev.* ~/.claude/pm/.pulse/jev-*.json ~/.claude/pm/.pulse/jev-*.lock ~/.claude/pm/*.jev-archive.md`
+  (and `boss-redact.json` / `typesafe.env` if nothing else uses them).
+  `unwire-legacy-hooks.py` still removes a hand-written `boss-jev.py` hook.
+
 ## 0.12.0 — 2026-10-25
 
 - **One reviewer chain** (architecture review, the owner, 2026-10-25). `boss-goal
