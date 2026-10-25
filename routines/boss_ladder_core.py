@@ -51,9 +51,10 @@ class Concurrent(Exception):
 _POLICY = Path(__file__).resolve().parent.parent / "skills" / "boss"
 sys.path.insert(0, str(_POLICY))
 from policy import STOP_MIN, next_rung, rung_for  # noqa: E402,F401
-# The marker, the Open blockers section, the lock and the objective's status
-# live in skills/boss/tracker.py, which boss-pulse reads too.
-from tracker import (PLACEHOLDER, MarkerError, blockers_range, goal_open,  # noqa: E402,F401
+# The marker, the Open blockers section and the lock live in skills/boss/tracker.py,
+# the objective's status in skills/boss/objective.py; boss-pulse reads both too.
+from objective import is_open  # noqa: E402
+from tracker import (PLACEHOLDER, MarkerError, blockers_range,  # noqa: E402,F401
                      lock_path, parse_ts, rewrite, scan_marker, validate)
 
 
@@ -110,7 +111,7 @@ def open_tracks(pm_dir: Path):
         except OSError as exc:
             yield track, md, f"goal unreadable: {exc}"
             continue
-        yield track, md, None if goal_open(head) else "goal not OPEN"
+        yield track, md, None if is_open(head) else "goal not OPEN"
 
 
 # ---------------------------------------------------------------- the run

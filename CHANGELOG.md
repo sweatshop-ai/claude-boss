@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.15.0 — 2026-10-25
+
+- **One owner for the objective file** (architecture review, candidate 3).
+  `pm/<track>.goal.md` had one format and three readers: `tracker.goal_status`
+  took the first `_Status:` line, `boss-goal check`/`list` took line 2 with
+  `sed`, and the pulse parsed the sections with its own regex. `boss-goal
+  status` overwrote line 2 whatever it held, so a note above the status line
+  was lost and the status left untouched. `skills/boss/objective.py` now reads
+  and writes the format, and `boss-goal` goes through its command line. All 44
+  objectives on the author's machine had the status on line 2, so nothing read
+  differently before; the gap was in hand-edited files.
+- `boss-goal status` rewrites the first status line (or inserts one under the
+  heading); `set` keeps the heading and that status line; both write through a
+  temp file.
+- `boss-goal check` counts the items of `## Next` only (a numbered or bulleted
+  line at the margin; a wrapped line belongs to its item). It counted numbered
+  lines up to the end of the file, so a numbered list in a later section was
+  queued too and a bulleted Next was empty. Same counts as before on all 44
+  live objectives.
+- `tracker.goal_status`/`goal_open` moved to `objective.status`/`is_open`; the
+  ladder and the pulse import them from there.
+- Not in this release: the GitHub frontier cache (`boss-goal check` and the
+  pulse share its file name through a comment). No objective uses a `gh:`
+  ticket source today.
+- Tests: `test_objective.py` (the rules and the command line); `test_bin.py`
+  gained the line-3 status cases for `status`, `list`, `check` and `set`.
+
 ## 0.14.0 — 2026-10-25
 
 - **One fleet view** (architecture review, candidate 2). Which pane runs which
