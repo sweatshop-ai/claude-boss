@@ -66,7 +66,7 @@ show)
 append)
   t=${2:-}; [[ -n "$t" ]] || die "usage: append <track>  (body on stdin)"
   f=$(live "$t"); [[ -f "$f" ]] || die "no such track: $t"
-  # Under the lock boss-jev and the ladder routine take: they rewrite the
+  # Under the lock the ladder routine takes: it rewrites the
   # tracker by temp file + rename, and an append outside it can be lost.
   flock "$PM/.$t.md.lock" sh -c 'cat >> "$1"' _ "$f"
   printf 'appended to %s (%s B)\n' "$f" "$(stat -c%s "$f")" ;;

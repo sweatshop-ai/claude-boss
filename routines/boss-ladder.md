@@ -8,9 +8,8 @@ Lucas on track `acme-groups`).
 
 The P12 ladder (`${CLAUDE_PLUGIN_ROOT}/skills/boss/references/escalation.md`) posts rungs at
 T+5, T+15, T+30, T+60, T+120 and every 120 after (`policy.py`). Its timer is a detached `sleep` that
-re-invokes the boss session, so **a rung only fires when the boss wakes**. Once
-the Jev hook (`~/.claude/plans/2026-09-18-boss-jev-hook.md`) absorbs no-action
-events, the boss wakes less often and can sleep straight through a rung. A
+re-invokes the boss session, so **a rung only fires when the boss wakes**. A
+boss that is not woken can sleep straight through a rung. A
 ladder nobody climbs is the same as no ladder, and the blocker it was raised for
 sits there while workers idle behind it.
 
@@ -20,10 +19,10 @@ timestamps.
 
 ## The marker
 
-Agreed with Berit 2026-09-18 (her hook writes it, this reads it). Appended to
+Agreed with Berit 2026-09-18 (the boss writes it, this reads it). Appended to
 the blocker line:
 
-    - boss-jev a1b2c3d4: Ottilie (20:0.2) blocked on OWNER: <first sentence> — T+0 2026-09-18 10:53 [ladder id=a1b2c3d4 t0=2026-09-18T10:53+02:00 last=0 next=2026-09-18T10:58+02:00 pane=20:0.2 ask="put /root/door-e2e-u2.txt on lab-0"]
+    - a1b2c3d4: Ottilie (20:0.2) blocked on OWNER: <first sentence> — T+0 2026-09-18 10:53 [ladder id=a1b2c3d4 t0=2026-09-18T10:53+02:00 last=0 next=2026-09-18T10:58+02:00 pane=20:0.2 ask="put /root/door-e2e-u2.txt on lab-0"]
 
 | field | | |
 |---|---|---|

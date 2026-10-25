@@ -3,10 +3,9 @@
 
 The failure this exists to prevent: the P12 ladder
 (${CLAUDE_PLUGIN_ROOT}/skills/boss/references/escalation.md) fires only when the boss wakes,
-because the timer is a detached `sleep` that re-invokes the session. Once the Jev
-hook absorbs no-action events the boss may sleep through a rung, and a ladder
-nobody climbs is the same as no ladder. This reads the marker that the boss (or
-the hook) leaves on an Open-blockers line and posts the rung that is due, with no
+because the timer is a detached `sleep` that re-invokes the session. A boss that
+stays asleep sleeps through a rung, and a ladder nobody climbs is the same as no
+ladder. This reads the marker that the boss leaves on an Open-blockers line and posts the rung that is due, with no
 boss turn.
 
 No LLM anywhere: the decision is arithmetic on two timestamps.
@@ -53,7 +52,7 @@ _POLICY = Path(__file__).resolve().parent.parent / "skills" / "boss"
 sys.path.insert(0, str(_POLICY))
 from policy import STOP_MIN, next_rung, rung_for  # noqa: E402,F401
 # The marker, the Open blockers section, the lock and the objective's status
-# live in skills/boss/tracker.py, which boss-jev and boss-pulse read too.
+# live in skills/boss/tracker.py, which boss-pulse reads too.
 from tracker import (PLACEHOLDER, MarkerError, blockers_range, goal_open,  # noqa: E402,F401
                      lock_path, parse_ts, rewrite, scan_marker, validate)
 
