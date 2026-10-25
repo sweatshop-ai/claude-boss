@@ -229,7 +229,7 @@ class Fallback(Base):
 
 
 class NoReviewer(Base):
-    EXPECTED = ("boss-run: no reviewer answered (codex and claude-opus-5-5 "
+    EXPECTED = ("boss-run: no reviewer answered (codex and opus "
                 "both silent or absent).\n"
                 "  Nothing was run. Retry, or hand the command to the owner.\n")
 
@@ -711,10 +711,17 @@ class FailClosed(Base):
         self.assertEqual(Path(argv[0]).resolve(), HERE / "reviewer_chain.py")
         flags = dict(zip(argv[3::2], argv[4::2]))
         self.assertEqual(argv[1], "--prompt-file")
+        # The fallback is a preset: the model id lives in reviewer_chain.py alone, and the
+        # chain gives the fallback twice Codex's time unless the owner set it.
         self.assertEqual(flags, {"--words": "APPROVE,REJECT", "--match": "prefix", "--effort": "medium",
-                                 "--codex-timeout": "17", "--fallback-name": "opus",
-                                 "--fallback-model": OPUS, "--fallback-timeout": "34"})
+                                 "--codex-timeout": "17", "--fallback": "opus"})
         self.assertEqual(call.stdin, "")
+        self.assertNotIn(OPUS, argv)
+        self.chain_says()
+        self.sb.boss_run("--why", WHY, "--dry-run", "--", CMD,
+                         extra_env={"BOSS_RUN_REVIEW_FALLBACK_TIMEOUT": "9"})
+        argv = self.sb.calls_of("python3")[1].argv
+        self.assertEqual(dict(zip(argv[3::2], argv[4::2]))["--fallback-timeout"], "9")
 
     def test_no_temporary_prompt_file_is_left_behind(self):
         for name, setup in [("approve", lambda: self.chain_says()),
