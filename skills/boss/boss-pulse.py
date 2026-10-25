@@ -46,6 +46,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import boss_store  # noqa: E402
 import fleet  # noqa: E402
+import objective  # noqa: E402
 import policy  # noqa: E402
 import registry  # noqa: E402
 import tracker  # noqa: E402
@@ -66,11 +67,6 @@ def read_goal(track):
     except OSError:
         return None
 
-
-def section(body, title):
-    m = re.search(r"^##\s+%s\s*$(.*?)(?=^##\s|\Z)" % re.escape(title),
-                  body, re.M | re.S)
-    return m.group(1).strip() if m else ""
 
 
 # ------------------------------------------------------------------ fleet
@@ -104,14 +100,6 @@ def team(sid):
 
 FRONTIER_PY = Path(__file__).resolve().parent.parent / "hand-to-boss" / "frontier.py"
 
-
-def tickets_source(body):
-    """The first line under `## Tickets`: a folder of ticket files, or nothing."""
-    for line in section(body, "Tickets").splitlines():
-        line = line.strip().strip("`").strip()
-        if line:
-            return line
-    return ""
 
 
 GH_CACHE_S = 30         # a GitHub frontier older than this is read again
@@ -316,7 +304,7 @@ def main():
     body = read_goal(track)
     if body is None:
         return 0                                  # opt-in: no objective, no pulse
-    if not tracker.goal_open(body):
+    if not objective.is_open(body):
         return 0                                  # paused, or met
 
     # "Session is done" vs "session is paused waiting for background work" — the
@@ -339,18 +327,16 @@ def main():
     fired = dict(st.get("rungs") or {})
     rungs = due_rungs(track, fired)
     blockers = open_blockers(track)
-    source = tickets_source(body)
+    source = objective.tickets_source(body)
     ready, broken = read_frontier(source, track) if source else ([], None)
     # More ready tickets than idle workers, and room left in the team.
     spawn = min(len(ready) - len(idle), policy.BOSS_SPAN - size) if not broken else 0
     if not idle and not rungs and not blockers and not broken and spawn <= 0:
         return 0                                  # team busy, nothing overdue
 
-    outcome = section(body, "Outcome")
-    unmet = [l for l in section(body, "Done when").splitlines()
-             if l.startswith("- [ ]")]
-    nxt = [l for l in section(body, "Next, in priority order").splitlines()
-           if l.strip()]
+    outcome = objective.section(body, "Outcome")
+    unmet = objective.unmet(body)
+    nxt = objective.next_items(body)
 
     lines = ["[boss pulse - track `%s`] Your objective is still OPEN, so this "
              "turn continues rather than ending." % track, ""]
@@ -358,7 +344,7 @@ def main():
         lines.append("OUTCOME: " + outcome.splitlines()[0][:300])
     if unmet:
         lines.append("NOT YET MET:")
-        lines += ["  " + l[6:][:160] for l in unmet[:6]]
+        lines += ["  " + l[:160] for l in unmet[:6]]
     if broken:
         lines.append("TICKET GRAPH BROKEN (%s): %s" % (source, broken))
     elif source:

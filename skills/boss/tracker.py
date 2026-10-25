@@ -1,18 +1,17 @@
 #!/usr/bin/env python3
-"""The formats of a track's two files, in one place.
+"""The format of a track's tracker, pm/<track>.md, in one place.
 
   pm/<track>.md        the tracker. Its `## Open blockers` section holds one
                        line per thing blocked on the owner; a line the ladder
                        escalates carries a marker.
-  pm/<track>.goal.md   the objective. Line 2 is `_Status: OPEN_`, `PAUSED — …`
-                       or `MET … — …`, written by bin/boss-goal.
+
+The objective, pm/<track>.goal.md, has its own module: objective.py.
 
 Who reads and writes them:
 
-  boss-pulse.py        reads the objective's status and the Open blockers
-  boss_ladder_core.py  reads both, rewrites last= and next= under the lock
+  boss-pulse.py        reads the Open blockers
+  boss_ladder_core.py  reads them, rewrites last= and next= under the lock
   bin/boss-tracker     writes the section template (bash), appends under the lock
-  bin/boss-goal        writes the status line (bash)
 
 The bash tools keep their own templates; test_tracker.py runs them and reads
 what they wrote with this module, so the two cannot drift apart unnoticed.
@@ -28,8 +27,6 @@ what they wrote with this module, so the two cannot drift apart unnoticed.
     blocker_lines(text)         the same, as lines
     open_blockers(text)         its bulleted entries
     insert_in_section(body, title, line)
-    goal_status(text)           OPEN, PAUSED — …, MET …, or "" when unreadable
-    goal_open(text)
 
 Marker, appended to a `## Open blockers` line:
 
@@ -264,25 +261,3 @@ def insert_in_section(body: str, title: str, line: str) -> str:
     lines.insert(at, line)
     return "\n".join(lines)
 
-
-# ---------------------------------------------------------- the objective
-
-STATUS_RE = re.compile(r"^_Status:\s*(.+?)_\s*$")
-
-
-def goal_status(text: str) -> str:
-    """The objective's status, upper-cased: `OPEN`, `PAUSED — …`, `MET …`.
-
-    The first `_Status:` line is the one bin/boss-goal writes (line 2) and
-    rewrites on `status`. A later one is a stale copy: on 2026-10-02 six of
-    nineteen objectives had their header twice, and three of them said MET or
-    PAUSED on line 2 and OPEN on line 4. A first status line that does not
-    read is "", which is not open: a stale copy further down never stands in.
-    """
-    line = next((ln for ln in text.splitlines() if ln.startswith("_Status:")), "")
-    m = STATUS_RE.match(line)
-    return m.group(1).strip().upper() if m else ""
-
-
-def goal_open(text: str) -> bool:
-    return goal_status(text).startswith("OPEN")

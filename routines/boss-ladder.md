@@ -58,7 +58,7 @@ the boss and this timer both post the same rung.
 ## What it does, every 5 minutes
 
 1. Every `~/.claude/pm/<track>.md` whose `<track>.goal.md` says `_Status: OPEN_`
-   on its first status line (`tracker.goal_open`, the pulse's rule too). No goal
+   on its first status line (`objective.is_open`, the pulse's rule too). No goal
    file, or a goal that is not OPEN → skipped.
 2. `flock` on `~/.claude/pm/.<track>.md.lock` — a sibling, not the tracker's own
    inode, because both writers replace that inode by rename. Berit's hook takes

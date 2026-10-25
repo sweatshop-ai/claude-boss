@@ -141,27 +141,6 @@ class OpenBlockers(unittest.TestCase):
         self.assertEqual(tracker.lock_path(Path("/x/pm/demo.md")), Path("/x/pm/.demo.md.lock"))
 
 
-class GoalStatus(unittest.TestCase):
-    def test_the_first_status_line_wins(self):
-        body = ("# Objective — t\n_Status: MET 2026-10-01 — done_\n"
-                "# Objective — t\n_Status: OPEN_\n")
-        self.assertEqual(tracker.goal_status(body), "MET 2026-10-01 — DONE")
-        self.assertFalse(tracker.goal_open(body))
-
-    def test_open_with_or_without_a_note(self):
-        self.assertTrue(tracker.goal_open("# O\n_Status: OPEN_\n"))
-        self.assertTrue(tracker.goal_open("# O\n_Status: open — reopened_\n"))
-
-    def test_a_broken_first_status_is_not_rescued_by_a_stale_copy(self):
-        # Codex on PR #10: matching the first *well-formed* line let line 4 win.
-        body = "# O\n_Status: MET 2026-10-01 — done\n# O\n_Status: OPEN_\n"
-        self.assertEqual(tracker.goal_status(body), "")
-        self.assertFalse(tracker.goal_open(body))
-
-    def test_prose_mentioning_the_status_is_not_one(self):
-        self.assertFalse(tracker.goal_open("# O\n_Status: PAUSED — x_\nwrite `_Status: OPEN_` to resume\n"))
-        self.assertEqual(tracker.goal_status("# O\nno status\n"), "")
-
 
 class LadderReadsTheObjective(unittest.TestCase):
     def setUp(self):
@@ -184,7 +163,7 @@ class LadderReadsTheObjective(unittest.TestCase):
 
 
 class BashTools(unittest.TestCase):
-    """bin/boss-tracker and bin/boss-goal write these formats in bash."""
+    """bin/boss-tracker writes this format in bash."""
 
     def setUp(self):
         self.cfg = Path(tempfile.mkdtemp(prefix="boss-tracker-cfg-"))
@@ -206,56 +185,6 @@ class BashTools(unittest.TestCase):
         lo, hi = tracker.blockers_range(lines)
         self.assertGreater(hi, 0)
         self.assertEqual([ln for ln in lines[lo:hi] if ln.strip()], [])
-
-    def test_status_written_by_boss_goal_is_read_back(self):
-        self.run_tool("boss-goal", "init", "demo")
-        goal = self.pm / "demo.goal.md"
-        self.assertEqual(tracker.goal_status(goal.read_text()), "OPEN")
-        self.run_tool("boss-goal", "status", "demo", "paused", "waiting on the owner")
-        self.assertTrue(tracker.goal_status(goal.read_text()).startswith("PAUSED — WAITING ON THE OWNER"))
-        self.run_tool("boss-goal", "status", "demo", "met", "PR merged")
-        self.assertFalse(tracker.goal_open(goal.read_text()))
-
-    def test_set_with_the_header_on_stdin_keeps_one_status(self):
-        # What happened to six objectives before 2026-10-02: the body came from
-        # `show`, header included, and `set` kept both.
-        self.run_tool("boss-goal", "init", "demo")
-        goal = self.pm / "demo.goal.md"
-        shown = self.run_tool("boss-goal", "show", "demo").stdout
-        out = self.run_tool("boss-goal", "set", "demo", stdin=shown.replace("<REPLACE", "<FILLED"))
-        self.assertIn("dropped the header", out.stderr)
-        body = goal.read_text()
-        self.assertEqual(body.count("_Status:"), 1, body)
-        self.assertEqual(body.count("# Objective"), 1, body)
-        self.assertIn("<FILLED", body)
-        self.run_tool("boss-goal", "status", "demo", "met", "done")
-        self.assertFalse(tracker.goal_open(goal.read_text()))
-
-    def test_boss_goal_reads_the_status_the_module_reads(self):
-        # boss-goal list and check read line 2 with sed; the module reads the
-        # first _Status: line. The same file must give the same answer.
-        self.run_tool("boss-goal", "init", "demo")
-        goal = self.pm / "demo.goal.md"
-        for args in (("paused", "waiting on the owner"), ("met", "PR merged"), ("open",)):
-            self.run_tool("boss-goal", "status", "demo", *args)
-            listed = self.run_tool("boss-goal", "list").stdout.split(None, 1)[1].strip()
-            self.assertEqual(listed.upper(), tracker.goal_status(goal.read_text()), args)
-
-    def test_set_keeps_a_body_heading_and_skips_leading_blanks(self):
-        self.run_tool("boss-goal", "init", "demo")
-        goal = self.pm / "demo.goal.md"
-        self.run_tool("boss-goal", "set", "demo", stdin="# Objectives and constraints\nx\n")
-        self.assertIn("# Objectives and constraints", goal.read_text())
-        self.run_tool("boss-goal", "set", "demo",
-                      stdin="\n# Objective — demo\n_Status: OPEN_\n## Outcome\ny\n")
-        self.assertEqual(goal.read_text().count("_Status:"), 1)
-
-    def test_set_without_a_header_is_left_alone(self):
-        self.run_tool("boss-goal", "init", "demo")
-        out = self.run_tool("boss-goal", "set", "demo", stdin="## Outcome\nx\n")
-        self.assertNotIn("dropped", out.stderr)
-        self.assertEqual((self.pm / "demo.goal.md").read_text(),
-                         "# Objective — demo\n_Status: OPEN_\n## Outcome\nx\n")
 
 
 if __name__ == "__main__":
