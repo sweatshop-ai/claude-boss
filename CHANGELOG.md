@@ -7,8 +7,8 @@
   tell the boss, built the numbered text and marked the fired rungs, all in
   one 140-line function, and its tests could only look for substrings in the
   text. `skills/boss/pulse.py` now holds `decide(facts)`, which returns the
-  ordered actions, the overdue rungs and the rung marks (or nothing), and
-  `render(facts, decision)`, which words them. The rung marks are part of the
+  ordered actions, the due rungs it names and the fired marks (or nothing), and
+  `render(facts, decision)`, which words them. The fired marks are part of the
   decision; the text no longer sets them as it is built. `boss-pulse.py` keeps
   the gathering, the gate and the state file. The text is byte-identical: the
   full output of 1152 situations matched `main` before the change.

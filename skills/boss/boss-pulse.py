@@ -247,7 +247,7 @@ def due_rungs(track, fired):
         if isinstance(prev, int) and prev >= rung:
             continue                              # already said this one, or a later one
                                                   # (state from an older schedule: 90, 180)
-        due.append((key, rung, mins, line.strip()[:120]))
+        due.append(pulse.Rung(key, rung, mins, line.strip()[:120]))
     return due
 
 
@@ -323,14 +323,16 @@ def main():
         return 0
 
     idle, size = team(sid)
-    fired = st.get("rungs") or {}
+    fired = dict(st.get("rungs") or {})
+    rungs = due_rungs(track, fired)
+    blockers = open_blockers(track)
     source = objective.tickets_source(body)
     ready, broken = read_frontier(source, track) if source else ([], None)
     facts = pulse.Facts(
-        track=track, idle=idle, size=size, rungs=due_rungs(track, fired), fired=fired,
-        blockers=open_blockers(track), source=source, ready=ready, broken=broken,
+        track=track, idle=idle, size=size, rungs=rungs, fired=fired,
+        blockers=blockers, source=source, ready=ready, broken=broken,
         outcome=objective.section(body, "Outcome"), unmet=objective.unmet(body),
-        next=objective.next_items(body))
+        next_items=objective.next_items(body))
     decision = pulse.decide(facts)
     if decision is None:
         return 0                                  # team busy, nothing overdue
