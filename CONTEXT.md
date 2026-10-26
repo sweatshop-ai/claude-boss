@@ -69,9 +69,10 @@ blocker. The ladder escalates that line from it, with no boss turn.
 
 **Pulse decision**: what the pulse tells a boss at a Stop, as data before it
 is worded: the ordered actions (`ask`, `fix-graph`, `dispatch-ready`,
-`spawn n`, `dispatch-next`, `refill-next`, `run-rung n`), the overdue rungs it
-names and the rung marks saved once the text is out; or nothing, and the boss
-is left alone. `skills/boss/pulse.py` decides and words it; `boss-pulse.py`
+`spawn n`, `dispatch-next`, `refill-next`, `run-rung n`), the due rungs it
+names (`overdue`, three at most) and the fired marks (`fired`: each rung
+already said) saved once the text is out; or nothing, and the boss is left
+alone. `skills/boss/pulse.py` decides and words it; `boss-pulse.py`
 gathers the facts and owns the gate and the state file.
 
 **Objective status**: the first `_Status: …_` line of `pm/<track>.goal.md`,
