@@ -67,6 +67,13 @@ heading. Something is blocked on the owner.
 **Marker**: the `[ladder id=… t0=… last=… next=… ask="…"]` token on an open
 blocker. The ladder escalates that line from it, with no boss turn.
 
+**Pulse decision**: what the pulse tells a boss at a Stop, as data before it
+is worded: the ordered actions (`ask`, `fix-graph`, `dispatch-ready`,
+`spawn n`, `dispatch-next`, `refill-next`, `run-rung n`), the overdue rungs it
+names and the rung marks saved once the text is out; or nothing, and the boss
+is left alone. `skills/boss/pulse.py` decides and words it; `boss-pulse.py`
+gathers the facts and owns the gate and the state file.
+
 **Objective status**: the first `_Status: …_` line of `pm/<track>.goal.md`,
 wherever it sits; `boss-goal status` rewrites that same line. A track is open
 when it starts with OPEN. The objective's format — status, sections, ticket

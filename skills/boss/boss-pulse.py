@@ -48,6 +48,7 @@ import boss_store  # noqa: E402
 import fleet  # noqa: E402
 import objective  # noqa: E402
 import policy  # noqa: E402
+import pulse  # noqa: E402
 import registry  # noqa: E402
 import tracker  # noqa: E402
 
@@ -97,7 +98,7 @@ def team(sid):
 
 # ------------------------------------------------------------- ticket graph
 
-FRONTIER_PY = Path(__file__).resolve().parent.parent / "hand-to-boss" / "frontier.py"
+FRONTIER_PY = pulse.FRONTIER_PY
 
 
 GH_CACHE_S = 30         # a GitHub frontier older than this is read again
@@ -322,99 +323,23 @@ def main():
         return 0
 
     idle, size = team(sid)
-    fired = dict(st.get("rungs") or {})
-    rungs = due_rungs(track, fired)
-    blockers = open_blockers(track)
+    fired = st.get("rungs") or {}
     source = objective.tickets_source(body)
     ready, broken = read_frontier(source, track) if source else ([], None)
-    # More ready tickets than idle workers, and room left in the team.
-    spawn = min(len(ready) - len(idle), policy.BOSS_SPAN - size) if not broken else 0
-    if not idle and not rungs and not blockers and not broken and spawn <= 0:
+    facts = pulse.Facts(
+        track=track, idle=idle, size=size, rungs=due_rungs(track, fired), fired=fired,
+        blockers=open_blockers(track), source=source, ready=ready, broken=broken,
+        outcome=objective.section(body, "Outcome"), unmet=objective.unmet(body),
+        next=objective.next_items(body))
+    decision = pulse.decide(facts)
+    if decision is None:
         return 0                                  # team busy, nothing overdue
-
-    outcome = objective.section(body, "Outcome")
-    unmet = objective.unmet(body)
-    nxt = objective.next_items(body)
-
-    lines = ["[boss pulse - track `%s`] Your objective is still OPEN, so this "
-             "turn continues rather than ending." % track, ""]
-    if outcome:
-        lines.append("OUTCOME: " + outcome.splitlines()[0][:300])
-    if unmet:
-        lines.append("NOT YET MET:")
-        lines += ["  " + l[:160] for l in unmet[:6]]
-    if broken:
-        lines.append("TICKET GRAPH BROKEN (%s): %s" % (source, broken))
-    elif source:
-        lines.append("READY NOW: " + ("; ".join(r[:60] for r in ready[:policy.BOSS_SPAN])
-                                      or "none"))
-    elif nxt:
-        lines.append("NEXT, in priority order:")
-        lines += ["  " + l[:160] for l in nxt[:6]]
-    lines.append("")
-
-    if idle:
-        lines.append("IDLE NOW, yours: "
-                     + ", ".join("%s (%s)" % (n, c) for n, c in idle[:policy.BOSS_SPAN]))
-    for key, rung, mins, text in rungs[:3]:
-        lines.append("OVERDUE: blocker open %d min, rung %d due - %s"
-                     % (mins, rung, text))
-        fired[key] = rung
-
-    if blockers:
-        lines.append("BLOCKED, and you are ending your turn without asking: "
-                     + "; ".join(blockers[:3]))
-
-    lines += ["", "Act, in this order:"]
-    n = 0
-    if blockers:
-        n += 1
-        lines.append("%d. **Ask the owner, with `AskUserQuestion`.** One question, the "
-                     "one that unblocks the most work; hold the rest with their timers "
-                     "running but silent. Self-contained - they remember nothing of this "
-                     "context. Options they can click, your recommendation first and "
-                     "labelled, and the reason that actually decides it. Prose makes them "
-                     "type; a question makes the dashboard chime and their phone light up. "
-                     "See `references/escalation.md`." % n)
-    if broken:
-        n += 1
-        lines.append("%d. Fix the ticket graph before dispatching from it: "
-                     "`python3 %s %s` names what is wrong." % (n, FRONTIER_PY, source))
-    elif source:
-        if idle and ready:
-            n += 1
-            lines.append("%d. Dispatch the READY tickets this turn, one ticket per idle worker "
-                         "until the READY list runs out, not one per turn. Claim each first: `python3 %s claim %s "
-                         "<NN> <worker>`." % (n, FRONTIER_PY, source))
-        if spawn > 0:
-            n += 1
-            lines.append("%d. Spawn %d more worker%s (team %d of %d) and dispatch the "
-                         "remaining READY tickets to them." % (
-                             n, spawn, "s" if spawn > 1 else "", size, policy.BOSS_SPAN))
-    elif idle:
-        n += 1
-        lines.append("%d. Dispatch NEXT items to the idle workers, one each, top first; "
-                     "skip an item that waits on work still in progress (P6: match "
-                     "the project; move or spawn only if none fits)." % n)
-        n += 1
-        lines.append("%d. NEXT empty or stale? Refill it from the board or the "
-                     "tracker (`boss-goal next %s`), then dispatch." % (n, track))
-    if rungs:
-        n += 1
-        lines.append('%d. Run the due rung: `boss-alert %d "<one action, where, '
-                     'what it costs>"`.' % (n, rungs[0][1]))
-    lines.append("Then update the tracker, and tick off any DONE WHEN criterion "
-                 "that has just been met.")
-    lines.append("If none of this applies - the idle worker is deliberately "
-                 "parked, or the objective is finished - say which in one line "
-                 'and stop. `boss-goal status %s met "<evidence>"` closes it and '
-                 "ends the pulse." % track)
 
     print(json.dumps({"hookSpecificOutput": {
         "hookEventName": "Stop",
-        "additionalContext": "\n".join(lines),
+        "additionalContext": pulse.render(facts, decision),
     }}))
-    commit(statef, st, now, fired)
+    commit(statef, st, now, decision.fired)
     return 0
 
 

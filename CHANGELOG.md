@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.16.0 — 2026-10-26
+
+- **The pulse decides as data, then words it** (architecture review,
+  candidate 4). `boss-pulse.py`'s `main()` gathered the facts, decided what to
+  tell the boss, built the numbered text and marked the fired rungs, all in
+  one 140-line function, and its tests could only look for substrings in the
+  text. `skills/boss/pulse.py` now holds `decide(facts)`, which returns the
+  ordered actions, the overdue rungs and the rung marks (or nothing), and
+  `render(facts, decision)`, which words them. The rung marks are part of the
+  decision; the text no longer sets them as it is built. `boss-pulse.py` keeps
+  the gathering, the gate and the state file. The text is byte-identical: the
+  full output of 1152 situations matched `main` before the change.
+
 ## 0.15.0 — 2026-10-25
 
 - **One owner for the objective file** (architecture review, candidate 3).
