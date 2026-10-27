@@ -214,6 +214,9 @@ def update_state(sid, kind, fn, cfg=None):
 
     A directory that cannot be written is not an error: the hook still has to
     exit 0, so `fn` runs on whatever could be read and its result is returned.
+    A lock that cannot be taken is the same: the update is still written, unlocked.
+    Dropping it would freeze the counter for good, which is worse than the rare
+    lost count of a race.
     """
     f = state_path(sid, kind, cfg)
     lock = None

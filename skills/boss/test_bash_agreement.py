@@ -75,10 +75,10 @@ def _disagreements(bindir):
             pre += lift(script, r"^%s\(\)" % fn) + "\n"
         # the config directory rule: unset and empty both mean ~/.claude
         for env, want in (({"CLAUDE_CONFIG_DIR": cfg}, pm),
-                          ({"CLAUDE_CONFIG_DIR": ""}, boss_store.pm_dir(None)),
-                          ({}, boss_store.pm_dir(None))):
+                          ({"CLAUDE_CONFIG_DIR": ""}, boss_store.pm_dir(Path.home() / ".claude")),
+                          ({}, boss_store.pm_dir(Path.home() / ".claude"))):
             rc, got = bash(pre + 'printf %s "$PM"', dict(env, HOME=str(Path.home())))
-            if got != str(boss_store.pm_dir(env.get("CLAUDE_CONFIG_DIR") or None)):
+            if got != str(boss_store.pm_dir(env.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")):
                 out.append("%s: PM is %r for %r" % (script.name, got, env))
         for name in NAMES:
             ok = boss_store.valid_track(name)
