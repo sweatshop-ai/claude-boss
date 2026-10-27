@@ -319,5 +319,73 @@ class TrackFiles(unittest.TestCase):
                 os.environ["CLAUDE_CONFIG_DIR"] = old
 
 
+class OpenTracks(unittest.TestCase):
+    """Which trackers the ladder walks, and why one is passed over."""
+
+    def setUp(self):
+        self.cfg = Path(tempfile.mkdtemp())
+        self.pm = self.cfg / "pm"
+        self.pm.mkdir()
+
+    def _list(self, **kw):
+        return list(boss_store.open_tracks(**kw))
+
+    def test_a_tracker_with_an_objective_comes_with_its_text(self):
+        (self.pm / "demo.md").write_text("t")
+        (self.pm / "demo.goal.md").write_text("_Status: OPEN_\n")
+        self.assertEqual(self._list(cfg=self.cfg),
+                         [("demo", self.pm / "demo.md", "_Status: OPEN_\n", None)])
+
+    def test_a_tracker_with_no_objective_is_no_goal_file(self):
+        (self.pm / "demo.md").write_text("t")
+        self.assertEqual(self._list(cfg=self.cfg),
+                         [("demo", self.pm / "demo.md", None, "no goal file")])
+
+    def test_an_unreadable_objective_says_why(self):
+        (self.pm / "demo.md").write_text("t")
+        (self.pm / "demo.goal.md").mkdir()
+        [(track, path, text, reason)] = self._list(cfg=self.cfg)
+        self.assertEqual((track, path, text), ("demo", self.pm / "demo.md", None))
+        self.assertTrue(reason.startswith("goal unreadable: "), reason)
+
+    def test_invalid_utf8_in_an_objective_is_read_with_replacement(self):
+        (self.pm / "demo.md").write_text("t")
+        (self.pm / "demo.goal.md").write_bytes(b"_Status: OPEN_\n\xff\xfe\n")
+        [(_, _, text, reason)] = self._list(cfg=self.cfg)
+        self.assertIsNone(reason)
+        self.assertEqual(text, "_Status: OPEN_\n\ufffd\ufffd\n")
+
+    def test_objectives_archives_dot_files_and_other_files_are_not_tracks(self):
+        for n in ("a.md", "a.goal.md", "old.archive.md", ".hid.md", ".hid.goal.md",
+                  "orphan.goal.md", "notes.txt"):
+            (self.pm / n).write_text("x")
+        self.assertEqual([t for t, *_ in self._list(cfg=self.cfg)], ["a"])
+
+    def test_the_order_is_the_sorted_path_order(self):
+        for n in ("zeta", "Upper", "alpha", "with space"):
+            (self.pm / f"{n}.md").write_text("x")
+        self.assertEqual([t for t, *_ in self._list(cfg=self.cfg)],
+                         ["Upper", "alpha", "with space", "zeta"])
+
+    def test_names_outside_the_track_pattern_are_still_listed_as_today(self):
+        (self.pm / "Upper.md").write_text("x")
+        (self.pm / "Upper.goal.md").write_text("g")
+        self.assertEqual(self._list(cfg=self.cfg)[0][2], "g")
+
+    def test_pm_overrides_the_directory(self):
+        other = self.cfg / "other"
+        other.mkdir()
+        (other / "x.md").write_text("t")
+        self.assertEqual([t for t, *_ in self._list(pm=other)], ["x"])
+
+    def test_a_missing_directory_yields_nothing(self):
+        self.assertEqual(self._list(cfg=self.cfg / "nope"), [])
+
+    def test_the_store_does_not_decide_whether_a_track_is_open(self):
+        (self.pm / "demo.md").write_text("t")
+        (self.pm / "demo.goal.md").write_text("_Status: CLOSED_\n")
+        self.assertIsNone(self._list(cfg=self.cfg)[0][3])
+
+
 if __name__ == "__main__":
     unittest.main()

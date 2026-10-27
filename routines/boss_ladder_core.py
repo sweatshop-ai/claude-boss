@@ -98,22 +98,11 @@ def save_state(state: dict) -> None:
 # ---------------------------------------------------------------- tracks
 
 def open_tracks(pm_dir: Path):
-    """(track, tracker_path) for every tracker whose goal says OPEN."""
-    for md in sorted(pm_dir.glob("*.md")):
-        name = md.name
-        if name.startswith(".") or name.endswith((".goal.md", ".archive.md")):
-            continue
-        track = name[:-3]
-        goal = pm_dir / f"{track}.goal.md"
-        if not goal.exists():
-            yield track, md, "no goal file"
-            continue
-        try:
-            head = goal.read_text(errors="replace")
-        except OSError as exc:
-            yield track, md, f"goal unreadable: {exc}"
-            continue
-        yield track, md, None if is_open(head) else "goal not OPEN"
+    """(track, tracker_path, skip reason or None) for every tracker the store lists."""
+    for track, md, head, reason in boss_store.open_tracks(pm=pm_dir):
+        if reason is None and not is_open(head):
+            reason = "goal not OPEN"
+        yield track, md, reason
 
 
 # ---------------------------------------------------------------- the run

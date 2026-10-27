@@ -90,6 +90,36 @@ def read_tracker(track, cfg=None):
     return _read(tracker_path(track, cfg))
 
 
+def open_tracks(cfg=None, pm=None):
+    """`(track, tracker_path, objective_text_or_None, reason)` for every tracker in `pm/`.
+
+    Objectives (`.goal.md`), archives (`.archive.md`) and dot files are not
+    tracks. `reason` is None when the objective was read, "no goal file" when
+    there is none, "goal unreadable: <why>" when it cannot be read. Whether the
+    objective says OPEN is the caller's to judge: the store keeps no format.
+    `pm` names the directory outright (the ladder's `BOSS_LADDER_PM`); the
+    listing is in sorted path order, and a name is a track whatever it looks
+    like, as it always was. The objective is read with replacement, so a stray
+    byte in it does not hide the track.
+    """
+    pm = Path(pm) if pm is not None else pm_dir(cfg)
+    for md in sorted(pm.glob("*.md")):
+        name = md.name
+        if name.startswith(".") or name.endswith((".goal.md", ".archive.md")):
+            continue
+        track = name[:-3]
+        goal = pm / f"{track}.goal.md"
+        if not goal.exists():
+            yield track, md, None, "no goal file"
+            continue
+        try:
+            text = goal.read_text(errors="replace")
+        except OSError as exc:
+            yield track, md, None, f"goal unreadable: {exc}"
+            continue
+        yield track, md, text, None
+
+
 def _marker(sid, cfg):
     if not sid or not SID_RE.match(sid):
         return None
