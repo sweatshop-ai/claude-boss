@@ -61,6 +61,35 @@ def valid_track(track):
     return bool(track) and bool(TRACK_RE.match(track)) and ".." not in track
 
 
+def objective_path(track, cfg=None):
+    """`pm/<track>.goal.md`, or None when `track` is not a plain track name."""
+    return pm_dir(cfg) / (track + ".goal.md") if valid_track(track) else None
+
+
+def tracker_path(track, cfg=None):
+    """`pm/<track>.md`, or None when `track` is not a plain track name."""
+    return pm_dir(cfg) / (track + ".md") if valid_track(track) else None
+
+
+def _read(path):
+    if path is None:
+        return None
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+
+
+def read_objective(track, cfg=None):
+    """The objective's text, or None when it is missing, unreadable or the track is invalid."""
+    return _read(objective_path(track, cfg))
+
+
+def read_tracker(track, cfg=None):
+    """The tracker's text, or None when it is missing, unreadable or the track is invalid."""
+    return _read(tracker_path(track, cfg))
+
+
 def _marker(sid, cfg):
     if not sid or not SID_RE.match(sid):
         return None
