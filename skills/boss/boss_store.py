@@ -14,6 +14,7 @@ writes it through `boss-marker register`. A marker is a regular file of this
 user, never a symlink or a directory. A track is a plain name, because it
 becomes a file name under pm/; a marker holding anything else has no track.
 """
+import hashlib
 import os
 import re
 import stat
@@ -46,6 +47,17 @@ def markers_dir(cfg=None):
 
 def state_dir(cfg=None):
     return pm_dir(cfg) / ".pulse"
+
+
+def frontier_cache(track, source, cfg=None):
+    """Where the last `frontier.py --json` of this track's GitHub graph is kept.
+
+    Keyed by the source too, so a track moved to another graph never reads the
+    old one's tickets. `boss-goal check` writes the same file with bash (a
+    `sha1sum` of the source's bytes); test_bash_agreement.py keeps the two equal.
+    """
+    key = hashlib.sha1(source.encode("utf-8")).hexdigest()[:10]
+    return state_dir(cfg) / ("%s.%s.frontier.json" % (track, key))
 
 
 def valid_track(track):

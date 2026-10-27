@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -71,6 +72,18 @@ class Store(unittest.TestCase):
     def test_register_needs_the_session_id(self):
         out = self.cli("register", "lead-engine", sid="")
         self.assertNotEqual(out.returncode, 0)
+
+
+class FrontierCache(unittest.TestCase):
+    def test_it_lives_under_the_pulse_state_keyed_by_track_and_source(self):
+        a = boss_store.frontier_cache("demo", "gh:a/b#1", cfg="/c")
+        self.assertEqual(a.parent, Path("/c/pm/.pulse"))
+        self.assertRegex(a.name, r"^demo\.[0-9a-f]{10}\.frontier\.json$")
+        self.assertNotEqual(a, boss_store.frontier_cache("demo", "gh:a/b#2", cfg="/c"))
+
+    def test_an_empty_config_dir_is_the_home_one(self):
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": ""}):
+            self.assertEqual(boss_store.frontier_cache("t", "s").parent, Path.home() / ".claude/pm/.pulse")
 
 
 if __name__ == "__main__":
