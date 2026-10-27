@@ -12,7 +12,9 @@ the store; `registry.config_dir` calls it; the hooks drop their `CFG`, `PM`,
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Claimed by:** Farid 2026-10-27 12:16
+
+**Status:** in-progress
 
 - [ ] A test, written first and red on today's code, runs guard, pulse, compact
       and reap as subprocesses with `CLAUDE_CONFIG_DIR=""` and `HOME=<tmp>`, and
