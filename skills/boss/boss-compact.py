@@ -26,15 +26,12 @@ Active only for sessions registered as a boss, with a track name in the marker:
 (SKILL.md session start, step 2, writes it.) Any other session: silent exit 0.
 """
 import json
-import os
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import boss_store  # noqa: E402
 
-CFG = Path(os.environ.get("CLAUDE_CONFIG_DIR", str(Path.home() / ".claude")))
-PM = CFG / "pm"
 CAP = 15360   # boss-tracker's cap; anything past it is history we do not inject
 
 RESTORE_HEAD = (
@@ -52,7 +49,7 @@ LIVE_HEAD = "\n--- ~/.claude/pm/{track}.md (live state) ---\n"
 
 
 def track_for(sid):
-    return boss_store.track_of(sid, CFG) or None
+    return boss_store.track_of(sid) or None
 
 
 def main():
@@ -86,11 +83,10 @@ def main():
         why = payload.get("source") or payload.get("trigger") or ""
         if why and why != "compact":
             return 0
-        live = PM / f"{track}.md"
-        try:
-            body = live.read_text(encoding="utf-8")
-        except OSError:
-            body = f"(tracker {live} could not be read — run boss-tracker show {track})"
+        body = boss_store.read_tracker(track)
+        if body is None:
+            body = (f"(tracker {boss_store.tracker_path(track)} could not be read"
+                    f" — run boss-tracker show {track})")
         if len(body.encode("utf-8")) > CAP:
             body = body.encode("utf-8")[:CAP].decode("utf-8", "ignore") + (
                 f"\n\n[truncated at {CAP} B — the tracker is over its cap; "
@@ -99,9 +95,8 @@ def main():
         # The objective first. A compaction summary reliably keeps the recent
         # tactical thread and drops the standing outcome, which is the wrong way
         # round: the thread can be rebuilt from the tracker, the outcome cannot.
-        try:
-            goal = (PM / f"{track}.goal.md").read_text(encoding="utf-8")
-        except OSError:
+        goal = boss_store.read_objective(track)
+        if goal is None:
             goal = (f"(no objective file for {track} — run `boss-goal init {track}` "
                     f"and fill it in before dispatching anything else)")
 

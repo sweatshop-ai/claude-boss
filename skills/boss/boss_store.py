@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""The boss marker, and the one rule for reading it.
+"""The track store: the one module that owns `pm/` and the boss marker.
+
+It names the config and `pm/` directories (an empty CLAUDE_CONFIG_DIR means
+~/.claude), reads the objective and tracker files, updates per-session state
+under a lock, lists the files reap may remove and keeps the frontier cache path.
+The marker is the part described below.
+
+The boss marker, and the one rule for reading it.
 
 `$CLAUDE_CONFIG_DIR/pm/.boss-sessions/<session_id>` says a session is a boss.
 Its first line, once the boss has claimed one, is the track: the name of its
@@ -14,6 +21,9 @@ writes it through `boss-marker register`. A marker is a regular file of this
 user, never a symlink or a directory. A track is a plain name, because it
 becomes a file name under pm/; a marker holding anything else has no track.
 """
+import fcntl
+import hashlib
+import json
 import os
 import re
 import stat
@@ -23,9 +33,21 @@ from pathlib import Path
 
 SID_RE = re.compile(r"^[\w-]{1,80}$")
 TRACK_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
+UUID = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}"
+                  r"-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+
+# Per-session state under pm/.pulse/: kind -> file name suffix. The names are the
+# ones the hooks have always written, so a state file survives the upgrade.
+STATE_KINDS = {"guard": ".guard.json", "pulse": ".json"}
+LOCK_NAME = ".state.lock"
 
 
 def config_dir(cfg=None):
+    """The config directory: `cfg` when given, else `$CLAUDE_CONFIG_DIR`, else `~/.claude`.
+
+    An empty variable is unset. It is read on every call, so a test that sets it
+    (or passes `cfg`) is heard, and a hook never holds a stale copy.
+    """
     if cfg is not None:
         return Path(cfg)
     return Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
@@ -39,8 +61,82 @@ def markers_dir(cfg=None):
     return pm_dir(cfg) / ".boss-sessions"
 
 
+def state_dir(cfg=None):
+    return pm_dir(cfg) / ".pulse"
+
+
+def frontier_cache(track, source, cfg=None):
+    """Where the last `frontier.py --json` of this track's GitHub graph is kept.
+
+    Keyed by the source too, so a track moved to another graph never reads the
+    old one's tickets. `boss-goal check` writes the same file with bash (a
+    `sha1sum` of the source's bytes); test_bash_agreement.py keeps the two equal.
+    """
+    key = hashlib.sha1(source.encode("utf-8")).hexdigest()[:10]
+    return state_dir(cfg) / ("%s.%s.frontier.json" % (track, key))
+
+
 def valid_track(track):
     return bool(track) and bool(TRACK_RE.match(track)) and ".." not in track
+
+
+def objective_path(track, cfg=None):
+    """`pm/<track>.goal.md`, or None when `track` is not a plain track name."""
+    return pm_dir(cfg) / (track + ".goal.md") if valid_track(track) else None
+
+
+def tracker_path(track, cfg=None):
+    """`pm/<track>.md`, or None when `track` is not a plain track name."""
+    return pm_dir(cfg) / (track + ".md") if valid_track(track) else None
+
+
+def _read(path):
+    if path is None:
+        return None
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+
+
+def read_objective(track, cfg=None):
+    """The objective's text, or None when it is missing, unreadable or the track is invalid."""
+    return _read(objective_path(track, cfg))
+
+
+def read_tracker(track, cfg=None):
+    """The tracker's text, or None when it is missing, unreadable or the track is invalid."""
+    return _read(tracker_path(track, cfg))
+
+
+def open_tracks(cfg=None, pm=None):
+    """`(track, tracker_path, objective_text_or_None, reason)` for every tracker in `pm/`.
+
+    Objectives (`.goal.md`), archives (`.archive.md`) and dot files are not
+    tracks. `reason` is None when the objective was read, "no goal file" when
+    there is none, "goal unreadable: <why>" when it cannot be read. Whether the
+    objective says OPEN is the caller's to judge: the store keeps no format.
+    `pm` names the directory outright (the ladder's `BOSS_LADDER_PM`); the
+    listing is in sorted path order, and a name is a track whatever it looks
+    like, as it always was. The objective is read with replacement, so a stray
+    byte in it does not hide the track.
+    """
+    pm = Path(pm) if pm is not None else pm_dir(cfg)
+    for md in sorted(pm.glob("*.md")):
+        name = md.name
+        if name.startswith(".") or name.endswith((".goal.md", ".archive.md")):
+            continue
+        track = name[:-3]
+        goal = pm / f"{track}.goal.md"
+        if not goal.exists():
+            yield track, md, None, "no goal file"
+            continue
+        try:
+            text = goal.read_text(errors="replace")
+        except OSError as exc:
+            yield track, md, None, f"goal unreadable: {exc}"
+            continue
+        yield track, md, text, None
 
 
 def _marker(sid, cfg):
@@ -87,6 +183,93 @@ def register(sid, track="", cfg=None):
     os.replace(tmp, path)
 
 
+def state_path(sid, kind, cfg=None):
+    """Where this session's state of this kind lives: `pm/.pulse/<sid><suffix>`."""
+    if not sid or not SID_RE.match(sid):
+        raise ValueError("not a session id: %r" % sid)
+    if kind not in STATE_KINDS:
+        raise ValueError("not a state kind: %r (%s)" % (kind, ", ".join(sorted(STATE_KINDS))))
+    return state_dir(cfg) / (sid + STATE_KINDS[kind])
+
+
+def read_state(sid, kind, cfg=None):
+    """The state as it is now, `{}` when the file is missing, unreadable or not an object."""
+    try:
+        st = json.loads(state_path(sid, kind, cfg).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return st if isinstance(st, dict) else {}
+
+
+def update_state(sid, kind, fn, cfg=None):
+    """Read the state, let `fn` change it, write it back. Returns the new state.
+
+    `fn(state)` changes the dict in place or returns a new one. The whole round
+    trip holds `flock` on one lock file beside the state files, so two hooks of
+    one session never lose each other's update. The lock is its own file with no
+    UUID in its name, never the state file: reap deletes state files, and a lock
+    taken on a deleted inode would let a second process lock a new file at once.
+    The new JSON goes to a temp file in the same directory and replaces the old
+    one, so a `fn` that raises, or a crash, leaves the old file as it was.
+
+    A directory that cannot be written is not an error: the hook still has to
+    exit 0, so `fn` runs on whatever could be read and its result is returned.
+    A lock that cannot be taken is the same: the update is still written, unlocked.
+    Dropping it would freeze the counter for good, which is worse than the rare
+    lost count of a race.
+    """
+    f = state_path(sid, kind, cfg)
+    lock = None
+    try:
+        f.parent.mkdir(parents=True, exist_ok=True)
+        lock = open(f.parent / LOCK_NAME, "a")
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+    except OSError:
+        if lock is not None:
+            lock.close()
+        lock = None
+    try:
+        state = read_state(sid, kind, cfg)
+        new = fn(state)
+        if not isinstance(new, dict):
+            new = state
+        tmp = None
+        try:
+            fd, tmp = tempfile.mkstemp(dir=f.parent, prefix=".state-", suffix=".tmp")
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(json.dumps(new))
+            os.replace(tmp, f)
+        except OSError:
+            if tmp:
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
+        return new
+    finally:
+        if lock is not None:
+            lock.close()
+
+
+def reap_candidates(cfg=None):
+    """`(path, session_id)` for every file in the boss-file and `.pulse/` directories
+    whose name holds a session UUID, the id lower-cased.
+
+    A name with no UUID is never returned: that is what keeps files such as
+    `jev.log` out of reap's reach. A UUID anywhere in the name counts, as it
+    always has; symlinks and directories do not.
+    """
+    for d in (markers_dir(cfg), state_dir(cfg)):
+        if not d.is_dir():
+            continue
+        for p in d.iterdir():
+            if p.is_symlink() or not p.is_file():
+                continue
+            m = UUID.search(p.name)
+            if m:
+                yield p, m.group(0).lower()
+
+
 def main(argv):
     sid = os.environ.get("CLAUDE_CODE_SESSION_ID", "")
     cmd = argv[0] if argv else ""
@@ -105,7 +288,7 @@ def main(argv):
         return 0
     if cmd == "is-boss" and len(argv) == 1:
         return 0 if is_boss(sid) else 1
-    print(__doc__.split("\n\n")[2], file=sys.stderr)
+    print(next(p for p in __doc__.split("\n\n") if "boss-marker register" in p), file=sys.stderr)
     return 2
 
 

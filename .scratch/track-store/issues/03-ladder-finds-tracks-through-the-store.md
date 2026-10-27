@@ -9,11 +9,13 @@ OPEN" line, so what the ladder prints and posts does not change.
 
 **Blocked by:** 02
 
-**Status:** ready-for-agent
+**Claimed by:** Chiara 2026-10-27 12:33
 
-- [ ] Store tests for `open_tracks()`: a tracker with no objective, an unreadable
+**Status:** done
+
+- [x] Store tests for `open_tracks()`: a tracker with no objective, an unreadable
       objective, an archive and a `.goal.md` not listed as tracks
-- [ ] The ladder's `--selftest` passes, and a dry run on a fixture `pm/` prints
+- [x] The ladder's `--selftest` passes, and a dry run on a fixture `pm/` prints
       the same lines as before
-- [ ] The ladder core builds no `pm/` path itself, beyond honouring
+- [x] The ladder core builds no `pm/` path itself, beyond honouring
       `BOSS_LADDER_PM`

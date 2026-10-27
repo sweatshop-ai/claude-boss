@@ -27,21 +27,14 @@ Usage:
     boss-reap.py --sweep --dry-run    say what it would reap, touch nothing
 """
 import json
-import os
-import re
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import boss_store  # noqa: E402
 import registry  # noqa: E402
 
-CFG = Path(os.environ.get("CLAUDE_CONFIG_DIR", str(Path.home() / ".claude")))
-PM = CFG / "pm"
-MARKERS = PM / ".boss-sessions"
-STATE = PM / ".pulse"
-
-UUID = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}"
-                  r"-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+UUID = boss_store.UUID
 GRACE_S = 30 * 60      # a session younger than this may simply not be registered yet
 
 
@@ -53,24 +46,7 @@ def live_session_ids():
     exactly the stale state this script exists to clear.
     """
     return {str(rec.get("sessionId")).lower()
-            for rec in registry.live(CFG) if rec.get("sessionId")}
-
-
-def candidates():
-    """(path, session_id) for every file in the two directories that names one.
-
-    A file whose name holds no UUID is not a candidate and is never returned,
-    which is the whole safety property.
-    """
-    for d in (MARKERS, STATE):
-        if not d.is_dir():
-            continue
-        for p in d.iterdir():
-            if p.is_symlink() or not p.is_file():
-                continue
-            m = UUID.search(p.name)
-            if m:
-                yield p, m.group(0).lower()
+            for rec in registry.live(boss_store.config_dir()) if rec.get("sessionId")}
 
 
 def drop(path, dry):
@@ -87,7 +63,7 @@ def reap_session(sid, dry=False):
     sid = (sid or "").lower()
     if not UUID.fullmatch(sid):
         return []
-    return [p for p, s in candidates() if s == sid and drop(p, dry)]
+    return [p for p, s in boss_store.reap_candidates() if s == sid and drop(p, dry)]
 
 
 def sweep(dry=False, now=None):
@@ -95,7 +71,7 @@ def sweep(dry=False, now=None):
     now = now or time.time()
     live = live_session_ids()
     gone = []
-    for p, sid in candidates():
+    for p, sid in boss_store.reap_candidates():
         if sid in live:
             continue
         try:

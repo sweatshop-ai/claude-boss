@@ -11,12 +11,20 @@ candidate; its live-session set, 30-minute grace and dry run stay in reap.
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Claimed by:** Elske 2026-10-27 12:28
 
-- [ ] Store tests: `update_state` on a missing file, on unreadable JSON (starts
+**Status:** done
+
+**Evidence:**
+- `python3 -m pytest skills/boss/test_boss_store.py -q` in track-store-04 at 14702ff: StateFiles covers missing file, unreadable JSON, non-object JSON, unwritable dir (returns new state, no exception), raising fn leaves bytes identical; 4-process x 25 updates lose none
+- `pytest test_boss_store.py test_boss_guard.py test_boss_pulse.py test_boss_reap.py test_config_dir.py`: 91 passed; CI pytest success on 14702ff (draft PR #32)
+- test_boss_reap.py passes; ReapCandidates compares `boss_store.reap_candidates` with 0.16.0's rule on a fixture of boss files, legacy and no-UUID names, a dir and a symlink: equal
+- `grep -n '".pulse"' boss-guard.py boss-pulse.py boss-reap.py` empty; test NoHookBuildsAStatePath. boss-pulse still calls `boss_store.state_dir()` for the frontier cache (ticket 05)
+
+- [x] Store tests: `update_state` on a missing file, on unreadable JSON (starts
       from `{}`), and on an unwritable directory (the hook still exits 0)
-- [ ] The guard's powers-of-two speaking and the pulse's 60 s / 12 per hour limit
+- [x] The guard's powers-of-two speaking and the pulse's 60 s / 12 per hour limit
       behave as before (existing tests pass)
-- [ ] Reap's tests pass; a file named without a UUID in either directory is
+- [x] Reap's tests pass; a file named without a UUID in either directory is
       never returned by the store's candidate list
-- [ ] Neither guard, pulse nor reap builds a `.pulse/` path itself
+- [x] Neither guard, pulse nor reap builds a `.pulse/` path itself
