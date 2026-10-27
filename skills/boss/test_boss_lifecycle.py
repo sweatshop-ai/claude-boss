@@ -86,6 +86,7 @@ class PanesState(unittest.TestCase):
                 fake.chmod(0o755)
             os.environ["PATH"] = str(bindir) + os.pathsep + "/usr/bin:/bin"
             bp = self.load_panes(tmp)
+            os.environ["CLAUDE_CONFIG_DIR"] = str(tmp)  # panes reads it at call time
             bp.TMUX = bp.fleet.MemoryTmux([bp.fleet.Pane("%7")])
             import io, contextlib
             with contextlib.redirect_stdout(io.StringIO()):
@@ -95,6 +96,7 @@ class PanesState(unittest.TestCase):
             return name, calls.read_text().split("\n")[0] if calls.exists() else None
         finally:
             os.environ["PATH"], sys.argv = old_path, old_argv
+            os.environ.pop("CLAUDE_CONFIG_DIR", None)
             kid.kill()
             kid.wait()
             shutil.rmtree(tmp)
