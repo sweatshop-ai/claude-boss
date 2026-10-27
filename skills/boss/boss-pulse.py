@@ -59,10 +59,7 @@ MAX_PER_HOUR = 12       # a boss needing more than this is in a loop, not a job
 # ---------------------------------------------------------------- goal file
 
 def read_goal(track):
-    try:
-        return (boss_store.pm_dir() / ("%s.goal.md" % track)).read_text(encoding="utf-8")
-    except OSError:
-        return None
+    return boss_store.read_objective(track)
 
 
 # ------------------------------------------------------------------ fleet
@@ -162,7 +159,7 @@ def read_frontier(source, track):
     return ready_of(fr.classify(tickets)), None
 
 
-def open_blockers(track):
+def open_blockers(body):
     """Every line under `## Open blockers` that is an entry, newest last.
 
     `due_rungs` below answers "is a rung overdue". This answers the blunter
@@ -171,9 +168,7 @@ def open_blockers(track):
     the line existing, which is the point — the failure being fixed is a boss
     that never armed a timer.
     """
-    try:
-        body = (boss_store.pm_dir() / ("%s.md" % track)).read_text(encoding="utf-8")
-    except OSError:
+    if body is None:
         return []
     return [b[:160] for b in tracker.open_blockers(body)]
 
@@ -200,11 +195,18 @@ def question_pending(sid):
 TPLUS = re.compile(r"T\+0[^0-9]{0,12}(\d{4}-\d{2}-\d{2})?[T ]?(\d{2}):(\d{2})")
 
 
-def due_rungs(track, fired):
-    """Open blockers in the tracker whose next escalation rung has come due."""
-    try:
-        body = (boss_store.pm_dir() / ("%s.md" % track)).read_text(encoding="utf-8")
-    except OSError:
+_UNREAD = object()
+
+
+def due_rungs(track, fired, body=_UNREAD):
+    """Open blockers in the tracker whose next escalation rung has come due.
+
+    `body` is the tracker text a caller already read (None: it could not be);
+    left out, this reads it.
+    """
+    if body is _UNREAD:
+        body = boss_store.read_tracker(track)
+    if body is None:
         return []
     now = time.localtime()
     due = []
@@ -242,32 +244,29 @@ def due_rungs(track, fired):
 # ------------------------------------------------------------ rate limit
 
 def gate(sid):
-    state = boss_store.state_dir()
-    state.mkdir(parents=True, exist_ok=True)
-    f = state / ("%s.json" % sid)
-    try:
-        st = json.loads(f.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        st = {}
+    """(now, state) when the pulse may speak, (None, state) when it must not."""
+    st = boss_store.read_state(sid, "pulse")
     now = time.time()
     if now - st.get("last", 0) < MIN_GAP_S:
-        return None, st, f
+        return None, st
     if now - st.get("hour_start", 0) > 3600:
         st["hour_start"], st["count"] = now, 0
     if st.get("count", 0) >= MAX_PER_HOUR:
-        return None, st, f
-    return now, st, f
+        return None, st
+    return now, st
 
 
-def commit(f, st, now, fired):
-    st["last"] = now
-    st["count"] = st.get("count", 0) + 1
-    st.setdefault("hour_start", now)
-    st["rungs"] = fired
-    try:
-        f.write_text(json.dumps(st), encoding="utf-8")
-    except OSError:
-        pass
+def commit(sid, now, fired):
+    """Record that the pulse spoke. Under the store's lock, so the hour's count
+    is the sum of every Stop hook that spoke, not the last writer's."""
+    def spoke(st):
+        if now - st.get("hour_start", 0) > 3600:
+            st["hour_start"], st["count"] = now, 0
+        st["last"] = now
+        st["count"] = st.get("count", 0) + 1
+        st.setdefault("hour_start", now)
+        st["rungs"] = fired
+    boss_store.update_state(sid, "pulse", spoke)
 
 
 # ------------------------------------------------------------------ main
@@ -301,7 +300,7 @@ def main():
         if (t.get("status") or "").lower() in ("running", "pending"):
             return 0
 
-    now, st, statef = gate(sid)
+    now, st = gate(sid)
     if now is None:
         return 0
 
@@ -313,8 +312,9 @@ def main():
 
     idle, size = team(sid)
     fired = dict(st.get("rungs") or {})
-    rungs = due_rungs(track, fired)
-    blockers = open_blockers(track)
+    tracker_text = boss_store.read_tracker(track)  # once per Stop, both consumers share it
+    rungs = due_rungs(track, fired, tracker_text)
+    blockers = open_blockers(tracker_text)
     source = objective.tickets_source(body)
     ready, broken = read_frontier(source, track) if source else ([], None)
     facts = pulse.Facts(
@@ -330,7 +330,7 @@ def main():
         "hookEventName": "Stop",
         "additionalContext": pulse.render(facts, decision),
     }}))
-    commit(statef, st, now, decision.fired)
+    commit(sid, now, decision.fired)
     return 0
 
 

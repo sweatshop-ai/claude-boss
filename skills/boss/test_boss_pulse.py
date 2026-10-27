@@ -336,6 +336,36 @@ class Marker(PulseCase):
         self.assertEqual(self.stop(), "")
 
 
+class OneTrackerRead(PulseCase):
+    """One Stop reads the tracker once, and both consumers see that snapshot."""
+
+    def test_the_tracker_is_read_once_per_stop(self):
+        import importlib.util
+        import io
+        from unittest import mock
+        self.tracker(blockers="- Ottilie blocked on OWNER")
+        spec = importlib.util.spec_from_file_location("pulse_%d" % time.monotonic_ns(), str(PULSE))
+        mod = importlib.util.module_from_spec(spec)
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(self.tmp)}):
+            spec.loader.exec_module(mod)
+            reads = []
+            real = mod.boss_store.read_tracker
+
+            def counting(*a, **kw):
+                reads.append(a)
+                return real(*a, **kw)
+
+            payload = json.dumps({"session_id": self.sid, "hook_event_name": "Stop",
+                                  "stop_hook_active": False})
+            out = io.StringIO()
+            with mock.patch.object(mod.boss_store, "read_tracker", counting), \
+                    mock.patch.object(sys, "stdin", io.StringIO(payload)), \
+                    mock.patch.object(sys, "stdout", out):
+                self.assertEqual(mod.main(), 0)
+        self.assertIn("Ottilie blocked on OWNER", out.getvalue())   # the blocker reached the text
+        self.assertEqual(len(reads), 1)
+
+
 class DueRungs(unittest.TestCase):
     """due_rungs() directly: which rung is due, and what counts as already said."""
 
