@@ -1,7 +1,11 @@
 # claude-boss — domain terms
 
 **Boss**: a Claude session that coordinates workers and does no implementation
-itself. It holds a marker under `pm/.boss-sessions/` and a track.
+itself. It holds a boss file and a track.
+
+**Boss file**: `pm/.boss-sessions/<session_id>`, which makes a session a boss;
+its first line, once claimed, is the track. Written by `boss-marker register`.
+_Avoid_: marker (that is the ladder's token on an open blocker)
 
 **Worker**: any session a boss dispatches to. One task per session.
 
@@ -27,6 +31,12 @@ _Avoid_: ready list, queue
 
 **Track**: the name of a boss's tracker (`pm/<track>.md`) and objective
 (`pm/<track>.goal.md`).
+
+**Track store**: the one module that names files under `pm/` and reads and
+writes them as raw text: the boss file, the tracker, the objective,
+per-session state. It knows where a file is, not what its text means; the
+formats stay with `objective.py` and `tracker.py`. `skills/boss/boss_store.py`.
+_Avoid_: pm paths, state dir
 
 **Policy**: the steering numbers a boss and its workers act on — context
 bands, cost lines, escalation rungs. One module, `skills/boss/policy.py`; the

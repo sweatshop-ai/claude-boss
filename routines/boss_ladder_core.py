@@ -29,12 +29,14 @@ import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-HOME = Path(os.environ.get("HOME") or Path.home())
 HERE = Path(__file__).resolve().parent          # <plugin>/routines
-CFG = Path(os.environ.get("CLAUDE_CONFIG_DIR", str(HOME / ".claude")))
-PM_DIR = Path(os.environ.get("BOSS_LADDER_PM", CFG / "pm"))
-STATE = Path(os.environ.get("BOSS_LADDER_STATE",
-                            CFG / "routines" / "state" / "boss-ladder.json"))
+sys.path.insert(0, str(HERE.parent / "skills" / "boss"))
+import boss_store  # noqa: E402
+
+# The defaults come from the track store; the two overrides still win.
+PM_DIR = Path(os.environ.get("BOSS_LADDER_PM") or boss_store.pm_dir())
+STATE = Path(os.environ.get("BOSS_LADDER_STATE")
+             or boss_store.config_dir() / "routines" / "state" / "boss-ladder.json")
 BOSS_ALERT = os.environ.get("BOSS_ALERT",
                             str(HERE.parent / "skills" / "boss" / "bin" / "boss-alert"))
 DRY_RUN = os.environ.get("DRY_RUN", "0") == "1"
@@ -96,22 +98,11 @@ def save_state(state: dict) -> None:
 # ---------------------------------------------------------------- tracks
 
 def open_tracks(pm_dir: Path):
-    """(track, tracker_path) for every tracker whose goal says OPEN."""
-    for md in sorted(pm_dir.glob("*.md")):
-        name = md.name
-        if name.startswith(".") or name.endswith((".goal.md", ".archive.md")):
-            continue
-        track = name[:-3]
-        goal = pm_dir / f"{track}.goal.md"
-        if not goal.exists():
-            yield track, md, "no goal file"
-            continue
-        try:
-            head = goal.read_text(errors="replace")
-        except OSError as exc:
-            yield track, md, f"goal unreadable: {exc}"
-            continue
-        yield track, md, None if is_open(head) else "goal not OPEN"
+    """(track, tracker_path, skip reason or None) for every tracker the store lists."""
+    for track, md, head, reason in boss_store.open_tracks(pm=pm_dir):
+        if reason is None and not is_open(head):
+            reason = "goal not OPEN"
+        yield track, md, reason
 
 
 # ---------------------------------------------------------------- the run

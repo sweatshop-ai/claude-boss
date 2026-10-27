@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.17.0 — 2026-10-27
+
+- **An empty `CLAUDE_CONFIG_DIR` no longer breaks the hooks** (architecture
+  review, candidate 1). `CLAUDE_CONFIG_DIR=""` was read as a path, not as unset,
+  so the guard never fired and reap, compact and the ladder resolved `pm/` to
+  `./pm` in whatever directory they ran from. An empty value now means
+  `~/.claude`, in every hook.
+- **The track store owns `pm/`.** `skills/boss/boss_store.py` is the one module
+  that knows where things live and how they are read: the config and `pm/`
+  paths, the objective and tracker reads (the pulse reads the tracker once per
+  run), per-session state with a locked atomic update (one stable lock file,
+  `pm/.pulse/.state.lock`, never a reap candidate), the reap candidates, the
+  frontier cache path and key, and `open_tracks`. `boss-guard`, `boss-pulse`,
+  `boss-compact`, `boss-reap`, `routines/boss_ladder_core.py` and `boss-panes`
+  now ask it at call time; their own path constants are gone.
+  `BOSS_LADDER_PM` and `BOSS_LADDER_STATE` still win in the ladder.
+- **A bash agreement test.** `test_bash_agreement.py` lifts the path and cache
+  key lines out of `boss-goal` and `boss-tracker`, runs them in bash and
+  compares the result with the store, so the shell scripts cannot drift from it.
+- `registry.py` stays a vendored copy, held equal to its original by a test;
+  it and `hermetic.py` are the two documented exceptions to the store.
+
 ## 0.16.0 — 2026-10-26
 
 - **The pulse decides as data, then words it** (architecture review,

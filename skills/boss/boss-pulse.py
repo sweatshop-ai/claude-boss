@@ -52,10 +52,6 @@ import pulse  # noqa: E402
 import registry  # noqa: E402
 import tracker  # noqa: E402
 
-CFG = registry.config_dir()
-PM = CFG / "pm"
-STATE = PM / ".pulse"
-
 MIN_GAP_S = 60          # never twice inside a minute
 MAX_PER_HOUR = 12       # a boss needing more than this is in a loop, not a job
 
@@ -63,10 +59,7 @@ MAX_PER_HOUR = 12       # a boss needing more than this is in a loop, not a job
 # ---------------------------------------------------------------- goal file
 
 def read_goal(track):
-    try:
-        return (PM / ("%s.goal.md" % track)).read_text(encoding="utf-8")
-    except OSError:
-        return None
+    return boss_store.read_objective(track)
 
 
 # ------------------------------------------------------------------ fleet
@@ -80,7 +73,7 @@ def team(sid):
     rule 15, so the pulse must not hand one over.
     """
     try:
-        seats = fleet.view(fleet.Tmux(timeout=3), registry.live(CFG))
+        seats = fleet.view(fleet.Tmux(timeout=3), registry.live(boss_store.config_dir()))
     except fleet.TmuxUnavailable:
         return [], 0
     me = fleet.seat_of(seats, sid=sid)
@@ -109,14 +102,6 @@ def ready_of(out):
     return ["%s %s" % (t["num"], t["title"]) for t in out["tickets"] if t["state"] == "ready"]
 
 
-def frontier_cache(track, source):
-    """Where the last `frontier.py --json` of this track's GitHub graph is kept.
-    Keyed by the source too, so a track moved to another graph never reads the
-    old one's tickets. `boss-goal check` writes the same file."""
-    import hashlib
-    return STATE / ("%s.%s.frontier.json" % (track, hashlib.sha1(source.encode()).hexdigest()[:10]))
-
-
 def read_frontier(source, track):
     """(ready tickets as "NN title", error) for the ticket graph at `source`.
 
@@ -128,7 +113,7 @@ def read_frontier(source, track):
     background and by `boss-goal check`, which saves the same cache; a failed
     read keeps the last good frontier."""
     if source.startswith("gh:"):
-        cache = frontier_cache(track, source)
+        cache = boss_store.frontier_cache(track, source)
         try:
             age = time.time() - cache.stat().st_mtime
         except OSError:
@@ -141,7 +126,7 @@ def read_frontier(source, track):
                 # minute must not turn the graph "broken". With no cache at all,
                 # the error is what the boss needs to see.
                 if r.returncode == 0 or age is None:
-                    STATE.mkdir(parents=True, exist_ok=True)
+                    boss_store.state_dir().mkdir(parents=True, exist_ok=True)
                     tmp = cache.with_suffix(".tmp%d" % os.getpid())
                     tmp.write_text(r.stdout if r.returncode == 0 else r.stderr, encoding="utf-8")
                     os.replace(tmp, cache)
@@ -174,7 +159,7 @@ def read_frontier(source, track):
     return ready_of(fr.classify(tickets)), None
 
 
-def open_blockers(track):
+def open_blockers(body):
     """Every line under `## Open blockers` that is an entry, newest last.
 
     `due_rungs` below answers "is a rung overdue". This answers the blunter
@@ -183,9 +168,7 @@ def open_blockers(track):
     the line existing, which is the point — the failure being fixed is a boss
     that never armed a timer.
     """
-    try:
-        body = (PM / ("%s.md" % track)).read_text(encoding="utf-8")
-    except OSError:
+    if body is None:
         return []
     return [b[:160] for b in tracker.open_blockers(body)]
 
@@ -201,7 +184,7 @@ def question_pending(sid):
     registry rather than trusting that. It is the difference between a boss
     that has asked and one that has gone quiet.
     """
-    rec = registry.by_sid(sid, CFG)
+    rec = registry.by_sid(sid, boss_store.config_dir())
     if rec is None:
         return False
     return bool(rec.get("waitingFor")) or (rec.get("status") or "") == "waiting"
@@ -212,11 +195,18 @@ def question_pending(sid):
 TPLUS = re.compile(r"T\+0[^0-9]{0,12}(\d{4}-\d{2}-\d{2})?[T ]?(\d{2}):(\d{2})")
 
 
-def due_rungs(track, fired):
-    """Open blockers in the tracker whose next escalation rung has come due."""
-    try:
-        body = (PM / ("%s.md" % track)).read_text(encoding="utf-8")
-    except OSError:
+_UNREAD = object()
+
+
+def due_rungs(track, fired, body=_UNREAD):
+    """Open blockers in the tracker whose next escalation rung has come due.
+
+    `body` is the tracker text a caller already read (None: it could not be);
+    left out, this reads it.
+    """
+    if body is _UNREAD:
+        body = boss_store.read_tracker(track)
+    if body is None:
         return []
     now = time.localtime()
     due = []
@@ -254,31 +244,29 @@ def due_rungs(track, fired):
 # ------------------------------------------------------------ rate limit
 
 def gate(sid):
-    STATE.mkdir(parents=True, exist_ok=True)
-    f = STATE / ("%s.json" % sid)
-    try:
-        st = json.loads(f.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        st = {}
+    """(now, state) when the pulse may speak, (None, state) when it must not."""
+    st = boss_store.read_state(sid, "pulse")
     now = time.time()
     if now - st.get("last", 0) < MIN_GAP_S:
-        return None, st, f
+        return None, st
     if now - st.get("hour_start", 0) > 3600:
         st["hour_start"], st["count"] = now, 0
     if st.get("count", 0) >= MAX_PER_HOUR:
-        return None, st, f
-    return now, st, f
+        return None, st
+    return now, st
 
 
-def commit(f, st, now, fired):
-    st["last"] = now
-    st["count"] = st.get("count", 0) + 1
-    st.setdefault("hour_start", now)
-    st["rungs"] = fired
-    try:
-        f.write_text(json.dumps(st), encoding="utf-8")
-    except OSError:
-        pass
+def commit(sid, now, fired):
+    """Record that the pulse spoke. Under the store's lock, so the hour's count
+    is the sum of every Stop hook that spoke, not the last writer's."""
+    def spoke(st):
+        if now - st.get("hour_start", 0) > 3600:
+            st["hour_start"], st["count"] = now, 0
+        st["last"] = now
+        st["count"] = st.get("count", 0) + 1
+        st.setdefault("hour_start", now)
+        st["rungs"] = fired
+    boss_store.update_state(sid, "pulse", spoke)
 
 
 # ------------------------------------------------------------------ main
@@ -294,9 +282,9 @@ def main():
         return 0                                  # never stack on another block
 
     sid = payload.get("session_id") or ""
-    if not boss_store.is_boss(sid, CFG):
+    if not boss_store.is_boss(sid):
         return 0                                  # not a boss
-    track = boss_store.track_of(sid, CFG)
+    track = boss_store.track_of(sid)
     if not track:
         return 0                                  # no track claimed yet, or not a plain name
 
@@ -312,7 +300,7 @@ def main():
         if (t.get("status") or "").lower() in ("running", "pending"):
             return 0
 
-    now, st, statef = gate(sid)
+    now, st = gate(sid)
     if now is None:
         return 0
 
@@ -324,8 +312,9 @@ def main():
 
     idle, size = team(sid)
     fired = dict(st.get("rungs") or {})
-    rungs = due_rungs(track, fired)
-    blockers = open_blockers(track)
+    tracker_text = boss_store.read_tracker(track)  # once per Stop, both consumers share it
+    rungs = due_rungs(track, fired, tracker_text)
+    blockers = open_blockers(tracker_text)
     source = objective.tickets_source(body)
     ready, broken = read_frontier(source, track) if source else ([], None)
     facts = pulse.Facts(
@@ -341,7 +330,7 @@ def main():
         "hookEventName": "Stop",
         "additionalContext": pulse.render(facts, decision),
     }}))
-    commit(statef, st, now, decision.fired)
+    commit(sid, now, decision.fired)
     return 0
 
 
