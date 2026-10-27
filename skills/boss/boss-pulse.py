@@ -105,14 +105,6 @@ def ready_of(out):
     return ["%s %s" % (t["num"], t["title"]) for t in out["tickets"] if t["state"] == "ready"]
 
 
-def frontier_cache(track, source):
-    """Where the last `frontier.py --json` of this track's GitHub graph is kept.
-    Keyed by the source too, so a track moved to another graph never reads the
-    old one's tickets. `boss-goal check` writes the same file."""
-    import hashlib
-    return boss_store.state_dir() / ("%s.%s.frontier.json" % (track, hashlib.sha1(source.encode()).hexdigest()[:10]))
-
-
 def read_frontier(source, track):
     """(ready tickets as "NN title", error) for the ticket graph at `source`.
 
@@ -124,7 +116,7 @@ def read_frontier(source, track):
     background and by `boss-goal check`, which saves the same cache; a failed
     read keeps the last good frontier."""
     if source.startswith("gh:"):
-        cache = frontier_cache(track, source)
+        cache = boss_store.frontier_cache(track, source)
         try:
             age = time.time() - cache.stat().st_mtime
         except OSError:
