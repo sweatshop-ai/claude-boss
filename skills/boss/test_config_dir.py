@@ -118,5 +118,29 @@ class EmptyConfigDir(unittest.TestCase):
         self.assertEqual((pm, state), (self.tmp / "opm", self.tmp / "ost.json"))
 
 
+class RegistryAgrees(unittest.TestCase):
+    """registry.py is a vendored copy that must not import the store, so its
+    config_dir is a second statement of the rule. A drift fails here."""
+
+    def test_registry_and_store_name_the_same_directory(self):
+        sys.path.insert(0, str(HERE))
+        import boss_store
+        import registry
+        old = os.environ.get("CLAUDE_CONFIG_DIR")
+        try:
+            for value in (None, "", "/tmp/some-config-dir"):
+                if value is None:
+                    os.environ.pop("CLAUDE_CONFIG_DIR", None)
+                else:
+                    os.environ["CLAUDE_CONFIG_DIR"] = value
+                self.assertEqual(registry.config_dir(), boss_store.config_dir(),
+                                 "CLAUDE_CONFIG_DIR=%r" % value)
+        finally:
+            if old is None:
+                os.environ.pop("CLAUDE_CONFIG_DIR", None)
+            else:
+                os.environ["CLAUDE_CONFIG_DIR"] = old
+
+
 if __name__ == "__main__":
     unittest.main()
