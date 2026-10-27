@@ -59,10 +59,7 @@ MAX_PER_HOUR = 12       # a boss needing more than this is in a loop, not a job
 # ---------------------------------------------------------------- goal file
 
 def read_goal(track):
-    try:
-        return (boss_store.pm_dir() / ("%s.goal.md" % track)).read_text(encoding="utf-8")
-    except OSError:
-        return None
+    return boss_store.read_objective(track)
 
 
 # ------------------------------------------------------------------ fleet
@@ -170,7 +167,7 @@ def read_frontier(source, track):
     return ready_of(fr.classify(tickets)), None
 
 
-def open_blockers(track):
+def open_blockers(body):
     """Every line under `## Open blockers` that is an entry, newest last.
 
     `due_rungs` below answers "is a rung overdue". This answers the blunter
@@ -179,9 +176,7 @@ def open_blockers(track):
     the line existing, which is the point — the failure being fixed is a boss
     that never armed a timer.
     """
-    try:
-        body = (boss_store.pm_dir() / ("%s.md" % track)).read_text(encoding="utf-8")
-    except OSError:
+    if body is None:
         return []
     return [b[:160] for b in tracker.open_blockers(body)]
 
@@ -208,11 +203,18 @@ def question_pending(sid):
 TPLUS = re.compile(r"T\+0[^0-9]{0,12}(\d{4}-\d{2}-\d{2})?[T ]?(\d{2}):(\d{2})")
 
 
-def due_rungs(track, fired):
-    """Open blockers in the tracker whose next escalation rung has come due."""
-    try:
-        body = (boss_store.pm_dir() / ("%s.md" % track)).read_text(encoding="utf-8")
-    except OSError:
+_UNREAD = object()
+
+
+def due_rungs(track, fired, body=_UNREAD):
+    """Open blockers in the tracker whose next escalation rung has come due.
+
+    `body` is the tracker text a caller already read (None: it could not be);
+    left out, this reads it.
+    """
+    if body is _UNREAD:
+        body = boss_store.read_tracker(track)
+    if body is None:
         return []
     now = time.localtime()
     due = []
@@ -318,8 +320,9 @@ def main():
 
     idle, size = team(sid)
     fired = dict(st.get("rungs") or {})
-    rungs = due_rungs(track, fired)
-    blockers = open_blockers(track)
+    tracker_text = boss_store.read_tracker(track)  # once per Stop, both consumers share it
+    rungs = due_rungs(track, fired, tracker_text)
+    blockers = open_blockers(tracker_text)
     source = objective.tickets_source(body)
     ready, broken = read_frontier(source, track) if source else ([], None)
     facts = pulse.Facts(
