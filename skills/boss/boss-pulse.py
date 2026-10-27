@@ -250,32 +250,29 @@ def due_rungs(track, fired):
 # ------------------------------------------------------------ rate limit
 
 def gate(sid):
-    state = boss_store.state_dir()
-    state.mkdir(parents=True, exist_ok=True)
-    f = state / ("%s.json" % sid)
-    try:
-        st = json.loads(f.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        st = {}
+    """(now, state) when the pulse may speak, (None, state) when it must not."""
+    st = boss_store.read_state(sid, "pulse")
     now = time.time()
     if now - st.get("last", 0) < MIN_GAP_S:
-        return None, st, f
+        return None, st
     if now - st.get("hour_start", 0) > 3600:
         st["hour_start"], st["count"] = now, 0
     if st.get("count", 0) >= MAX_PER_HOUR:
-        return None, st, f
-    return now, st, f
+        return None, st
+    return now, st
 
 
-def commit(f, st, now, fired):
-    st["last"] = now
-    st["count"] = st.get("count", 0) + 1
-    st.setdefault("hour_start", now)
-    st["rungs"] = fired
-    try:
-        f.write_text(json.dumps(st), encoding="utf-8")
-    except OSError:
-        pass
+def commit(sid, now, fired):
+    """Record that the pulse spoke. Under the store's lock, so the hour's count
+    is the sum of every Stop hook that spoke, not the last writer's."""
+    def spoke(st):
+        if now - st.get("hour_start", 0) > 3600:
+            st["hour_start"], st["count"] = now, 0
+        st["last"] = now
+        st["count"] = st.get("count", 0) + 1
+        st.setdefault("hour_start", now)
+        st["rungs"] = fired
+    boss_store.update_state(sid, "pulse", spoke)
 
 
 # ------------------------------------------------------------------ main
@@ -309,7 +306,7 @@ def main():
         if (t.get("status") or "").lower() in ("running", "pending"):
             return 0
 
-    now, st, statef = gate(sid)
+    now, st = gate(sid)
     if now is None:
         return 0
 
@@ -338,7 +335,7 @@ def main():
         "hookEventName": "Stop",
         "additionalContext": pulse.render(facts, decision),
     }}))
-    commit(statef, st, now, decision.fired)
+    commit(sid, now, decision.fired)
     return 0
 
 
