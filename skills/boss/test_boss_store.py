@@ -73,5 +73,70 @@ class Store(unittest.TestCase):
         self.assertNotEqual(out.returncode, 0)
 
 
+class TrackFiles(unittest.TestCase):
+    """The two files of a track: named and read by the store, never interpreted."""
+
+    def setUp(self):
+        self.cfg = Path(tempfile.mkdtemp())
+        self.pm = self.cfg / "pm"
+        self.pm.mkdir()
+
+    def test_the_paths_are_named_by_the_track(self):
+        self.assertEqual(boss_store.objective_path("demo", self.cfg), self.pm / "demo.goal.md")
+        self.assertEqual(boss_store.tracker_path("demo", self.cfg), self.pm / "demo.md")
+
+    def test_no_path_is_built_for_a_bad_track_name(self):
+        for bad in ("", "../evil", "a/b", "A", ".hidden", "x" * 65, None):
+            self.assertIsNone(boss_store.objective_path(bad, self.cfg), repr(bad))
+            self.assertIsNone(boss_store.tracker_path(bad, self.cfg), repr(bad))
+            self.assertIsNone(boss_store.read_objective(bad, self.cfg), repr(bad))
+            self.assertIsNone(boss_store.read_tracker(bad, self.cfg), repr(bad))
+
+    def test_reads_return_the_text_as_written(self):
+        (self.pm / "demo.goal.md").write_text("_Status: OPEN_\n", encoding="utf-8")
+        (self.pm / "demo.md").write_text("# T \u2014 caf\u00e9\n", encoding="utf-8")
+        self.assertEqual(boss_store.read_objective("demo", self.cfg), "_Status: OPEN_\n")
+        self.assertEqual(boss_store.read_tracker("demo", self.cfg), "# T \u2014 caf\u00e9\n")
+
+    def test_an_empty_file_is_empty_text_not_missing(self):
+        (self.pm / "demo.md").write_text("")
+        self.assertEqual(boss_store.read_tracker("demo", self.cfg), "")
+
+    def test_a_missing_file_is_none(self):
+        self.assertIsNone(boss_store.read_objective("demo", self.cfg))
+        self.assertIsNone(boss_store.read_tracker("demo", self.cfg))
+
+    def test_an_unreadable_file_is_none(self):
+        (self.pm / "demo.goal.md").mkdir()          # a directory: open() fails with OSError
+        self.assertIsNone(boss_store.read_objective("demo", self.cfg))
+        f = self.pm / "demo.md"
+        f.write_text("x")
+        f.chmod(0)
+        try:
+            if os.access(f, os.R_OK):
+                self.skipTest("running as a user who reads mode 000")
+            self.assertIsNone(boss_store.read_tracker("demo", self.cfg))
+        finally:
+            f.chmod(0o600)
+
+    def test_a_symlink_is_followed_as_today(self):
+        real = self.cfg / "elsewhere.md"
+        real.write_text("linked")
+        (self.pm / "demo.md").symlink_to(real)
+        self.assertEqual(boss_store.read_tracker("demo", self.cfg), "linked")
+
+    def test_the_directory_follows_the_environment_at_call_time(self):
+        (self.pm / "demo.md").write_text("here")
+        old = os.environ.get("CLAUDE_CONFIG_DIR")
+        os.environ["CLAUDE_CONFIG_DIR"] = str(self.cfg)
+        try:
+            self.assertEqual(boss_store.read_tracker("demo"), "here")
+        finally:
+            if old is None:
+                os.environ.pop("CLAUDE_CONFIG_DIR", None)
+            else:
+                os.environ["CLAUDE_CONFIG_DIR"] = old
+
+
 if __name__ == "__main__":
     unittest.main()
