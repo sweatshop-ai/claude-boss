@@ -9,6 +9,52 @@ coordinating — starts writing the code itself, forgets a worker went idle, or
 ends its turn while blocked and says nothing. Six hooks exist for that, and each
 one came from a measured failure rather than a guess.
 
+## When a boss is the right tool, and when subagents are enough
+
+Claude Code already runs work in parallel without this plugin: background
+subagents (the `Agent` tool) and, experimentally, agent teams. For most work
+they are the right choice, and a boss's own workers use them. The difference
+is not intelligence but lifetime: a subagent lives inside one turn of your
+session, a boss lives above several independent sessions, for days, with its
+state on disk.
+
+| | Subagent | Agent teams | Boss |
+|---|---|---|---|
+| Lives | one turn of your session | as long as the lead session | days; each worker is restarted fresh per task |
+| State | in your context | in the lead's and teammates' contexts | on disk: tracker, objective, handoffs |
+| Survives the coordinator compacting | no | no | yes, a hook hands the tracker back |
+| You can watch it and type into it | no, you get a summary | the agent panel | yes, every worker is a tmux pane |
+| Escalates a blocker while nobody is awake | no | no | yes, from a systemd timer |
+| Needs | nothing | an environment variable | tmux, two timers, this plugin |
+| Maintained by | Anthropic | Anthropic | you, from this repo |
+
+A subagent is an intern you send to look something up: you do not see the
+work, you get the answer, and then they are gone. That is the right tool for
+anything that fits in one conversation (three review lenses on a diff, five
+research questions, the mechanical half of a task) and it is cheaper.
+
+A boss is a project manager with a team at desks you can walk past. It writes
+no code itself (a hook counts when it does), keeps a board that still exists
+when it is away, and rings you only when something needs your hand. A worker
+whose context fills up writes a handoff and is replaced by a fresh one with the
+same name and the same pane.
+
+```mermaid
+flowchart TD
+  Q1{"Does the work fit in<br/>one turn of your session?"}
+  Q1 -->|yes| Q2{"Must the parts<br/>talk to each other?"}
+  Q2 -->|no| SUB["Subagents"]
+  Q2 -->|yes| TEAM["Agent teams"]
+  Q1 -->|no| Q3{"A ticket graph with dependencies,<br/>several repos, hours or days,<br/>blockers held by people?"}
+  Q3 -->|no| ONE["One session with a handoff"]
+  Q3 -->|yes| BOSS["A boss and its workers"]
+  BOSS --> SA["whose workers use<br/>subagents for the mechanical parts"]
+```
+
+So the question is never boss or subagents. Reach for a boss only when the
+work does not fit in one session. For one straight line of work, one session
+with a handoff is enough, and a boss over a single worker is overhead.
+
 ## What the hooks do
 
 | Hook | Event | What it catches |
