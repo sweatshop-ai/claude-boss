@@ -39,6 +39,11 @@ class Store(unittest.TestCase):
         self.assertTrue(boss_store.is_boss(SID, self.cfg))
         self.assertEqual(boss_store.track_of(SID, self.cfg), "lead-engine")
 
+    def test_an_unknown_command_prints_the_command_list(self):
+        out = self.cli("bogus")
+        self.assertEqual(out.returncode, 2)
+        self.assertIn("boss-marker register [track]", out.stderr)
+
     def test_register_without_a_track_is_a_boss_with_no_track_yet(self):
         self.cli("register")
         self.assertTrue(boss_store.is_boss(SID, self.cfg))

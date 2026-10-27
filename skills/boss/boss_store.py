@@ -285,7 +285,7 @@ def main(argv):
         return 0
     if cmd == "is-boss" and len(argv) == 1:
         return 0 if is_boss(sid) else 1
-    print(__doc__.split("\n\n")[2], file=sys.stderr)
+    print(next(p for p in __doc__.split("\n\n") if "boss-marker register" in p), file=sys.stderr)
     return 2
 
 

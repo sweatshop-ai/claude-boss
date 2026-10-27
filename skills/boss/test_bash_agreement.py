@@ -82,14 +82,14 @@ def _disagreements(bindir):
                 out.append("%s: PM is %r for %r" % (script.name, got, env))
         for name in NAMES:
             ok = boss_store.valid_track(name)
-            for fn in fns:
-                rc, got = bash(pre + '%s "$1"' % fn, {"CLAUDE_CONFIG_DIR": cfg}, [name])
+            for fn, loc in ((f, l) for f in fns for l in LOCALES):
+                rc, got = bash(pre + '%s "$1"' % fn, {"CLAUDE_CONFIG_DIR": cfg, "LC_ALL": loc}, [name])
                 want = {"live": boss_store.tracker_path, "goal": boss_store.objective_path}.get(fn, lambda n, cfg: pm / ("%s.archive.md" % n))(name, cfg)
                 want = str(want)
                 if ok and (rc != 0 or got != want):
-                    out.append("%s %s(%r): got rc=%d %r, want %r" % (script.name, fn, name, rc, got, want))
+                    out.append("%s %s(%r) under %s: got rc=%d %r, want %r" % (script.name, fn, name, loc, rc, got, want))
                 if not ok and rc == 0:
-                    out.append("%s %s(%r) accepts a name the store refuses" % (script.name, fn, name))
+                    out.append("%s %s(%r) under %s accepts a name the store refuses" % (script.name, fn, name, loc))
     # the frontier cache: key line and path line, run with the same inputs
     keyln = lift(goal, r"^\s*key=\$\(")
     pathln = lift(goal, r"^\s*c=\"\$PM/\.pulse/")
