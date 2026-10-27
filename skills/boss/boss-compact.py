@@ -26,15 +26,12 @@ Active only for sessions registered as a boss, with a track name in the marker:
 (SKILL.md session start, step 2, writes it.) Any other session: silent exit 0.
 """
 import json
-import os
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import boss_store  # noqa: E402
 
-CFG = Path(os.environ.get("CLAUDE_CONFIG_DIR", str(Path.home() / ".claude")))
-PM = CFG / "pm"
 CAP = 15360   # boss-tracker's cap; anything past it is history we do not inject
 
 RESTORE_HEAD = (
@@ -52,7 +49,7 @@ LIVE_HEAD = "\n--- ~/.claude/pm/{track}.md (live state) ---\n"
 
 
 def track_for(sid):
-    return boss_store.track_of(sid, CFG) or None
+    return boss_store.track_of(sid) or None
 
 
 def main():
@@ -86,7 +83,7 @@ def main():
         why = payload.get("source") or payload.get("trigger") or ""
         if why and why != "compact":
             return 0
-        live = PM / f"{track}.md"
+        live = boss_store.pm_dir() / f"{track}.md"
         try:
             body = live.read_text(encoding="utf-8")
         except OSError:
@@ -100,7 +97,7 @@ def main():
         # tactical thread and drops the standing outcome, which is the wrong way
         # round: the thread can be rebuilt from the tracker, the outcome cannot.
         try:
-            goal = (PM / f"{track}.goal.md").read_text(encoding="utf-8")
+            goal = (boss_store.pm_dir() / f"{track}.goal.md").read_text(encoding="utf-8")
         except OSError:
             goal = (f"(no objective file for {track} — run `boss-goal init {track}` "
                     f"and fill it in before dispatching anything else)")

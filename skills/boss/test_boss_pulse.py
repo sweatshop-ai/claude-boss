@@ -343,19 +343,19 @@ class DueRungs(unittest.TestCase):
         import importlib.util
         self.tmp = Path(tempfile.mkdtemp(prefix="boss-pulse-rungs-"))
         (self.tmp / "pm").mkdir()
-        old = os.environ.get("CLAUDE_CONFIG_DIR")
+        # The hook resolves its paths when a function runs, so the variable
+        # stays set until tearDown.
+        self._old = os.environ.get("CLAUDE_CONFIG_DIR")
         os.environ["CLAUDE_CONFIG_DIR"] = str(self.tmp)
-        try:
-            spec = importlib.util.spec_from_file_location("pulse_%d" % time.monotonic_ns(), str(PULSE))
-            self.mod = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(self.mod)
-        finally:
-            if old is None:
-                os.environ.pop("CLAUDE_CONFIG_DIR", None)
-            else:
-                os.environ["CLAUDE_CONFIG_DIR"] = old
+        spec = importlib.util.spec_from_file_location("pulse_%d" % time.monotonic_ns(), str(PULSE))
+        self.mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.mod)
 
     def tearDown(self):
+        if self._old is None:
+            os.environ.pop("CLAUDE_CONFIG_DIR", None)
+        else:
+            os.environ["CLAUDE_CONFIG_DIR"] = self._old
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def due(self, minutes_ago, fired):

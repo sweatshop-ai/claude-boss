@@ -27,18 +27,13 @@ Usage:
     boss-reap.py --sweep --dry-run    say what it would reap, touch nothing
 """
 import json
-import os
 import re
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import boss_store  # noqa: E402
 import registry  # noqa: E402
-
-CFG = Path(os.environ.get("CLAUDE_CONFIG_DIR", str(Path.home() / ".claude")))
-PM = CFG / "pm"
-MARKERS = PM / ".boss-sessions"
-STATE = PM / ".pulse"
 
 UUID = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}"
                   r"-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
@@ -53,7 +48,7 @@ def live_session_ids():
     exactly the stale state this script exists to clear.
     """
     return {str(rec.get("sessionId")).lower()
-            for rec in registry.live(CFG) if rec.get("sessionId")}
+            for rec in registry.live(boss_store.config_dir()) if rec.get("sessionId")}
 
 
 def candidates():
@@ -62,7 +57,7 @@ def candidates():
     A file whose name holds no UUID is not a candidate and is never returned,
     which is the whole safety property.
     """
-    for d in (MARKERS, STATE):
+    for d in (boss_store.markers_dir(), boss_store.state_dir()):
         if not d.is_dir():
             continue
         for p in d.iterdir():

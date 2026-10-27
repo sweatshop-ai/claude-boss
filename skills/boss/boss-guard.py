@@ -30,10 +30,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import boss_store  # noqa: E402
 
-CFG = Path(os.environ.get("CLAUDE_CONFIG_DIR", str(Path.home() / ".claude")))
-MARKERS = CFG / "pm" / ".boss-sessions"
-LOG = CFG / "pm" / "boss-guard.log"
-STATE = CFG / "pm" / ".pulse"
 
 # Commands a coordinator genuinely runs. Everything else is a worker's job.
 #
@@ -83,13 +79,12 @@ def strip_prefix(cmd, limit=6):
 # tilde or relative form and the resolved prefix would miss it.
 PLUGIN = Path(os.environ.get("CLAUDE_PLUGIN_ROOT",
                              str(Path(__file__).resolve().parent.parent.parent)))
-OWNED = (str(CFG / "pm"), str(PLUGIN))
 LOOSE = re.compile(r"/\.claude/pm/")
 
 
 def owns(path):
     p = str(path)
-    return p.startswith(OWNED) or bool(LOOSE.search(p))
+    return p.startswith((str(boss_store.pm_dir()), str(PLUGIN))) or bool(LOOSE.search(p))
 
 WATCHED = {"Bash", "Edit", "Write", "NotebookEdit", "Read", "Glob", "Grep", "Agent"}
 
@@ -122,8 +117,9 @@ def bump(sid):
     first carried no information. The count is what carries information after
     that, so keep it per session and let main() decide when to speak.
     """
-    STATE.mkdir(parents=True, exist_ok=True)
-    f = STATE / ("%s.guard.json" % sid)
+    state = boss_store.state_dir()
+    state.mkdir(parents=True, exist_ok=True)
+    f = state / ("%s.guard.json" % sid)
     try:
         fh = f.open("r+", encoding="utf-8")
     except OSError:
@@ -155,7 +151,7 @@ def main():
         return 0
 
     sid = payload.get("session_id") or ""
-    if not boss_store.is_boss(sid, CFG):
+    if not boss_store.is_boss(sid):
         return 0                      # not a boss session; nothing to say
 
     tool = payload.get("tool_name") or ""
@@ -178,8 +174,8 @@ def main():
         detail = str(fp)[:200]
 
     try:
-        MARKERS.mkdir(parents=True, exist_ok=True)
-        with LOG.open("a", encoding="utf-8") as fh:
+        boss_store.markers_dir().mkdir(parents=True, exist_ok=True)
+        with (boss_store.pm_dir() / "boss-guard.log").open("a", encoding="utf-8") as fh:
             fh.write(json.dumps({
                 "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
                 "session": sid,
