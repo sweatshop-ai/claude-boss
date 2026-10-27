@@ -19,7 +19,6 @@ data instead of imagination.
 Active only for sessions that registered themselves as a boss:
     ~/.claude/pm/.boss-sessions/<session_id>
 """
-import fcntl
 import json
 import os
 import re
@@ -117,31 +116,10 @@ def bump(sid):
     first carried no information. The count is what carries information after
     that, so keep it per session and let main() decide when to speak.
     """
-    state = boss_store.state_dir()
-    state.mkdir(parents=True, exist_ok=True)
-    f = state / ("%s.guard.json" % sid)
-    try:
-        fh = f.open("r+", encoding="utf-8")
-    except OSError:
-        try:
-            fh = f.open("w+", encoding="utf-8")
-        except OSError:
-            return 1                  # unwritable state: behave as first firing
-    with fh:
-        try:
-            fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
-            try:
-                st = json.loads(fh.read() or "{}")
-            except ValueError:
-                st = {}
-            n = int(st.get("n") or 0) + 1
-            st["n"] = n
-            fh.seek(0)
-            fh.truncate()
-            fh.write(json.dumps(st))
-        except OSError:
-            return 1
-    return n
+    def count(st):
+        st["n"] = int(st.get("n") or 0) + 1
+
+    return boss_store.update_state(sid, "guard", count)["n"]
 
 
 def main():

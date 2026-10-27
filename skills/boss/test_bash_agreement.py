@@ -84,7 +84,8 @@ def _disagreements(bindir):
             ok = boss_store.valid_track(name)
             for fn in fns:
                 rc, got = bash(pre + '%s "$1"' % fn, {"CLAUDE_CONFIG_DIR": cfg}, [name])
-                want = {"live": "%s/%s.md", "arch": "%s/%s.archive.md", "goal": "%s/%s.goal.md"}[fn] % (pm, name)
+                want = {"live": boss_store.tracker_path, "goal": boss_store.objective_path}.get(fn, lambda n, cfg: pm / ("%s.archive.md" % n))(name, cfg)
+                want = str(want)
                 if ok and (rc != 0 or got != want):
                     out.append("%s %s(%r): got rc=%d %r, want %r" % (script.name, fn, name, rc, got, want))
                 if not ok and rc == 0:

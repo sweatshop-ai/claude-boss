@@ -83,11 +83,10 @@ def main():
         why = payload.get("source") or payload.get("trigger") or ""
         if why and why != "compact":
             return 0
-        live = boss_store.pm_dir() / f"{track}.md"
-        try:
-            body = live.read_text(encoding="utf-8")
-        except OSError:
-            body = f"(tracker {live} could not be read — run boss-tracker show {track})"
+        body = boss_store.read_tracker(track)
+        if body is None:
+            body = (f"(tracker {boss_store.tracker_path(track)} could not be read"
+                    f" — run boss-tracker show {track})")
         if len(body.encode("utf-8")) > CAP:
             body = body.encode("utf-8")[:CAP].decode("utf-8", "ignore") + (
                 f"\n\n[truncated at {CAP} B — the tracker is over its cap; "
@@ -96,9 +95,8 @@ def main():
         # The objective first. A compaction summary reliably keeps the recent
         # tactical thread and drops the standing outcome, which is the wrong way
         # round: the thread can be rebuilt from the tracker, the outcome cannot.
-        try:
-            goal = (boss_store.pm_dir() / f"{track}.goal.md").read_text(encoding="utf-8")
-        except OSError:
+        goal = boss_store.read_objective(track)
+        if goal is None:
             goal = (f"(no objective file for {track} — run `boss-goal init {track}` "
                     f"and fill it in before dispatching anything else)")
 
