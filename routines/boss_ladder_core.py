@@ -29,12 +29,14 @@ import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-HOME = Path(os.environ.get("HOME") or Path.home())
 HERE = Path(__file__).resolve().parent          # <plugin>/routines
-CFG = Path(os.environ.get("CLAUDE_CONFIG_DIR", str(HOME / ".claude")))
-PM_DIR = Path(os.environ.get("BOSS_LADDER_PM", CFG / "pm"))
-STATE = Path(os.environ.get("BOSS_LADDER_STATE",
-                            CFG / "routines" / "state" / "boss-ladder.json"))
+sys.path.insert(0, str(HERE.parent / "skills" / "boss"))
+import boss_store  # noqa: E402
+
+# The defaults come from the track store; the two overrides still win.
+PM_DIR = Path(os.environ.get("BOSS_LADDER_PM") or boss_store.pm_dir())
+STATE = Path(os.environ.get("BOSS_LADDER_STATE")
+             or boss_store.config_dir() / "routines" / "state" / "boss-ladder.json")
 BOSS_ALERT = os.environ.get("BOSS_ALERT",
                             str(HERE.parent / "skills" / "boss" / "bin" / "boss-alert"))
 DRY_RUN = os.environ.get("DRY_RUN", "0") == "1"

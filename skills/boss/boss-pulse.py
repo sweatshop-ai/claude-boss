@@ -52,10 +52,6 @@ import pulse  # noqa: E402
 import registry  # noqa: E402
 import tracker  # noqa: E402
 
-CFG = registry.config_dir()
-PM = CFG / "pm"
-STATE = PM / ".pulse"
-
 MIN_GAP_S = 60          # never twice inside a minute
 MAX_PER_HOUR = 12       # a boss needing more than this is in a loop, not a job
 
@@ -64,7 +60,7 @@ MAX_PER_HOUR = 12       # a boss needing more than this is in a loop, not a job
 
 def read_goal(track):
     try:
-        return (PM / ("%s.goal.md" % track)).read_text(encoding="utf-8")
+        return (boss_store.pm_dir() / ("%s.goal.md" % track)).read_text(encoding="utf-8")
     except OSError:
         return None
 
@@ -80,7 +76,7 @@ def team(sid):
     rule 15, so the pulse must not hand one over.
     """
     try:
-        seats = fleet.view(fleet.Tmux(timeout=3), registry.live(CFG))
+        seats = fleet.view(fleet.Tmux(timeout=3), registry.live(boss_store.config_dir()))
     except fleet.TmuxUnavailable:
         return [], 0
     me = fleet.seat_of(seats, sid=sid)
@@ -114,7 +110,7 @@ def frontier_cache(track, source):
     Keyed by the source too, so a track moved to another graph never reads the
     old one's tickets. `boss-goal check` writes the same file."""
     import hashlib
-    return STATE / ("%s.%s.frontier.json" % (track, hashlib.sha1(source.encode()).hexdigest()[:10]))
+    return boss_store.state_dir() / ("%s.%s.frontier.json" % (track, hashlib.sha1(source.encode()).hexdigest()[:10]))
 
 
 def read_frontier(source, track):
@@ -141,7 +137,7 @@ def read_frontier(source, track):
                 # minute must not turn the graph "broken". With no cache at all,
                 # the error is what the boss needs to see.
                 if r.returncode == 0 or age is None:
-                    STATE.mkdir(parents=True, exist_ok=True)
+                    boss_store.state_dir().mkdir(parents=True, exist_ok=True)
                     tmp = cache.with_suffix(".tmp%d" % os.getpid())
                     tmp.write_text(r.stdout if r.returncode == 0 else r.stderr, encoding="utf-8")
                     os.replace(tmp, cache)
@@ -184,7 +180,7 @@ def open_blockers(track):
     that never armed a timer.
     """
     try:
-        body = (PM / ("%s.md" % track)).read_text(encoding="utf-8")
+        body = (boss_store.pm_dir() / ("%s.md" % track)).read_text(encoding="utf-8")
     except OSError:
         return []
     return [b[:160] for b in tracker.open_blockers(body)]
@@ -201,7 +197,7 @@ def question_pending(sid):
     registry rather than trusting that. It is the difference between a boss
     that has asked and one that has gone quiet.
     """
-    rec = registry.by_sid(sid, CFG)
+    rec = registry.by_sid(sid, boss_store.config_dir())
     if rec is None:
         return False
     return bool(rec.get("waitingFor")) or (rec.get("status") or "") == "waiting"
@@ -215,7 +211,7 @@ TPLUS = re.compile(r"T\+0[^0-9]{0,12}(\d{4}-\d{2}-\d{2})?[T ]?(\d{2}):(\d{2})")
 def due_rungs(track, fired):
     """Open blockers in the tracker whose next escalation rung has come due."""
     try:
-        body = (PM / ("%s.md" % track)).read_text(encoding="utf-8")
+        body = (boss_store.pm_dir() / ("%s.md" % track)).read_text(encoding="utf-8")
     except OSError:
         return []
     now = time.localtime()
@@ -254,8 +250,9 @@ def due_rungs(track, fired):
 # ------------------------------------------------------------ rate limit
 
 def gate(sid):
-    STATE.mkdir(parents=True, exist_ok=True)
-    f = STATE / ("%s.json" % sid)
+    state = boss_store.state_dir()
+    state.mkdir(parents=True, exist_ok=True)
+    f = state / ("%s.json" % sid)
     try:
         st = json.loads(f.read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -294,9 +291,9 @@ def main():
         return 0                                  # never stack on another block
 
     sid = payload.get("session_id") or ""
-    if not boss_store.is_boss(sid, CFG):
+    if not boss_store.is_boss(sid):
         return 0                                  # not a boss
-    track = boss_store.track_of(sid, CFG)
+    track = boss_store.track_of(sid)
     if not track:
         return 0                                  # no track claimed yet, or not a plain name
 

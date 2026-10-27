@@ -26,6 +26,11 @@ TRACK_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 
 
 def config_dir(cfg=None):
+    """The config directory: `cfg` when given, else `$CLAUDE_CONFIG_DIR`, else `~/.claude`.
+
+    An empty variable is unset. It is read on every call, so a test that sets it
+    (or passes `cfg`) is heard, and a hook never holds a stale copy.
+    """
     if cfg is not None:
         return Path(cfg)
     return Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
@@ -37,6 +42,10 @@ def pm_dir(cfg=None):
 
 def markers_dir(cfg=None):
     return pm_dir(cfg) / ".boss-sessions"
+
+
+def state_dir(cfg=None):
+    return pm_dir(cfg) / ".pulse"
 
 
 def valid_track(track):

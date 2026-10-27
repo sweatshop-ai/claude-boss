@@ -53,7 +53,7 @@ import policy  # noqa: E402
 import registry  # noqa: E402
 import transcript  # noqa: E402
 
-CFG = registry.config_dir()
+CFG = boss_store.config_dir()
 
 
 def transcript_for(rec):
