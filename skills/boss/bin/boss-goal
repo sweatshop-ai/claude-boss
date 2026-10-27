@@ -44,7 +44,7 @@ obj() { python3 "$HERE/../objective.py" "$@"; }
 
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 # A track becomes a file name under pm/: a plain name only (boss_store.TRACK_RE).
-plain() { [[ "$1" =~ ^[a-z0-9][a-z0-9._-]{0,63}$ && "$1" != *..* ]] || die "not a track name: '$1' (lowercase letters, digits, . _ -)"; }
+plain() { local LC_ALL=C; [[ "$1" =~ ^[a-z0-9][a-z0-9._-]{0,63}$ && "$1" != *..* ]] || die "not a track name: '$1' (lowercase letters, digits, . _ -)"; }
 goal() { plain "$1"; printf '%s/%s.goal.md' "$PM" "$1"; }
 
 need() {

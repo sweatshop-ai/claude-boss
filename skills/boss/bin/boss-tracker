@@ -26,7 +26,7 @@ mkdir -p "$PM"
 
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 # A track becomes a file name under pm/: a plain name only (boss_store.TRACK_RE).
-plain() { [[ "$1" =~ ^[a-z0-9][a-z0-9._-]{0,63}$ && "$1" != *..* ]] || die "not a track name: '$1' (lowercase letters, digits, . _ -)"; }
+plain() { local LC_ALL=C; [[ "$1" =~ ^[a-z0-9][a-z0-9._-]{0,63}$ && "$1" != *..* ]] || die "not a track name: '$1' (lowercase letters, digits, . _ -)"; }
 live() { plain "$1"; printf '%s/%s.md' "$PM" "$1"; }
 arch() { plain "$1"; printf '%s/%s.archive.md' "$PM" "$1"; }
 
