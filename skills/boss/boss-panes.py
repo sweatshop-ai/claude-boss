@@ -53,17 +53,14 @@ import policy  # noqa: E402
 import registry  # noqa: E402
 import transcript  # noqa: E402
 
-CFG = boss_store.config_dir()
-
-
 def transcript_for(rec):
-    return registry.transcript_of(rec, CFG)
+    return registry.transcript_of(rec, boss_store.config_dir())
 
 
 def load_sessions():
     """Live sessions only: a reused pid or an orphaned worker is not one."""
     out = []
-    for rec in registry.live(CFG):
+    for rec in registry.live(boss_store.config_dir()):
         rec["_path"] = Path(rec["path"])
         out.append(rec)
     return out
@@ -91,7 +88,7 @@ def usage(rec):
 
 def flags_of(seat, ctx, cost):
     rec = seat.session
-    role = policy.BOSS if boss_store.is_boss(rec.get("sessionId") or "", CFG) else policy.WORKER
+    role = policy.BOSS if boss_store.is_boss(rec.get("sessionId") or "") else policy.WORKER
     pol = policy.flag_for(ctx, cost, role) if transcript_for(rec) else []
     return pol + seat.flags()
 

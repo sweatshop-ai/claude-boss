@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""The boss marker, and the one rule for reading it.
+"""The track store: the one module that owns `pm/` and the boss marker.
+
+It names the config and `pm/` directories (an empty CLAUDE_CONFIG_DIR means
+~/.claude), reads the objective and tracker files, updates per-session state
+under a lock, lists the files reap may remove and keeps the frontier cache path.
+The marker is the part described below.
+
+The boss marker, and the one rule for reading it.
 
 `$CLAUDE_CONFIG_DIR/pm/.boss-sessions/<session_id>` says a session is a boss.
 Its first line, once the boss has claimed one, is the track: the name of its
