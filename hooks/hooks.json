@@ -37,6 +37,15 @@
     ],
     "SessionStart": [
       {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/boss-link",
+            "timeout": 5
+          }
+        ]
+      },
+      {
         "matcher": "compact",
         "hooks": [
           {

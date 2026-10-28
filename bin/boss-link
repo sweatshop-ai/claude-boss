@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Keep the stable path to this plugin pointing at wherever it lives now.
+#
+#   $CLAUDE_CONFIG_DIR/routines/claude-boss -> <plugin root>
+#
+# The two systemd units run the ladder and the watchdog through that link, so
+# they survive a plugin upgrade: a marketplace install lands each version in a
+# new cache directory (plugins/cache/<marketplace>/claude-boss/<version>/), and
+# a unit written against one version dies with it. Measured 2026-10-23: both
+# timers failed on every tick for five days after the path moved.
+#
+# Runs as a SessionStart hook with CLAUDE_PLUGIN_ROOT set, and from install.sh
+# with the root as its one argument. Silent when the link is already right;
+# one line on stdout when it (re)links. A real file or directory at the link
+# path is left alone, with a line on stderr, because that is somebody's data.
+set -euo pipefail
+
+root="${1:-${CLAUDE_PLUGIN_ROOT:-}}"
+if [[ -z $root ]]; then
+  root="$(cd -- "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")/.." && pwd)"
+fi
+root="${root%/}"
+[[ -f $root/routines/boss-ladder.sh ]] || { echo "boss-link: $root is not a claude-boss checkout" >&2; exit 1; }
+
+cfg="${CLAUDE_CONFIG_DIR:-}"           # an empty value means unset (see boss_store.py)
+[[ -n $cfg ]] || cfg="$HOME/.claude"
+link="$cfg/routines/claude-boss"
+
+if [[ -L $link ]]; then
+  [[ $(readlink -- "$link") == "$root" ]] && exit 0
+elif [[ -e $link ]]; then
+  echo "boss-link: $link exists and is not a symlink; left alone" >&2
+  exit 1
+fi
+
+mkdir -p "$cfg/routines"
+ln -sfn -- "$root" "$link"
+echo "boss-link: $link -> $root"
