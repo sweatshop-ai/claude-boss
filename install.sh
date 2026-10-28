@@ -7,7 +7,10 @@
 #   1. creates the state directories the boss writes to, under your Claude
 #      config dir (pm/ for trackers and markers, routines/ for timer state)
 #   2. installs and enables the two systemd user timers, the escalation ladder
-#      and the worker watchdog, pointed at this checkout
+#      and the worker watchdog. They run through a stable link,
+#      $CLAUDE_CONFIG_DIR/routines/claude-boss -> this checkout, which the
+#      SessionStart hook (bin/boss-link) moves along when a plugin upgrade
+#      lands in a new cache directory, so the units never go stale
 #   3. optionally symlinks bin/ into ~/.local/bin so `boss-start` and friends
 #      are on PATH
 #
@@ -22,7 +25,9 @@
 set -euo pipefail
 
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-CFG="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+CFG="${CLAUDE_CONFIG_DIR:-}"          # an empty value means unset (see boss_store.py)
+[[ -n $CFG ]] || CFG="$HOME/.claude"
+LINK="$CFG/routines/claude-boss"
 UNITS="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 
 [[ -d $CFG ]] || { echo "No Claude config at $CFG" >&2; exit 1; }
@@ -31,6 +36,7 @@ UNITS="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 mkdir -p "$CFG/pm/.boss-sessions" "$CFG/pm/.pulse" \
          "$CFG/routines/state" "$CFG/routines/logs"
 echo "state directories ready under $CFG"
+"$ROOT/bin/boss-link" "$ROOT"
 
 # ---------------------------------------------------------------- 2. timers
 if [[ -z ${NO_TIMERS:-} ]]; then
@@ -42,14 +48,13 @@ if [[ -z ${NO_TIMERS:-} ]]; then
     mkdir -p "$UNITS"
     for u in boss-ladder.service boss-ladder.timer \
              boss-workers-watch.service boss-workers-watch.timer; do
-      sed -e "s|@ROOT@|$ROOT|g" -e "s|@CFG@|$CFG|g" \
+      sed -e "s|@ROOT@|$LINK|g" -e "s|@CFG@|$CFG|g" \
           "$ROOT/systemd/$u.in" > "$UNITS/$u"
     done
     systemctl --user daemon-reload
     systemctl --user enable --now boss-ladder.timer boss-workers-watch.timer
     echo "timers enabled: boss-ladder (every 5 min), boss-workers-watch (every min)"
-    echo "  they run $ROOT/routines/ — re-run this script if that path moves,"
-    echo "  which it does when you upgrade a plugin installed from a marketplace."
+    echo "  they run $LINK/routines/, and the link follows a plugin upgrade by itself"
   fi
 fi
 
@@ -73,6 +78,7 @@ claude-boss installed from $ROOT
 
   hooks        from hooks/hooks.json (the plugin registers them; nothing to do)
   state        $CFG/pm/
+  link         $LINK -> $ROOT
   timers       $( [[ -n ${NO_TIMERS:-} ]] && echo skipped || echo enabled )
 
 Start a boss with:  $ROOT/skills/boss/bin/boss-start [track]

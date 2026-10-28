@@ -333,5 +333,68 @@ class Tools(unittest.TestCase):
         self.assertIn("appended line", tracker.read_text())
 
 
+class StableLink(unittest.TestCase):
+    """`bin/boss-link` keeps `$CLAUDE_CONFIG_DIR/routines/claude-boss` pointing at the
+    plugin root the systemd units run through. It is the SessionStart hook that moves
+    the link when a marketplace upgrade lands in a new cache directory."""
+
+    LINK_BIN = HERE.parents[1] / "bin" / "boss-link"
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="boss-link-"))
+        self.addCleanup(lambda: subprocess.run(["rm", "-rf", str(self.tmp)]))
+        self.cfg = self.tmp / "cfg"
+        self.home = self.tmp / "home"
+        self.home.mkdir()
+        self.roots = []
+        for v in ("0.1.0", "0.2.0"):
+            r = self.tmp / "cache" / v
+            (r / "routines").mkdir(parents=True)
+            (r / "routines" / "boss-ladder.sh").write_text("#!/bin/sh\n")
+            self.roots.append(r)
+        self.link = self.cfg / "routines" / "claude-boss"
+
+    def run_link(self, *args, plugin_root=None, cfg=None):
+        env = {"PATH": os.environ["PATH"], "HOME": str(self.home),
+               "CLAUDE_CONFIG_DIR": str(self.cfg) if cfg is None else cfg}
+        if plugin_root is not None:
+            env["CLAUDE_PLUGIN_ROOT"] = str(plugin_root)
+        return subprocess.run([str(self.LINK_BIN), *args], env=env, capture_output=True, text=True,
+                              stdin=subprocess.DEVNULL, timeout=10)
+
+    def test_links_the_given_root_and_says_so_once(self):
+        r = self.run_link(str(self.roots[0]))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(os.readlink(self.link), str(self.roots[0]))
+        self.assertIn(f"{self.link} -> {self.roots[0]}", r.stdout)
+        r = self.run_link(str(self.roots[0]))
+        self.assertEqual((r.returncode, r.stdout, r.stderr), (0, "", ""))     # silent when right
+
+    def test_as_a_hook_it_follows_the_plugin_root_to_the_new_version(self):
+        self.run_link(plugin_root=self.roots[0])
+        r = self.run_link(plugin_root=self.roots[1])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(os.readlink(self.link), str(self.roots[1]))
+
+    def test_leaves_a_real_directory_at_the_link_path_alone(self):
+        self.link.mkdir(parents=True)
+        (self.link / "keep").write_text("mine")
+        r = self.run_link(str(self.roots[0]))
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("not a symlink", r.stderr)
+        self.assertTrue((self.link / "keep").is_file())
+
+    def test_refuses_a_root_that_is_not_the_plugin(self):
+        r = self.run_link(str(self.tmp))
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("not a claude-boss checkout", r.stderr)
+        self.assertFalse(self.link.exists())
+
+    def test_an_empty_config_dir_means_home(self):
+        r = self.run_link(str(self.roots[0]), cfg="")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(os.readlink(self.home / ".claude" / "routines" / "claude-boss"), str(self.roots[0]))
+
+
 if __name__ == "__main__":
     unittest.main()

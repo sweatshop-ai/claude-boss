@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.18.0 — 2026-10-28
+
+- **The systemd units survive a plugin upgrade.** `install.sh` wrote the
+  plugin's cache directory into `ExecStart`, and a marketplace upgrade lands in
+  a new one (`plugins/cache/<marketplace>/claude-boss/<version>/`), so the
+  ladder and the watchdog failed on every tick from the next upgrade on.
+  Measured on the author's machine: five days of `No such file or directory`,
+  one tick a minute, including the morning a worker pane froze unseen. The
+  units now run through `$CLAUDE_CONFIG_DIR/routines/claude-boss`, a symlink
+  to the plugin root; `bin/boss-link` sets it from `install.sh` and, as a
+  SessionStart hook, moves it to the new root on the first session after an
+  upgrade. A real file or directory at the link path is never replaced.
+  `uninstall.sh` removes the link. Five tests in `test_bin.py`.
+- `install.sh` and `uninstall.sh` read an empty `CLAUDE_CONFIG_DIR` as unset,
+  like the hooks since 0.17.0.
+
 ## 0.17.0 — 2026-10-27
 
 - **An empty `CLAUDE_CONFIG_DIR` no longer breaks the hooks** (architecture
