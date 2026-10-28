@@ -3,6 +3,8 @@ Description=Post due boss escalation rungs from tracker marker lines
 Documentation=file://@ROOT@/routines/boss-ladder.md
 
 [Service]
+# @ROOT@ is the stable link routines/claude-boss, not a version directory;
+# bin/boss-link moves it on every session start, so an upgrade needs no re-render.
 Type=oneshot
 ExecStart=@ROOT@/routines/boss-ladder.sh
 StandardOutput=append:@CFG@/routines/logs/boss-ladder.log

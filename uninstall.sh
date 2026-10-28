@@ -7,7 +7,9 @@
 set -euo pipefail
 
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-CFG="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+CFG="${CLAUDE_CONFIG_DIR:-}"
+[[ -n $CFG ]] || CFG="$HOME/.claude"
+LINK="$CFG/routines/claude-boss"
 UNITS="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 
 if [[ -z ${KEEP_TIMERS:-} ]] && command -v systemctl >/dev/null 2>&1; then
@@ -16,6 +18,8 @@ if [[ -z ${KEEP_TIMERS:-} ]] && command -v systemctl >/dev/null 2>&1; then
   systemctl --user daemon-reload
   echo "timers removed"
 fi
+
+[[ -L $LINK ]] && rm -f "$LINK" && echo "unlinked $LINK"
 
 for f in "$ROOT"/skills/boss/bin/*; do
   link="$HOME/.local/bin/$(basename "$f")"
