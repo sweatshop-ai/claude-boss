@@ -81,6 +81,13 @@ and the two systemd timers:
 ./install.sh          # BIN=1 also puts boss-start on your PATH
 ```
 
+The timers run the plugin through one stable path,
+`$CLAUDE_CONFIG_DIR/routines/claude-boss`, a symlink to wherever the plugin
+lives. A marketplace upgrade lands in a new cache directory, and the
+SessionStart hook `bin/boss-link` moves the link there on the next session, so
+the units never point at a version that is gone. `install.sh` runs once; it
+does not need re-running after an upgrade.
+
 Start a boss inside tmux:
 
 ```bash
