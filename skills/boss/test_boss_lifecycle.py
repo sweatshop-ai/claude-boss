@@ -130,7 +130,7 @@ case "$1" in
     esac ;;
   send-keys)
     if [[ "$*" == *"/exit"* && -f "$STUB_DIR/exits" ]]; then echo bash > "$STUB_DIR/cmd"; fi
-    if [[ "$*" == *" --model "* ]]; then echo claude > "$STUB_DIR/cmd"; fi   # a launch
+    if [[ "$*" == *" --model "* ]]; then echo claude > "$STUB_DIR/cmd"; touch "$STUB_DIR/launched"; fi
     # Enter on the exit dialog: "Exit and stop tasks" is what it confirms.
     if [[ "$*" == "send-keys -t %5 Enter" && -f "$STUB_DIR/dialog" && ! -f "$STUB_DIR/slow" ]]; then
       echo bash > "$STUB_DIR/cmd"; fi ;;
@@ -162,7 +162,11 @@ elif sys.argv[1:2] == ["get"]:
     if os.path.exists(os.path.join(os.environ["STUB_DIR"], "get-fails")):
         sys.exit(1)                                   # a crash: no output at all
     row = os.environ["STUB_ROW"].split("\t")
-    known = {"name": "Wanda", "session": "w-sid", "owner": "-",
+    d = os.environ["STUB_DIR"]
+    after = os.path.join(d, "name-after")
+    name = (open(after).read().strip() if os.path.exists(os.path.join(d, "launched"))
+            and os.path.exists(after) else "Wanda")
+    known = {"name": name, "session": "w-sid", "owner": "-",
              "status": row[1] if len(row) > 1 else "-"}
     print("\t".join(known.get(f, "-") for f in sys.argv[3:]))
 '''
@@ -336,6 +340,15 @@ class RestartKeepsName(unittest.TestCase):
         self.assertIn("--session-id '%s'" % sid, calls[launch[0]])
         self.assertLess(sets[0], launch[0])
         self.assertFalse([c for c in calls if c.startswith("set-name")], calls)
+
+    def test_a_name_held_elsewhere_is_reported_not_claimed(self):
+        # Another live session holds Wanda, so the hook names the new one Greta.
+        (self.tmp / "name-after").write_text("Greta\n")
+        r, calls = self.run_restart()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("as Greta", r.stdout)
+        self.assertIn("not Wanda", r.stderr)
+        self.assertIn("set-option -p -t %5 @worker_name Greta", calls)
 
     def test_without_agent_names_the_name_is_set_after_the_start_as_before(self):
         r, calls = self.run_restart(with_agent_name=False)
