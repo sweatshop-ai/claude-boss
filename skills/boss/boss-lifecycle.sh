@@ -91,6 +91,20 @@ agent_name() { local n; n=$(pane_field "$1" name); [[ "$n" == "-" ]] || printf '
 agent_status() { pane_field "$1" status; }
 set_agent_name() { python3 "$PANES_PY" --set-name "$1" "$2" 2>/dev/null || true; }
 
+# Name a session before it exists: choose its id, give the name to that id
+# through cc-agent-names, and print the id for launch_claude. The plugin's hook
+# then names the session at SessionStart and tells it so. Setting the name
+# after the start is too late: the hook has already told the session another
+# name, and it signs its messages with that one (cc-agent-names#5). Prints
+# nothing without agent-name; the caller then sets the name after the start.
+preassign_name() {
+  local name=$1 sid
+  [[ -n "$name" && "$name" != "-" ]] && command -v agent-name >/dev/null || return 0
+  sid=$(python3 -c 'import uuid; print(uuid.uuid4())') || return 0
+  agent-name set "$sid" "$name" >/dev/null 2>&1 || return 0
+  printf '%s' "$sid"
+}
+
 # Mirror the plugin's name onto the pane. The boss-workers-watch routine only
 # reports a crashed worker for panes carrying @worker_name, so an unmirrored
 # pane is invisible to the watchdog.
@@ -168,7 +182,7 @@ prompt_visible() {
 }
 
 launch_claude() {
-  local pane=$1 dir=$2
+  local pane=$1 dir=$2 sid=${3:-}
   local cmd="$CLAUDE_CMD"
   # A worker's model is recorded on the pane so `list` shows it and a restart
   # keeps it: a worker silently downgraded on restart is worse than one that
@@ -181,6 +195,7 @@ launch_claude() {
   # or for the machine with BOSS_WORKER_MODEL.
   m="${m:-$WORKER_MODEL_DEFAULT}"
   cmd="$cmd --model ${m@Q} --effort ${WORKER_EFFORT_DEFAULT@Q}"
+  if [[ -n "$sid" ]]; then cmd="$cmd --session-id ${sid@Q}"; fi
   tmux send-keys -t "$pane" "cd ${dir@Q}" Enter
   sleep 1
   tmux send-keys -t "$pane" "$cmd" Enter
@@ -198,7 +213,8 @@ cmd_spawn() {
   pane=$(tmux split-window -d -c "$dir" -P -F '#{pane_id}')
   tmux select-layout tiled >/dev/null 2>&1 || true
   sleep 1
-  launch_claude "$pane" "$dir"
+  local sid; sid=$(preassign_name "$hint")
+  launch_claude "$pane" "$dir" "$sid"
 
   claim_pane "$pane"
   if [[ -n "$MODEL" ]]; then tmux set-option -p -t "$pane" @worker_model "$MODEL"; fi
@@ -210,7 +226,7 @@ cmd_spawn() {
   for _ in 1 2 3 4 5 6; do
     n=$(agent_name "$pane"); [[ -n "$n" && "$n" != "-" ]] && break; sleep 2
   done
-  if [[ -n "$hint" ]]; then set_agent_name "$pane" "$hint" >/dev/null; fi
+  if [[ -n "$hint" && -z "$sid" ]]; then set_agent_name "$pane" "$hint" >/dev/null; fi
   n=$(mirror_name "$pane")
   printf '%s\t%s\n' "$pane" "${n:-unnamed}"
 }
@@ -339,10 +355,11 @@ cmd_restart() {
   dir=$(pane_prop "$pane" '#{pane_current_path}')
   local keep; keep=$(agent_name "$pane")
   cmd_retire "$pane" >/dev/null
-  launch_claude "$pane" "$dir"
+  local sid; sid=$(preassign_name "$keep")
+  launch_claude "$pane" "$dir" "$sid"
   # A recycled worker keeps its name: the owner tracks the pane by the name on it,
   # and a restart that renames the worker loses them the thread.
-  if [[ -n "$keep" && "$keep" != "-" ]]; then
+  if [[ -n "$keep" && "$keep" != "-" && -z "$sid" ]]; then
     for _ in 1 2 3 4 5 6; do
       local n; n=$(agent_name "$pane"); [[ -n "$n" && "$n" != "-" ]] && break; sleep 2
     done
@@ -360,8 +377,9 @@ cmd_move() {
   local pane; pane=$(resolve_pane "$target")
   local keep; keep=$(agent_name "$pane")
   cmd_retire "$pane" >/dev/null
-  launch_claude "$pane" "$dir"
-  if [[ -n "$keep" && "$keep" != "-" ]]; then
+  local sid; sid=$(preassign_name "$keep")
+  launch_claude "$pane" "$dir" "$sid"
+  if [[ -n "$keep" && "$keep" != "-" && -z "$sid" ]]; then
     for _ in 1 2 3 4 5 6; do
       local n; n=$(agent_name "$pane"); [[ -n "$n" && "$n" != "-" ]] && break; sleep 2
     done

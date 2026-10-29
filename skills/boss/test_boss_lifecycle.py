@@ -130,6 +130,7 @@ case "$1" in
     esac ;;
   send-keys)
     if [[ "$*" == *"/exit"* && -f "$STUB_DIR/exits" ]]; then echo bash > "$STUB_DIR/cmd"; fi
+    if [[ "$*" == *" --model "* ]]; then echo claude > "$STUB_DIR/cmd"; fi   # a launch
     # Enter on the exit dialog: "Exit and stop tasks" is what it confirms.
     if [[ "$*" == "send-keys -t %5 Enter" && -f "$STUB_DIR/dialog" && ! -f "$STUB_DIR/slow" ]]; then
       echo bash > "$STUB_DIR/cmd"; fi ;;
@@ -154,6 +155,9 @@ if sys.argv[1:2] == ["--state"]:
     else:
         open(seen, "w").close()
         print(os.environ["STUB_ROW"])
+elif sys.argv[1:2] == ["--set-name"]:
+    with open(os.path.join(os.environ["STUB_DIR"], "calls"), "a") as fh:
+        fh.write("set-name " + " ".join(sys.argv[2:]) + "\n")
 elif sys.argv[1:2] == ["get"]:
     if os.path.exists(os.path.join(os.environ["STUB_DIR"], "get-fails")):
         sys.exit(1)                                   # a crash: no output at all
@@ -288,6 +292,58 @@ case "$1" in
 esac
 exit 0
 '''
+
+
+STUB_AGENT_NAME = r'''#!/usr/bin/env bash
+echo "agent-name $*" >> "$STUB_DIR/calls"
+echo "${@: -1}"
+'''
+
+
+class RestartKeepsName(unittest.TestCase):
+    """A restarted worker starts under its name (cc-agent-names#5).
+
+    Setting the name after the new session started was too late: the hook had
+    already told the session another name, and it signed its messages so. The
+    name is now set for a session id chosen first, and claude starts under it.
+    """
+
+    setUp, tearDown = RequireIdle.setUp, RequireIdle.tearDown
+
+    def run_restart(self, with_agent_name=True):
+        (self.tmp / "exits").touch()
+        if with_agent_name:
+            (self.tmp / "bin" / "agent-name").write_text(STUB_AGENT_NAME)
+            os.chmod(self.tmp / "bin" / "agent-name", 0o755)
+            path = "%s:%s" % (self.tmp / "bin", os.environ["PATH"])
+        else:
+            path = "%s:/usr/bin:/bin" % (self.tmp / "bin")
+        env = dict(os.environ, PATH=path, TMUX="stub", TMUX_PANE="%1", STUB_DIR=str(self.tmp),
+                   STUB_ROW="w-sid\tidle\tpin1", BOSS_EXIT_WAIT="2")
+        r = subprocess.run(["bash", str(self.tmp / "boss-lifecycle.sh"), "restart", "%5"],
+                           env=env, capture_output=True, text=True, timeout=60)
+        return r, (self.tmp / "calls").read_text().splitlines()
+
+    def test_the_name_is_set_for_the_new_session_before_it_starts(self):
+        r, calls = self.run_restart()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        sets = [i for i, c in enumerate(calls) if c.startswith("agent-name set ")]
+        self.assertEqual(len(sets), 1, calls)
+        sid, name = calls[sets[0]].split()[2:]
+        self.assertEqual(name, "Wanda")
+        launch = [i for i, c in enumerate(calls) if c.startswith("send-keys") and " --model " in c]
+        self.assertEqual(len(launch), 1, calls)
+        self.assertIn("--session-id '%s'" % sid, calls[launch[0]])
+        self.assertLess(sets[0], launch[0])
+        self.assertFalse([c for c in calls if c.startswith("set-name")], calls)
+
+    def test_without_agent_names_the_name_is_set_after_the_start_as_before(self):
+        r, calls = self.run_restart(with_agent_name=False)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        launch = [c for c in calls if c.startswith("send-keys") and " --model " in c]
+        self.assertEqual(len(launch), 1, calls)
+        self.assertNotIn("--session-id", launch[0])
+        self.assertIn("set-name %5 Wanda", calls)
 
 
 class ListAndFields(unittest.TestCase):
