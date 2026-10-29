@@ -134,6 +134,8 @@ case "$1" in
     # Enter on the exit dialog: "Exit and stop tasks" is what it confirms.
     if [[ "$*" == "send-keys -t %5 Enter" && -f "$STUB_DIR/dialog" && ! -f "$STUB_DIR/slow" ]]; then
       echo bash > "$STUB_DIR/cmd"; fi ;;
+  set-option)
+    if [[ -f "$STUB_DIR/set-fails" ]]; then exit 1; fi ;;
   capture-pane)
     if [[ -s "$STUB_DIR/dialog" ]]; then cat "$STUB_DIR/dialog"
     elif [[ -f "$STUB_DIR/dialog" ]]; then
@@ -349,6 +351,13 @@ class RestartKeepsName(unittest.TestCase):
         self.assertIn("as Greta", r.stdout)
         self.assertIn("not Wanda", r.stderr)
         self.assertIn("set-option -p -t %5 @worker_name Greta", calls)
+
+    def test_a_mirror_that_fails_fails_the_restart(self):
+        # The watchdog only sees panes carrying @worker_name (Codex on #35).
+        (self.tmp / "set-fails").touch()
+        r, calls = self.run_restart()
+        self.assertNotEqual(r.returncode, 0, r.stdout)
+        self.assertNotIn("restarted", r.stdout)
 
     def test_without_agent_names_the_name_is_set_after_the_start_as_before(self):
         r, calls = self.run_restart(with_agent_name=False)

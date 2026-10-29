@@ -92,20 +92,24 @@ agent_status() { pane_field "$1" status; }
 set_agent_name() { python3 "$PANES_PY" --set-name "$1" "$2" 2>/dev/null || true; }
 
 # After a restart or move: wait for the new session's name, mirror it onto the
-# pane and print it. A name another live session holds is not handed out twice,
-# so the worker can come back under another one; say so rather than report the
-# old name the owner would then address in vain.
+# pane and leave it in SETTLED_NAME. A name another live session holds is not
+# handed out twice, so the worker can come back under another one; say so
+# rather than report the old name the owner would then address in vain.
+# Call it as a plain command, never in $(...), where set -e is off: a failed
+# tmux set-option must stop the script, since the watchdog only sees panes
+# that carry @worker_name.
 settle_name() {
   local pane=$1 keep=$2 n=""
   for _ in 1 2 3 4 5 6; do
     n=$(agent_name "$pane"); [[ -n "$n" ]] && break; sleep 2
   done
-  n=$(mirror_name "$pane")
+  mirror_name "$pane" >/dev/null
+  n=$(agent_name "$pane")
   if [[ -n "$keep" && "$n" != "$keep" ]]; then
     printf 'WARN: %s came back as %s, not %s: another live session holds %s\n' \
       "$pane" "${n:-unnamed}" "$keep" "$keep" >&2
   fi
-  printf '%s' "${n:-unnamed}"
+  SETTLED_NAME=${n:-unnamed}
 }
 
 # Name a session before it exists: choose its id, give the name to that id
@@ -382,7 +386,8 @@ cmd_restart() {
     done
     set_agent_name "$pane" "$keep" >/dev/null
   fi
-  printf 'restarted %s in %s as %s\n' "$pane" "$dir" "$(settle_name "$pane" "$keep")"
+  settle_name "$pane" "$keep"
+  printf 'restarted %s in %s as %s\n' "$pane" "$dir" "$SETTLED_NAME"
 }
 
 cmd_move() {
@@ -401,7 +406,8 @@ cmd_move() {
     done
     set_agent_name "$pane" "$keep" >/dev/null
   fi
-  printf 'moved %s to %s as %s\n' "$pane" "$dir" "$(settle_name "$pane" "$keep")"
+  settle_name "$pane" "$keep"
+  printf 'moved %s to %s as %s\n' "$pane" "$dir" "$SETTLED_NAME"
 }
 
 # The roster: boss-panes.py list prints it, one row per pane, and under a pane
