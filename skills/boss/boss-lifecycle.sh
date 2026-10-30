@@ -216,6 +216,10 @@ launch_claude() {
   # or for the machine with BOSS_WORKER_MODEL.
   m="${m:-$WORKER_MODEL_DEFAULT}"
   cmd="$cmd --model ${m@Q} --effort ${WORKER_EFFORT_DEFAULT@Q}"
+  # Only the boss asks the owner. A worker's AskUserQuestion rings the chime
+  # for a pane nobody watches and stalls its ticket; without the tool, a
+  # blocker goes to the boss by SendMessage (Thierry, 2026-10-30).
+  cmd="$cmd --disallowedTools AskUserQuestion"
   if [[ -n "$sid" ]]; then cmd="$cmd --session-id ${sid@Q}"; fi
   tmux send-keys -t "$pane" "cd ${dir@Q}" Enter
   sleep 1
