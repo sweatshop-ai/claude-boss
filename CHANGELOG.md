@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- **READY none no longer reads as an empty backlog.** With a ticket graph whose
+  open tickets all waited on a person, the pulse said `READY NOW: none`, hid
+  NEXT and offered no action, only the escape "the idle worker is deliberately
+  parked". On 2026-10-30 a boss took that escape 174 times in 155 pulses while
+  four side tickets in its own NEXT sat unstaffed, until the owner asked why
+  one worker was busy. The pulse now shows NEXT and hands it out when nothing
+  in the graph is READY, and "parked" has to name, per idle worker, the ticket
+  or event it waits on.
+
 ## 0.18.0 — 2026-10-28
 
 - **The systemd units survive a plugin upgrade.** `install.sh` wrote the
