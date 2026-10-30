@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **Workers cannot ask the owner.** `boss-lifecycle.sh` starts every worker
+  (spawn, restart, move) with `--disallowedTools AskUserQuestion`, so a choice
+  a worker cannot make goes to the boss by SendMessage. Only the boss asks.
+  The reporting contract a dispatch ends with says so. A boss started with
+  `boss-start` keeps the tool.
+
 ## 0.18.1 — 2026-10-30
 
 - **READY none no longer reads as an empty backlog.** With a ticket graph whose

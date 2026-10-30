@@ -574,7 +574,13 @@ concerned — invisibly.
 
 > Report to <your name> by SendMessage when you are done or blocked, even if
 > the owner has since given you something else in your pane. If they redirect you,
-> tell me that too, in one line.
+> tell me that too, in one line. You have no `AskUserQuestion`: a choice you
+> cannot make yourself comes to me, with the options and your recommendation.
+
+Workers are started with `--disallowedTools AskUserQuestion` (`launch_claude` in
+`boss-lifecycle.sh`), so only you ask the owner. A worker's question rang the chime
+for a pane nobody watched, and its ticket stalled there. When a worker brings you
+a choice, decide it yourself, or put it to the owner through P12.
 
 **And arm the subscription in the same call** — `notify_when_idle: true` (Phase D).
 The contract covers a worker that remembers; the subscription covers one that
