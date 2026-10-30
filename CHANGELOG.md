@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.19.0 — 2026-10-30
 
 - **Workers cannot ask the owner.** `boss-lifecycle.sh` starts every worker
   (spawn, restart, move) with `--disallowedTools AskUserQuestion`, so a choice
