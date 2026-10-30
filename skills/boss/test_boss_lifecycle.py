@@ -343,6 +343,15 @@ class RestartKeepsName(unittest.TestCase):
         self.assertLess(sets[0], launch[0])
         self.assertFalse([c for c in calls if c.startswith("set-name")], calls)
 
+    def test_a_worker_starts_without_ask_user_question(self):
+        # Only the boss asks the owner; a worker's question rings the chime for
+        # a pane nobody watches and stalls the ticket (Thierry, 2026-10-30).
+        r, calls = self.run_restart()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        launch = [c for c in calls if c.startswith("send-keys") and " --model " in c]
+        self.assertEqual(len(launch), 1, calls)
+        self.assertIn("--disallowedTools AskUserQuestion", launch[0])
+
     def test_a_name_held_elsewhere_is_reported_not_claimed(self):
         # Another live session holds Wanda, so the hook names the new one Greta.
         (self.tmp / "name-after").write_text("Greta\n")
