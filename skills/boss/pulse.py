@@ -15,7 +15,8 @@ actions, in the order the boss is told to take them:
     fix-graph       the ticket graph is broken; nothing is dispatched from it
     dispatch-ready  one READY ticket per idle worker
     spawn n         n more workers for the READY tickets left over
-    dispatch-next   no ticket graph: one NEXT item per idle worker
+    dispatch-next   no ticket graph, or one with nothing READY: one NEXT item
+                    per idle worker
     refill-next     ... and refill NEXT if it is empty or stale
     run-rung n      post the due rung n (the first overdue one)
 """
@@ -62,6 +63,10 @@ def decide(facts):
             actions.append(Action("dispatch-ready"))
         if spawn > 0:
             actions.append(Action("spawn", spawn))
+        # A graph whose open tickets all wait on someone is not an empty
+        # backlog: the side work lives in NEXT, so hand that out instead.
+        if facts.idle and not facts.ready and facts.next_items:
+            actions += [Action("dispatch-next"), Action("refill-next")]
     elif facts.idle:
         actions += [Action("dispatch-next"), Action("refill-next")]
     if facts.rungs:
@@ -129,7 +134,7 @@ def render(facts, decision):
     elif facts.source:
         lines.append("READY NOW: " + ("; ".join(r[:60] for r in facts.ready[:policy.BOSS_SPAN])
                                       or "none"))
-    elif facts.next_items:
+    if facts.next_items and (facts.broken or not facts.source or not facts.ready):
         lines.append("NEXT, in priority order:")
         lines += ["  " + item[:160] for item in facts.next_items[:6]]
     lines.append("")
@@ -148,7 +153,10 @@ def render(facts, decision):
     lines.append("Then update the tracker, and tick off any DONE WHEN criterion "
                  "that has just been met.")
     lines.append("If none of this applies - the idle worker is deliberately "
-                 "parked, or the objective is finished - say which in one line "
-                 'and stop. `boss-goal status %s met "<evidence>"` closes it and '
+                 "parked, or the objective is finished - say which and stop. "
+                 "Parked means: name, for each idle worker, the ticket or event "
+                 "it waits on; \"parked on purpose\" with no such name is an "
+                 "idle team, so dispatch instead. "
+                 '`boss-goal status %s met "<evidence>"` closes it and '
                  "ends the pulse." % facts.track)
     return "\n".join(lines)
