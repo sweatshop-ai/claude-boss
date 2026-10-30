@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.18.1 — 2026-10-30
 
 - **READY none no longer reads as an empty backlog.** With a ticket graph whose
   open tickets all waited on a person, the pulse said `READY NOW: none`, hid
