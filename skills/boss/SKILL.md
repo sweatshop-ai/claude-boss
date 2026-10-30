@@ -827,8 +827,12 @@ Three sources. Turn all three on.
    work of yours is still running, and it goes silent the moment the objective is
    `met` or `paused`. `boss-goal check` reports whether it is armed.
 
-   When it fires, **act — do not acknowledge it.** Dispatch the top item, or say
-   in one line why the idle worker is deliberately parked, and stop.
+   When it fires, **act — do not acknowledge it.** Dispatch the top item, or name
+   for each idle worker the ticket or event it is parked on, and stop. "Parked on
+   purpose" with nothing named is an idle team: on 2026-10-30 a boss said it 174
+   times while four side tickets sat unstaffed, because its ticket graph showed
+   READY none and it never looked past it. READY none is not an empty backlog —
+   check NEXT, the tracker and the open side tickets before parking anyone.
 
 3. **The escalation timer.** P12's ladder, `references/escalation.md`. A blocker
    waiting on the owner emits nothing at all; the detached `sleep` is what brings
