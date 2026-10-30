@@ -42,10 +42,24 @@ class Decide(unittest.TestCase):
     def test_nothing_ready_and_nobody_idle_is_silence(self):
         self.assertIsNone(pulse.decide(pulse.Facts(track="demo", source="issues", size=3)))
 
-    def test_with_a_ticket_graph_next_is_not_handed_out(self):
+    def test_with_a_ticket_graph_and_no_next_nothing_is_handed_out(self):
         d = pulse.decide(pulse.Facts(track="demo", source="issues", idle=[("Ada", "w:1.0")],
                                      size=1))
         self.assertEqual(kinds(d), [])
+
+    def test_ready_tickets_go_out_before_next(self):
+        d = pulse.decide(pulse.Facts(track="demo", source="issues", idle=[("Ada", "w:1.0")],
+                                     size=1, ready=["01 API"], next_items=["- side fix"]))
+        self.assertEqual(kinds(d), ["dispatch-ready"])
+
+    def test_a_graph_with_nothing_ready_falls_back_to_next(self):
+        # 2026-10-30, track action-list: the graph's open tickets all waited on a
+        # person, so READY was "none" in 155 pulses while NEXT held four side
+        # tickets nobody needed to unblock. The boss answered "parked on purpose"
+        # 174 times and four workers sat idle until the owner noticed.
+        d = pulse.decide(pulse.Facts(track="demo", source="issues", idle=[("Ada", "w:1.0")],
+                                     size=1, next_items=["- #188 fix the reopen"]))
+        self.assertEqual(kinds(d), ["dispatch-next", "refill-next"])
 
     def test_a_broken_graph_is_fixed_before_anything_is_dispatched(self):
         d = pulse.decide(pulse.Facts(track="demo", source="issues", idle=[("Ada", "w:1.0")],
@@ -103,6 +117,17 @@ class Render(unittest.TestCase):
         self.assertEqual(lines[2:7], ["OUTCOME: Ship it.", "NOT YET MET:", "  - [ ] it ships",
                                       "NEXT, in priority order:", "  - do a thing"])
         self.assertIn("IDLE NOW, yours: Ada (w:1.0)", lines)
+
+    def test_a_graph_with_nothing_ready_still_shows_next(self):
+        lines = self.say(idle=[("Ada", "w:1.0")], source="issues",
+                         next_items=["- #188 fix the reopen"])
+        self.assertIn("READY NOW: none", lines)
+        self.assertIn("NEXT, in priority order:", lines)
+        self.assertIn("  - #188 fix the reopen", lines)
+
+    def test_parked_must_name_what_each_idle_worker_waits_on(self):
+        text = "\n".join(self.say(idle=[("Ada", "w:1.0")]))
+        self.assertIn("name, for each idle worker, the ticket or event it waits on", text)
 
 
 def kinds(decision):
