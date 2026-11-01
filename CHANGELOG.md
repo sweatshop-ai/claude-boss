@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.19.1 — 2026-11-01
+
+- A command only the owner can run goes on the boss's session card as a Paste
+  and after `$ ` in the team-line ask, as well as in the `AskUserQuestion`
+  (P12 and `references/escalation.md`).
+
 ## 0.19.0 — 2026-10-30
 
 - **Workers cannot ask the owner.** `boss-lifecycle.sh` starts every worker

@@ -43,6 +43,13 @@ reply supersedes the timer.
   decisions and bundle them into ONE list at the next rung, clearly separated.
 - **One action per alert.** "Approve the navigation in Mei's pane, session 39
   pane 4" is actionable. "Several things need your input" is not.
+- **A command for the owner's hand goes on your card too.** When the one action
+  is a command only they can run, put it on your session card as a Paste
+  (`/home/tiroir/Projects/agentview/hooks/paste create <session-id> <file> --title '<short>' --provider claude`,
+  the text in a file in your scratchpad) and after `$ ` in your team-line
+  `--ask`, as well as in the question. They run it from whichever they see
+  first. A command that sat only in an `AskUserQuestion` was missing from the
+  card when the owner looked for it (the owner, 2026-11-01).
 - **State what it costs.** Idle workers and elapsed time are what make an
   interrupt worth it.
 - **Keep everything else moving.** Escalating is not waiting: dispatch every task
