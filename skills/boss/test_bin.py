@@ -346,15 +346,16 @@ class StableLink(unittest.TestCase):
         self.cfg = self.tmp / "cfg"
         self.home = self.tmp / "home"
         self.home.mkdir()
-        self.roots = []
-        for v in ("0.1.0", "0.2.0"):
-            r = self.tmp / "cache" / v
-            (r / "routines").mkdir(parents=True)
-            (r / "routines" / "boss-ladder.sh").write_text("#!/bin/sh\n")
-            (r / ".claude-plugin").mkdir()
-            (r / ".claude-plugin" / "plugin.json").write_text(f'{{"name": "claude-boss", "version": "{v}"}}\n')
-            self.roots.append(r)
+        self.roots = [self.make_root(v) for v in ("0.1.0", "0.2.0")]
         self.link = self.cfg / "routines" / "claude-boss"
+
+    def make_root(self, version):
+        r = self.tmp / "cache" / version
+        (r / "routines").mkdir(parents=True)
+        (r / "routines" / "boss-ladder.sh").write_text("#!/bin/sh\n")
+        (r / ".claude-plugin").mkdir()
+        (r / ".claude-plugin" / "plugin.json").write_text(f'{{"name": "claude-boss", "version": "{version}"}}\n')
+        return r
 
     def run_link(self, *args, plugin_root=None, cfg=None):
         env = {"PATH": os.environ["PATH"], "HOME": str(self.home),
@@ -388,11 +389,7 @@ class StableLink(unittest.TestCase):
         self.assertIn(f"kept {self.link} -> {self.roots[1]}", r.stdout)
 
     def test_versions_compare_as_versions_not_as_text(self):
-        newer = self.tmp / "cache" / "0.10.0"
-        (newer / "routines").mkdir(parents=True)
-        (newer / "routines" / "boss-ladder.sh").write_text("#!/bin/sh\n")
-        (newer / ".claude-plugin").mkdir()
-        (newer / ".claude-plugin" / "plugin.json").write_text('{"version": "0.10.0"}\n')
+        newer = self.make_root("0.10.0")
         self.run_link(str(self.roots[1]))                                     # 0.2.0
         self.run_link(str(newer))
         self.assertEqual(os.readlink(self.link), str(newer))
