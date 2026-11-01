@@ -15,7 +15,7 @@
 # version than the one it points at: every session runs this hook from its own
 # version, and on 2026-11-01 a boss started on 0.19.0 compacted and dragged the
 # link back from 0.19.1, so the timers ran the old rules. It says "kept" then.
-# A missing or dangling link is always set. A real file or directory at the link
+# A missing or dangling link, or either side without a version, is always set. A real file or directory at the link
 # path is left alone, with a line on stderr, because that is somebody's data.
 set -euo pipefail
 
@@ -38,7 +38,8 @@ if [[ -L $link ]]; then
   current="$(readlink -- "$link")"
   [[ $current == "$root" ]] && exit 0
   if [[ -e $link ]]; then
-    have="$(version_of "$(readlink -f -- "$link")")" want="$(version_of "$root")"
+    have="$(version_of "$(readlink -f -- "$link")")"
+    want="$(version_of "$root")"
     if [[ -n $have && -n $want && $have != "$want" \
           && $(printf '%s\n%s\n' "$have" "$want" | sort -V | tail -n1) == "$have" ]]; then
       echo "boss-link: kept $link -> $current ($have is newer than $want)"
