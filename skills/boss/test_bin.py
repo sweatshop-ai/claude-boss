@@ -388,23 +388,29 @@ class StableLink(unittest.TestCase):
         self.assertEqual(os.readlink(self.link), str(self.roots[1]))
         self.assertIn(f"kept {self.link} -> {self.roots[1]}", r.stdout)
 
+    def test_install_with_an_explicit_root_can_roll_the_link_back(self):
+        self.run_link(plugin_root=self.roots[1])
+        r = self.run_link(str(self.roots[0]))                                 # install.sh passes $1
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(os.readlink(self.link), str(self.roots[0]))
+
     def test_versions_compare_as_versions_not_as_text(self):
         newer = self.make_root("0.10.0")
-        self.run_link(str(self.roots[1]))                                     # 0.2.0
-        self.run_link(str(newer))
+        self.run_link(plugin_root=self.roots[1])                              # 0.2.0
+        self.run_link(plugin_root=newer)
         self.assertEqual(os.readlink(self.link), str(newer))
 
     def test_a_dangling_link_is_replaced_even_by_an_older_version(self):
-        self.run_link(str(self.roots[1]))
+        self.run_link(plugin_root=self.roots[1])
         subprocess.run(["rm", "-rf", str(self.roots[1])], check=True)
-        r = self.run_link(str(self.roots[0]))
+        r = self.run_link(plugin_root=self.roots[0])
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(os.readlink(self.link), str(self.roots[0]))
 
     def test_a_root_without_a_version_still_moves_the_link(self):
         (self.roots[0] / ".claude-plugin" / "plugin.json").unlink()
-        self.run_link(str(self.roots[1]))
-        r = self.run_link(str(self.roots[0]))
+        self.run_link(plugin_root=self.roots[1])
+        r = self.run_link(plugin_root=self.roots[0])
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(os.readlink(self.link), str(self.roots[0]))
 
