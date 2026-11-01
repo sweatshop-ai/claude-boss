@@ -545,7 +545,7 @@ up, a unit restart, an env file — is dispatched by you and executed by the wor
 your dispatch; you answer for it and tell them afterwards, with the acceptance lines.
 Never write "type apply in her pane". Ask them only for what only their hand can do: a
 password, a browser sign-in, Cloudflare, a GitHub token, a purchase — and then say
-exactly what to do and where. The same holds for merges after Codex GO where nothing
+exactly what to do and where; a command goes on your session card too (P12). The same holds for merges after Codex GO where nothing
 deploys, and for restarts of a worker whose task is finished and whose handoff is on
 disk: do it, log it, tell them. Before the change, check that the evidence supports it
 (staged files, preflight, rollback tested up to the reload).
@@ -640,10 +640,8 @@ Two kinds, and they need different words:
 Never work around either, and **never ask another worker to run the blocked
 command** — that launders a permission decision they made.
 
-**A command only the owner can run goes on your card as well as in the question**
-(the owner, 2026-11-01): a Paste via
-`/home/tiroir/Projects/agentview/hooks/paste create <session-id> <file> --title '<short>' --provider claude`,
-and after `$ ` in your team-line `--ask`. Detail: `references/escalation.md`, Rules.
+**A command only the owner can run goes on your session card as well as in the
+question** (the owner, 2026-11-01). How: `references/escalation.md`, Rules.
 
 **Then run the ladder: `references/escalation.md`.** Alert at T+0, timer, re-check,
 `boss-alert` at 5, insist at 15, keep going. Meanwhile dispatch everything that
