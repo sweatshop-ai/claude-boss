@@ -2,9 +2,11 @@
 
 ## 0.19.1 — 2026-11-01
 
-- A command only the owner can run goes on the boss's session card as a Paste
-  and after `$ ` in the team-line ask, as well as in the `AskUserQuestion`
-  (P12 and `references/escalation.md`).
+- **A command for the owner's hand also goes on the boss's session card.** On
+  2026-11-01 a boss put three `gh run cancel` lines only in an `AskUserQuestion`,
+  and the owner found nothing on the card. The rule (`references/escalation.md`,
+  pointed to from P12): the question, a Paste on the card, and `$ ` in the
+  team-line ask.
 
 ## 0.19.0 — 2026-10-30
 
