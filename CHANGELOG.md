@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.19.2 — 2026-11-01
+
+- **`boss-link` never moves the stable link to an older version.** Every session
+  runs it as a SessionStart hook from its own plugin version, so on 2026-11-01 a
+  boss started on 0.19.0 compacted and pointed `routines/claude-boss` back from
+  0.19.1: the timers ran the old rules. It now compares the `plugin.json`
+  versions (`sort -V`) and prints `kept` instead. A missing or dangling link, or
+  a root without a version, is still set; so is a root passed to it by
+  `install.sh`, which is how a deliberate rollback moves it back.
+
 ## 0.19.1 — 2026-11-01
 
 - **A command for the owner's hand also goes on the boss's session card.** On

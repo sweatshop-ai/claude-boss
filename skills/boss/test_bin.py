@@ -346,13 +346,16 @@ class StableLink(unittest.TestCase):
         self.cfg = self.tmp / "cfg"
         self.home = self.tmp / "home"
         self.home.mkdir()
-        self.roots = []
-        for v in ("0.1.0", "0.2.0"):
-            r = self.tmp / "cache" / v
-            (r / "routines").mkdir(parents=True)
-            (r / "routines" / "boss-ladder.sh").write_text("#!/bin/sh\n")
-            self.roots.append(r)
+        self.roots = [self.make_root(v) for v in ("0.1.0", "0.2.0")]
         self.link = self.cfg / "routines" / "claude-boss"
+
+    def make_root(self, version):
+        r = self.tmp / "cache" / version
+        (r / "routines").mkdir(parents=True)
+        (r / "routines" / "boss-ladder.sh").write_text("#!/bin/sh\n")
+        (r / ".claude-plugin").mkdir()
+        (r / ".claude-plugin" / "plugin.json").write_text(f'{{"name": "claude-boss", "version": "{version}"}}\n')
+        return r
 
     def run_link(self, *args, plugin_root=None, cfg=None):
         env = {"PATH": os.environ["PATH"], "HOME": str(self.home),
@@ -375,6 +378,41 @@ class StableLink(unittest.TestCase):
         r = self.run_link(plugin_root=self.roots[1])
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(os.readlink(self.link), str(self.roots[1]))
+
+    def test_an_older_session_does_not_drag_the_link_back(self):
+        # 2026-11-01: a boss started on 0.19.0 compacted, its SessionStart hook ran and
+        # moved the link back from 0.19.1, so the timers ran the old rules.
+        self.run_link(plugin_root=self.roots[1])
+        r = self.run_link(plugin_root=self.roots[0])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(os.readlink(self.link), str(self.roots[1]))
+        self.assertIn(f"kept {self.link} -> {self.roots[1]}", r.stdout)
+
+    def test_install_with_an_explicit_root_can_roll_the_link_back(self):
+        self.run_link(plugin_root=self.roots[1])
+        r = self.run_link(str(self.roots[0]))                                 # install.sh passes $1
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(os.readlink(self.link), str(self.roots[0]))
+
+    def test_versions_compare_as_versions_not_as_text(self):
+        newer = self.make_root("0.10.0")
+        self.run_link(plugin_root=self.roots[1])                              # 0.2.0
+        self.run_link(plugin_root=newer)
+        self.assertEqual(os.readlink(self.link), str(newer))
+
+    def test_a_dangling_link_is_replaced_even_by_an_older_version(self):
+        self.run_link(plugin_root=self.roots[1])
+        subprocess.run(["rm", "-rf", str(self.roots[1])], check=True)
+        r = self.run_link(plugin_root=self.roots[0])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(os.readlink(self.link), str(self.roots[0]))
+
+    def test_a_root_without_a_version_still_moves_the_link(self):
+        (self.roots[0] / ".claude-plugin" / "plugin.json").unlink()
+        self.run_link(plugin_root=self.roots[1])
+        r = self.run_link(plugin_root=self.roots[0])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(os.readlink(self.link), str(self.roots[0]))
 
     def test_leaves_a_real_directory_at_the_link_path_alone(self):
         self.link.mkdir(parents=True)
