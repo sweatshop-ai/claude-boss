@@ -11,7 +11,11 @@
 #
 # Runs as a SessionStart hook with CLAUDE_PLUGIN_ROOT set, and from install.sh
 # with the root as its one argument. Silent when the link is already right;
-# one line on stdout when it (re)links. A real file or directory at the link
+# one line on stdout when it (re)links. It never moves the link to a lower
+# version than the one it points at: every session runs this hook from its own
+# version, and on 2026-11-01 a boss started on 0.19.0 compacted and dragged the
+# link back from 0.19.1, so the timers ran the old rules. It says "kept" then.
+# A missing or dangling link is always set. A real file or directory at the link
 # path is left alone, with a line on stderr, because that is somebody's data.
 set -euo pipefail
 
@@ -26,8 +30,21 @@ cfg="${CLAUDE_CONFIG_DIR:-}"           # an empty value means unset (see boss_st
 [[ -n $cfg ]] || cfg="$HOME/.claude"
 link="$cfg/routines/claude-boss"
 
+version_of() {   # the plugin's own version, empty when it has none
+  sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$1/.claude-plugin/plugin.json" 2>/dev/null | head -n1 || true
+}
+
 if [[ -L $link ]]; then
-  [[ $(readlink -- "$link") == "$root" ]] && exit 0
+  current="$(readlink -- "$link")"
+  [[ $current == "$root" ]] && exit 0
+  if [[ -e $link ]]; then
+    have="$(version_of "$(readlink -f -- "$link")")" want="$(version_of "$root")"
+    if [[ -n $have && -n $want && $have != "$want" \
+          && $(printf '%s\n%s\n' "$have" "$want" | sort -V | tail -n1) == "$have" ]]; then
+      echo "boss-link: kept $link -> $current ($have is newer than $want)"
+      exit 0
+    fi
+  fi
 elif [[ -e $link ]]; then
   echo "boss-link: $link exists and is not a symlink; left alone" >&2
   exit 1
