@@ -640,6 +640,11 @@ Two kinds, and they need different words:
 Never work around either, and **never ask another worker to run the blocked
 command** — that launders a permission decision they made.
 
+**A command only the owner can run goes on your card as well as in the question**
+(the owner, 2026-11-01): a Paste via
+`/home/tiroir/Projects/agentview/hooks/paste create <session-id> <file> --title '<short>' --provider claude`,
+and after `$ ` in your team-line `--ask`. Detail: `references/escalation.md`, Rules.
+
 **Then run the ladder: `references/escalation.md`.** Alert at T+0, timer, re-check,
 `boss-alert` at 5, insist at 15, keep going. Meanwhile dispatch everything that
 does not depend on the answer.
