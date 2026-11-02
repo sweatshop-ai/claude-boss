@@ -102,7 +102,7 @@ how it gets its own copy.
 
 | Repo | Shared when it runs | Own copy per worker |
 |---|---|---|
-| {{repo}} | {{installed package, database, port, container}} | {{the setting or command, or "none: one at a time"}} |
+| {{repo}} | {{installed package, database, port, container}} | {{the setting or command, "none: one at a time", or "nothing shared"}} |
 
 A resource with no own copy goes one at a time: writing code stays parallel, and
 you give one worker the turn to run on it, then the next.

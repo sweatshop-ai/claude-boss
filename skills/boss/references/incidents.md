@@ -151,13 +151,14 @@ on. Boss workers:
 - **Shared runtime, three times.** Two suites blocking on one Postgres (2026-08-29),
   a migration on the shared database after a typo in the override's name
   (2026-08-30), a check POSTing to another worker's server (2026-09-29). In the last
-  five weeks collisions were bind errors, which announce themselves.
+  four weeks the collisions read back were bind errors, which announce themselves.
 
 **What it bought:** P17: the proof line in the dispatch and the Shared runtime table
-in the brief. The two repos with the trap got a `conftest.py` that refuses to start.
+in the brief. The two repos with the trap got a `conftest.py` that refuses a pytest
+run on foreign code; scripts and alembic stay covered by the proof line alone.
 **What it did not buy:** a slot in the pulse. Of the three only the first is one a
-slot would have prevented, and P15 has since moved full suites to the CI. Build it on
-three new cases of two workers on one resource that a written turn did not stop.
+slot would have prevented, and the written turn covers that case. Build it on three
+new cases of two workers on one resource that a written turn did not stop.
 
 ## 2026-11-02 — a progress watchdog was measured and not built
 
