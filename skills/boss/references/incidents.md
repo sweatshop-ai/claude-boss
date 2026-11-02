@@ -156,7 +156,7 @@ over 30 minutes, that neither the boss nor the owner stepped into.
 hits, nearly all of them the clock running after a turn had ended, on a person, or
 through a usage limit. Reading the hits is what told them apart.
 
-**What it did not settle:** the boss rule misses the 2026-10-30 parked incident:
+**What it did not settle:** the boss rule misses the 2026-10-30 parked incident (CHANGELOG 0.18.1):
 the longest streak that day was 4 pulses in 22 minutes, because any `SendMessage`
 resets it. Counting only messages that name a dispatch gives 39 streaks over 30
 minutes in 10 sessions, not read by hand. So this clears workers, and leaves bosses
