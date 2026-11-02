@@ -219,7 +219,7 @@ class StillFlagged(GuardCase):
 
     def test_each_is_logged(self):
         for cmd in (
-                # a prefix must not carry a call past the check of its statements
+                # a prefix joined by && must not carry a call past the check of its statements
                 'export PATH=/plugin/bin:$PATH && gh pr checkout 5 && npm test',
                 'export PATH=/plugin/bin:$PATH; boss-goal next demo; cd /repo && npm run build',
                 'export V=$(./build.sh); gh release create $V',
@@ -237,17 +237,24 @@ class StillFlagged(GuardCase):
                 'echo x | tail -1 > /repo/src/app.ts',
                 'echo x >> ~/.claude/pm/a.md; date > /repo/src/app.ts',
                 'echo x >> /repo/src/app.ts >> ~/.claude/pm/a.md',
-                # a tool's name must be the whole name
+                # after the first statement, a tool's name must be the whole name
                 'echo x >> ~/.claude/pm/a.md; gh-deploy.sh',
                 'echo x >> ~/.claude/pm/a.md; date.py --build',
                 # sed: one own file, nothing else
                 'sed -i s/a/b/ /repo/src/app.ts ~/.claude/pm/a.md',
                 'sed -i s/a/b/ /repo/src/app.ts > ~/.claude/pm/log',
+                'sed -i s/a/b/ ~/.claude/pm/a.md /repo/x',
                 # only a plain date is a stamp
                 'S=$(date; rm -rf build); echo x >> ~/.claude/pm/a.md',
                 'S=$(date-build.sh); echo x >> ~/.claude/pm/a.md',
+                'S=$(date -u; npm run build); echo x >> ~/.claude/pm/a.md',
+                'S=$(date -u\nnpm run build\n); echo x >> ~/.claude/pm/a.md',
+                'cat >> ~/.claude/pm/a.md <<EOF\n- $(date\nnpm test\n)\nEOF',
+                # a redirect with no target must not crash the hook
+                'echo x >',
                 # paths
                 'echo x >> ~/.claude/pm/../../x/app.ts',
+                'echo x > %s/pm-other/a' % self.cfg,
                 'cd ~/.claude/pm/../../x && sed -i s/a/b/ app.ts',
                 'cd ~/.claude/pm && echo x >> sub/../../../x/app.ts',
                 'cd ~/.claude/pm && echo x >> /repo/src/app.ts',
@@ -256,6 +263,7 @@ class StillFlagged(GuardCase):
                 # reads and lone statements are not writes to own state
                 'cat /repo/src/app.ts',
                 'tail -1 /repo/src/app.ts',
+                'echo x >> ~/.claude/pm/a.md; tail /repo/src/app.ts',
                 'cd /repo',
                 'echo a || echo b'):
             before = len(self.log_lines())
