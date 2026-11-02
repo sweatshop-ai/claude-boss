@@ -81,6 +81,10 @@ that holds the `issues/` folder, and fill every `{{placeholder}}`:
   lines that bind this work — shared working trees, branches that deploy,
   production hosts, client devices, what needs the owner's own hand — each with
   its source path. A rule that does not touch this plan stays out.
+- **Shared runtime**: for every repo in Sources, read the compose files, fixed
+  ports, database settings and the venv's editable install, then write what is
+  shared and the exact setting that gives a worker its own copy. Test the import
+  path from a worktree. Where no own copy exists, write "none: one at a time".
 - **Time windows**: any date and time when something must stay untouched (a demo,
   a call, a release freeze), from the plan, the tickets and the conversation, with
   the timezone. None found → "None stated on <date>."
