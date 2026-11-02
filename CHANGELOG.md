@@ -3,7 +3,7 @@
 ## 0.20.0 — 2026-11-02
 
 - **A worker proves its run hits its own copy.** A worktree separates files, not
-  what runs. Every dispatch that runs tests or the app now asks for the proof: the
+  what runs. Every dispatch that runs tests, a script or the app now asks for the proof: the
   path of the import, and where used the database URL and the pid on the port (P17).
 - **The brief names the shared runtime.** `/hand-to-boss` writes one line per repo:
   what is shared and how a worker gets its own copy. With no own copy, workers run
