@@ -95,6 +95,18 @@ source wins where this summary is short.
 - Devices and hosts the team may and may not touch: {{rule}} (`{{source}}`)
 - Git: {{branches that deploy, who may push, where a push needs the owner}} (`{{source}}`)
 
+## Shared runtime
+
+What a running worker shares beyond its files, one line per repo in Sources, and
+how it gets its own copy.
+
+| Repo | Shared when it runs | Own copy per worker |
+|---|---|---|
+| {{repo}} | {{installed package, database, port, container}} | {{the setting or command, "none: one at a time", or "nothing shared"}} |
+
+A resource with no own copy goes one at a time: writing code stays parallel, and
+you give one worker the turn to run on it, then the next.
+
 ## Time windows
 
 | When | What must not happen | Why |
