@@ -155,7 +155,7 @@ on. Boss workers:
 
 **What it bought:** P17: the proof line in the dispatch and the Shared runtime table
 in the brief. The two repos with the trap got a `conftest.py` that refuses a pytest
-run on foreign code; scripts and alembic stay covered by the proof line alone.
+run on foreign code; scripts stay covered by the proof line alone.
 **What it did not buy:** a slot in the pulse. Of the three only the first is one a
 slot would have prevented, and the written turn covers that case. Build it on three
 new cases of two workers on one resource that a written turn did not stop.
