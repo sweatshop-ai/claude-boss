@@ -22,6 +22,7 @@ Active only for sessions that registered themselves as a boss:
 import json
 import os
 import re
+import shlex
 import sys
 import time
 from pathlib import Path
@@ -57,7 +58,7 @@ ALLOWED_CMD = re.compile(
 # `cd somewhere &&` and leading `VAR=value` assignments are shell throat-clearing,
 # not the command. Strip them and the real head is what follows. Only a leading
 # `cd` counts: `npm run build && cd x` is still a build.
-PREFIX = re.compile(r"^\s*(?:cd\s+[^\s;&|]+\s*(?:&&|;)\s*|[A-Za-z_][A-Za-z0-9_]*=\S*\s*[;]?\s*)")
+PREFIX = re.compile(r"^\s*(?:cd\s+[^\s;&|]+\s*(?:&&|;)\s*|(?:export\s+)?[A-Za-z_][A-Za-z0-9_]*=\S*\s*(?:&&|;)?\s*)")
 
 
 def strip_prefix(cmd, limit=6):
@@ -84,6 +85,105 @@ LOOSE = re.compile(r"/\.claude/pm/")
 def owns(path):
     p = str(path)
     return p.startswith((str(boss_store.pm_dir()), str(PLUGIN))) or bool(LOOSE.search(p))
+
+
+WRITERS = {"echo", "printf", "cat"}
+FILTERS = {"tail", "head", "cut", "wc"}
+HEREDOC = re.compile(r"""<<-?\s*(['"]?)(\w+)\1\s*$""")
+DATE = re.compile(r"\$\(date\b[^()`]*\)")
+SEPARATORS = {";", "&&", "|"}
+REDIRECTS = {">", ">>", "<"}
+# A heredoc run in pm/ is a tracker edit unless it reaches outside: a path that
+# is not the boss's own, or a process of its own.
+ESCAPES = re.compile(r"\b(?:subprocess|system|popen|exec|eval)\b|__import__")
+ABSOLUTE = re.compile(r"""['"](/[^'"]*)['"]""")
+
+
+def split_heredocs(cmd):
+    """(the command with heredoc bodies taken out, the bodies), or None when a
+    heredoc never closes. A line break between statements becomes `;`."""
+    lines, bodies, pending = [], [], None
+    for line in cmd.strip().split("\n"):
+        if pending is not None:
+            if line.strip() == pending:
+                pending = None
+            else:
+                bodies[-1] += line + "\n"
+            continue
+        found = HEREDOC.search(line)
+        if found:
+            pending = found.group(2)
+            bodies.append("")
+            line = line[:found.start()]
+        lines.append(line)
+    return None if pending is not None else (" ; ".join(lines), bodies)
+
+
+def own_path(path, cwd_own):
+    return owns(path) or (cwd_own and not path.startswith(("/", "~", "$", "..")))
+
+
+def statement_is_coordination(words, cwd_own, bodies):
+    """One statement: the boss's own tool, a stamp, or a write to its own state."""
+    while words and re.match(r"(?:export$|[A-Za-z_]\w*=)", words[0]):
+        words = words[1:]
+    if not words or ALLOWED_CMD.match(words[0]):
+        return True
+    redirects = [i for i, w in enumerate(words) if w in (">", ">>")]
+    if words[0] in WRITERS:
+        if words[0] == "cat" and not redirects:
+            return False
+        return not redirects or (len(redirects) == 1 and redirects[0] == len(words) - 2
+                                 and own_path(words[-1], cwd_own))
+    if words[0] == "sed" and "-i" in words:
+        return own_path(words[-1], cwd_own)
+    if words[0] == "python3" and words[1:2] == ["-"] and cwd_own and bodies:
+        return not any(ESCAPES.search(b) or not all(owns(p) for p in ABSOLUTE.findall(b))
+                       for b in bodies)
+    return False
+
+
+def is_coordination(cmd):
+    """True when every statement of a Bash call is coordination.
+
+    An Edit under pm/ was never flagged, and the same line appended from the
+    shell was. Measured on 22 boss sessions: the appended line arrives between
+    `cd pm`, a `$(date)` stamp and the team-line call, so the statements are
+    judged one by one. One statement of anything else flags the call, and so
+    does text that does not parse or a substitution other than `date`.
+    """
+    split = split_heredocs(DATE.sub("STAMP", cmd))
+    if split is None:
+        return False
+    text, bodies = split
+    if "$(" in text or "`" in text:
+        return False
+    lexer = shlex.shlex(text, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    lexer.commenters = ""
+    try:
+        tokens = list(lexer)
+    except ValueError:
+        return False
+    cwd_own, words, piped, used = False, [], False, False
+    for token in tokens + [";"]:
+        if token not in SEPARATORS:
+            if not token.strip("();<>|&") and token not in REDIRECTS:
+                return False          # `||`, `&`, a subshell: not read further
+            words.append(token)
+            continue
+        if words:
+            if words[0] == "cd" and len(words) == 2:
+                cwd_own = owns(words[1].rstrip("/") + "/")
+            elif piped and words[0] in FILTERS:
+                pass
+            elif statement_is_coordination(words, cwd_own, bodies):
+                used = True
+            else:
+                return False
+        words, piped = [], token == "|"
+    return used
+
 
 WATCHED = {"Bash", "Edit", "Write", "NotebookEdit", "Read", "Glob", "Grep", "Agent"}
 
@@ -140,7 +240,7 @@ def main():
     detail = ""
     if tool == "Bash":
         cmd = (ti.get("command") or "").strip()
-        if ALLOWED_CMD.match(cmd) or ALLOWED_CMD.match(strip_prefix(cmd)):
+        if ALLOWED_CMD.match(cmd) or ALLOWED_CMD.match(strip_prefix(cmd)) or is_coordination(cmd):
             return 0
         detail = cmd[:200]
     elif tool == "Agent":
