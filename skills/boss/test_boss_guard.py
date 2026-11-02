@@ -138,6 +138,79 @@ class Precision(GuardCase):
         self.assertNotEqual("", self.fire("FOO=1 python3 train.py"))
 
 
+class ExportPrefix(GuardCase):
+    """A boss puts the plugin on its PATH first; 138 flagged calls in 14 days
+    began with `export`, and the sessions' own lifecycle calls were among them."""
+
+    def test_an_export_prefix_does_not_hide_an_allowed_command(self):
+        for cmd in ('export PATH="/plugin/skills/boss:$PATH"; boss-lifecycle.sh list --mine',
+                    'export PATH=/plugin/bin:$PATH && boss-goal next demo'):
+            self.assertEqual(self.fire(cmd), "", "scolded for `%s`" % cmd)
+
+    def test_an_export_prefix_does_not_wave_through_real_work(self):
+        self.assertNotEqual("", self.fire('export PATH="/x:$PATH"; npm run build'))
+
+
+class BashWritesToPm(GuardCase):
+    """The tracker is the boss's own, by Edit or by shell. An Edit under pm/ was
+    never flagged; the same line appended with `printf >>` was."""
+
+    def test_appending_a_line_to_its_own_state_is_coordination(self):
+        for cmd in ('echo "- 08:0xZ Hassan: PR 101 merged" >> ~/.claude/pm/action-list.md',
+                    "printf '%s\\n' \"- a; b && c\" >> /home/x/.claude/pm/demo.md",
+                    'cd /repo && echo done > ~/.claude/pm/demo.state',
+                    "cat >> ~/.claude/pm/demo.md <<'EOF'\n- rm -rf build; it's fine\nEOF"):
+            self.assertEqual(self.fire(cmd), "", "scolded for `%s`" % cmd)
+        self.assertEqual(self.log_lines(), [])
+
+    def test_a_write_to_the_config_dirs_own_pm_counts(self):
+        self.assertEqual(self.fire('echo x >> %s/pm/demo.md' % self.cfg), "")
+
+    def test_the_compound_calls_bosses_really_make_are_coordination(self):
+        """Measured on 22 boss sessions: the bare write was 5 calls in 4,968.
+        The tracker line arrives with its timestamp and the team-line call."""
+        for cmd in ('cd ~/.claude/pm; S=$(date -u +%H:%MZ); echo "- $S Kasper: merged" >> action-list.md; '
+                    "/x/hooks/team-line abc --did 'done; next' --n 0",
+                    "printf '%s\\n' \"- 17:0xZ Farid\" >> ~/.claude/pm/a.md; /x/team-line abc --n 0 < /dev/null",
+                    "cd ~/.claude/pm && printf '%s\\n' \"- x\" | /x/bin/boss-tracker append demo | tail -1",
+                    "cd ~/.claude/pm && sed -i 's/a/b/' action-list.md",
+                    "cd ~/.claude/pm && t=$(date +%H:%M) && python3 - \"$t\" <<'EOF'\n"
+                    "p='action-list.md'; s=open(p).read(); open(p,'w').write(s+'x')\nEOF"):
+            self.assertEqual(self.fire(cmd), "", "scolded for `%s`" % cmd)
+        self.assertEqual(self.log_lines(), [])
+
+    def test_real_work_beside_a_tracker_line_is_still_flagged(self):
+        for cmd in ('cd ~/.claude/pm; echo x >> a.md; cd /repo && npm run build',
+                    'cd /repo && echo x >> a.md',
+                    "cd /repo && sed -i 's/a/b/' src/app.ts",
+                    "cd /repo && python3 - <<'EOF'\nopen('a','w').write('x')\nEOF",
+                    "cd ~/.claude/pm && python3 - <<'EOF'\nopen('/repo/src/app.ts','w').write('x')\nEOF",
+                    "cd ~/.claude/pm && python3 - <<'EOF'\nimport subprocess\nsubprocess.run(['make'])\nEOF",
+                    "S=$(rm -rf build); echo x >> ~/.claude/pm/a.md",
+                    'echo a || rm -rf build',
+                    'echo a & rm -rf build',
+                    '(echo a) ; rm -rf build'):
+            before = len(self.log_lines())
+            self.fire(cmd)
+            self.assertEqual(len(self.log_lines()), before + 1, "not logged: `%s`" % cmd)
+
+    def test_only_a_pure_write_counts(self):
+        for cmd in ('echo x >> ~/.claude/pm/a.md; rm -rf build',
+                    'echo x >> ~/.claude/pm/a.md && npm run build',
+                    'npm run build >> ~/.claude/pm/build.log',
+                    'echo x >> ~/.claude/pm/a.md\nrm -rf build',
+                    'echo $(rm -rf build) >> ~/.claude/pm/a.md',
+                    'echo `rm -rf build` >> ~/.claude/pm/a.md',
+                    'echo x >> /repo/src/app.ts',
+                    'echo x >> ~/.claude/pm/a.md >> /repo/src/app.ts',
+                    'echo x | tee /repo/src/app.ts',
+                    "cat >> ~/.claude/pm/a.md <<'EOF'\nbody\nEOF\nrm -rf build",
+                    'echo "unterminated >> ~/.claude/pm/a.md'):
+            before = len(self.log_lines())
+            self.fire(cmd)
+            self.assertEqual(len(self.log_lines()), before + 1, "not logged: `%s`" % cmd)
+
+
 class AgentTeams(GuardCase):
     """A named Agent call in a boss starts an agent-teams teammate.
 

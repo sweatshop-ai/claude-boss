@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.19.3 — 2026-11-02
+
+- **The guard stops flagging a boss for keeping its own tracker.** An Edit under
+  `pm/` was never flagged; the same line appended from the shell was, and so was
+  `export PATH=…; boss-lifecycle.sh`. A Bash call now passes when every statement
+  in it is coordination: the boss's own tools, a `$(date)` stamp, or a write to
+  its own state by `echo`, `printf`, `cat`, `sed -i` or a `python3 -` heredoc.
+  One statement of anything else still flags the call. Replayed on the 4,968
+  flagged calls of 22 boss sessions over 14 days that could be matched to their
+  full command, 1,462 no longer count and 3,506 still do. Reads of `pm/` from the
+  shell still count: the guard remains a warning, and that number is not yet a
+  count of implementation work.
+
 ## 0.19.2 — 2026-11-01
 
 - **`boss-link` never moves the stable link to an older version.** Every session
