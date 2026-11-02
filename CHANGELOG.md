@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.19.3 — 2026-11-02
+
+- **The guard stops flagging a boss for keeping its own tracker.** An Edit under
+  `pm/` was never flagged; the same line appended from the shell was, and so was
+  `export PATH=…; boss-lifecycle.sh`. A Bash call now passes when every statement
+  in it is coordination: the boss's own tools, a `$(date)` stamp, or a write to
+  `pm/` by `echo`, `printf`, `cat` or `sed -i`. A script is never coordination,
+  even one run from `pm/`, because its reach cannot be read from its text. The
+  older shortcut stands: a call whose head, after a `cd` or `VAR=` prefix, matches
+  an allowed tool's name is still not read further. Replayed on the 4,968 flagged calls of 22 boss
+  sessions over 14 days that could be matched to their full command, 964 no
+  longer count and 4,004 still do. Those include reads of `pm/` and tracker edits
+  by script, so that number is not a count of implementation work.
+
 ## 0.19.2 — 2026-11-01
 
 - **`boss-link` never moves the stable link to an older version.** Every session

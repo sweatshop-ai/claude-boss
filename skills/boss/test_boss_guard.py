@@ -12,6 +12,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -136,6 +137,145 @@ class Precision(GuardCase):
     def test_the_prefix_strip_does_not_wave_through_real_work(self):
         self.assertNotEqual("", self.fire("cd /repo && npm run build"))
         self.assertNotEqual("", self.fire("FOO=1 python3 train.py"))
+
+
+class ExportPrefix(GuardCase):
+    """A boss puts the plugin on its PATH first; 138 flagged calls in 14 days
+    began with `export`, and the sessions' own lifecycle calls were among them."""
+
+    def test_an_export_prefix_does_not_hide_an_allowed_command(self):
+        for cmd in ('export PATH="/plugin/skills/boss:$PATH"; boss-lifecycle.sh list --mine',
+                    'export PATH=/plugin/bin:$PATH && boss-goal next demo'):
+            self.assertEqual(self.fire(cmd), "", "scolded for `%s`" % cmd)
+
+    def test_an_export_prefix_does_not_wave_through_real_work(self):
+        self.assertNotEqual("", self.fire('export PATH="/x:$PATH"; npm run build'))
+
+
+class BashWritesToPm(GuardCase):
+    """The tracker is the boss's own, by Edit or by shell. An Edit under pm/ was
+    never flagged; the same line appended with `printf >>` was."""
+
+    def test_appending_a_line_to_its_own_state_is_coordination(self):
+        for cmd in ('echo "- 08:0xZ Hassan: PR 101 merged" >> ~/.claude/pm/action-list.md',
+                    "printf '%s\\n' \"- a; b && c\" >> /home/x/.claude/pm/demo.md",
+                    'cd /repo && echo done > ~/.claude/pm/demo.state',
+                    "cat >> ~/.claude/pm/demo.md <<'EOF'\n- rm -rf build; it's fine\nEOF"):
+            self.assertEqual(self.fire(cmd), "", "scolded for `%s`" % cmd)
+        self.assertEqual(self.log_lines(), [])
+
+    def test_a_write_to_the_config_dirs_own_pm_counts(self):
+        self.assertEqual(self.fire('echo x >> %s/pm/demo.md' % self.cfg), "")
+
+    def test_the_compound_calls_bosses_really_make_are_coordination(self):
+        """Measured on 22 boss sessions: the bare write was 5 calls in 4,968.
+        The tracker line arrives with its timestamp and the team-line call."""
+        for cmd in ('cd ~/.claude/pm; S=$(date -u +%H:%MZ); echo "- $S Kasper: merged" >> action-list.md; '
+                    "/x/hooks/team-line abc --did 'done; next' --n 0",
+                    "printf '%s\\n' \"- 17:0xZ Farid\" >> ~/.claude/pm/a.md; /x/team-line abc --n 0 < /dev/null",
+                    "cd ~/.claude/pm && printf '%s\\n' \"- x\" | /x/bin/boss-tracker append demo | tail -1",
+                    "cd ~/.claude/pm && sed -i 's/a/b/' action-list.md",
+                    "cd ~/.claude/pm && S=$(date -u +%H:%MZ) && cat >> a.md <<EOF\n- $S done\nEOF",
+                    "cat >> ~/.claude/pm/a.md <<'EOF'\n- the $(literal) text\nEOF"):
+            self.assertEqual(self.fire(cmd), "", "scolded for `%s`" % cmd)
+        self.assertEqual(self.log_lines(), [])
+
+    def test_real_work_beside_a_tracker_line_is_still_flagged(self):
+        for cmd in ('cd ~/.claude/pm; echo x >> a.md; cd /repo && npm run build',
+                    'cd /repo && echo x >> a.md',
+                    "cd /repo && sed -i 's/a/b/' src/app.ts",
+                    "cd /repo && python3 - <<'EOF'\nopen('a','w').write('x')\nEOF",
+                    "cd ~/.claude/pm && python3 - <<'EOF'\nopen('/repo/src/app.ts','w').write('x')\nEOF",
+                    "cd ~/.claude/pm && python3 - <<'EOF'\nimport subprocess\nsubprocess.run(['make'])\nEOF",
+                    "S=$(rm -rf build); echo x >> ~/.claude/pm/a.md",
+                    'echo a || rm -rf build',
+                    'echo a & rm -rf build',
+                    '(echo a) ; rm -rf build'):
+            before = len(self.log_lines())
+            self.fire(cmd)
+            self.assertEqual(len(self.log_lines()), before + 1, "not logged: `%s`" % cmd)
+
+    def test_only_a_pure_write_counts(self):
+        for cmd in ('echo x >> ~/.claude/pm/a.md; rm -rf build',
+                    'echo x >> ~/.claude/pm/a.md && npm run build',
+                    'npm run build >> ~/.claude/pm/build.log',
+                    'echo x >> ~/.claude/pm/a.md\nrm -rf build',
+                    'echo $(rm -rf build) >> ~/.claude/pm/a.md',
+                    'echo `rm -rf build` >> ~/.claude/pm/a.md',
+                    'echo x >> /repo/src/app.ts',
+                    'echo x >> ~/.claude/pm/a.md >> /repo/src/app.ts',
+                    'echo x | tee /repo/src/app.ts',
+                    "cat >> ~/.claude/pm/a.md <<'EOF'\nbody\nEOF\nrm -rf build",
+                    'echo "unterminated >> ~/.claude/pm/a.md'):
+            before = len(self.log_lines())
+            self.fire(cmd)
+            self.assertEqual(len(self.log_lines()), before + 1, "not logged: `%s`" % cmd)
+
+
+class StillFlagged(GuardCase):
+    """Opus's bug hunt on PR 43: each of these passed unlogged on some version
+    of the statement-by-statement check. An unlogged call costs more than a
+    noisy one, since the log is the evidence."""
+
+    def test_each_is_logged(self):
+        for cmd in (
+                # a prefix joined by && must not carry a call past the check of its statements
+                'export PATH=/plugin/bin:$PATH && gh pr checkout 5 && npm test',
+                'export PATH=/plugin/bin:$PATH; boss-goal next demo; cd /repo && npm run build',
+                'export V=$(./build.sh); gh release create $V',
+                'V=$(./build.sh) && gh release create $V',
+                # a script's reach cannot be read from its text
+                "cd ~/.claude/pm && python3 - <<'EOF'\nimport os\nopen(os.path.expanduser('~/x/a.ts'),'w')\nEOF",
+                "cd ~/.claude/pm && python3 - <<'EOF'\nfrom pathlib import Path\n(Path.home()/'x').write_text('x')\nEOF",
+                "cd ~/.claude/pm && python3 - <<'EOF'\nopen('../../x/a.ts','w')\nEOF",
+                # an unquoted heredoc runs its substitutions
+                'cat >> ~/.claude/pm/a.md <<EOF\n- $(npm test 2>&1 | tail -1)\nEOF',
+                'cat >> ~/.claude/pm/a.md <<EOF\n`rm -rf build`\nEOF',
+                # a herestring is no heredoc
+                'echo a <<<EOF\nrm -rf build\nEOF',
+                # redirects, wherever they sit
+                'echo x | tail -1 > /repo/src/app.ts',
+                'echo x >> ~/.claude/pm/a.md; date > /repo/src/app.ts',
+                'echo x >> /repo/src/app.ts >> ~/.claude/pm/a.md',
+                # after the first statement, a tool's name must be the whole name
+                'echo x >> ~/.claude/pm/a.md; gh-deploy.sh',
+                'echo x >> ~/.claude/pm/a.md; date.py --build',
+                # sed: one own file, nothing else
+                'sed -i s/a/b/ /repo/src/app.ts ~/.claude/pm/a.md',
+                'sed -i s/a/b/ /repo/src/app.ts > ~/.claude/pm/log',
+                'sed -i s/a/b/ ~/.claude/pm/a.md /repo/x',
+                # only a plain date is a stamp
+                'S=$(date; rm -rf build); echo x >> ~/.claude/pm/a.md',
+                'S=$(date-build.sh); echo x >> ~/.claude/pm/a.md',
+                'S=$(date -u; npm run build); echo x >> ~/.claude/pm/a.md',
+                'S=$(date -u\nnpm run build\n); echo x >> ~/.claude/pm/a.md',
+                'cat >> ~/.claude/pm/a.md <<EOF\n- $(date\nnpm test\n)\nEOF',
+                # a redirect with no target must not crash the hook
+                'echo x >',
+                # paths
+                'echo x >> ~/.claude/pm/../../x/app.ts',
+                'echo x > %s/pm-other/a' % self.cfg,
+                'cd ~/.claude/pm/../../x && sed -i s/a/b/ app.ts',
+                'cd ~/.claude/pm && echo x >> sub/../../../x/app.ts',
+                'cd ~/.claude/pm && echo x >> /repo/src/app.ts',
+                'cd ~/.claude/pm; F=/repo/app.ts; echo x >> a$F',
+                'cd ~/.claude/pm; cd /repo; echo x >> a.md',
+                # reads and lone statements are not writes to own state
+                'cat /repo/src/app.ts',
+                'tail -1 /repo/src/app.ts',
+                'echo x >> ~/.claude/pm/a.md; tail /repo/src/app.ts',
+                'cd /repo',
+                'echo a || echo b'):
+            before = len(self.log_lines())
+            self.fire(cmd)
+            self.assertEqual(len(self.log_lines()), before + 1, "not logged: `%s`" % cmd)
+
+    def test_a_huge_command_is_flagged_without_parsing(self):
+        """Quoted text of 1 MB took 28 s to split; the hook's timeout is 5 s."""
+        started = time.monotonic()
+        self.fire('echo "%s" >> ~/.claude/pm/a.md' % ("x" * 1_000_000))
+        self.assertLess(time.monotonic() - started, 4)
+        self.assertEqual(len(self.log_lines()), 1)
 
 
 class AgentTeams(GuardCase):

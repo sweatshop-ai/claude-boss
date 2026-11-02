@@ -22,6 +22,7 @@ Active only for sessions that registered themselves as a boss:
 import json
 import os
 import re
+import shlex
 import sys
 import time
 from pathlib import Path
@@ -85,6 +86,107 @@ def owns(path):
     p = str(path)
     return p.startswith((str(boss_store.pm_dir()), str(PLUGIN))) or bool(LOOSE.search(p))
 
+
+WRITERS = {"echo", "printf", "cat"}
+FILTERS = {"tail", "head", "cut", "wc"}
+HEREDOC = re.compile(r"""(?<!<)<<-?\s*(['"]?)(\w+)\1\s*$""")
+DATE = re.compile(r"\$\(date(?:[ \t]+[^()`;&|<>\n]*)?\)")
+SEPARATORS = {";", "&&", "|"}
+REDIRECTS = {">", ">>", "<"}
+MAX_PARSED = 20_000     # splitting 1 MB of quoted text took 28 s; the hook has 5
+
+
+def own_state(path, cwd_own=False):
+    """A path under pm/, or a plain relative one when the cwd is. A path with
+    `..` or a variable in it is not read."""
+    if ".." in path.split("/") or "$" in path:
+        return False
+    if path.startswith(("/", "~")):
+        return bool(LOOSE.search(path)) or path.startswith(str(boss_store.pm_dir()) + "/")
+    return cwd_own
+
+
+def split_heredocs(cmd):
+    """The command with heredoc bodies taken out, or None when a heredoc never
+    closes. A line break between statements becomes `;`. A body whose delimiter
+    is unquoted stays in the text, because the shell runs its substitutions."""
+    lines, pending = [], None
+    for line in cmd.strip().split("\n"):
+        if pending is not None:
+            delimiter, quoted = pending
+            if line.strip() == delimiter:
+                pending = None
+            elif not quoted and ("$(" in line or "`" in line):
+                return None
+            continue
+        found = HEREDOC.search(line)
+        if found:
+            pending = (found.group(2), bool(found.group(1)))
+            line = line[:found.start()]
+        lines.append(line)
+    return None if pending is not None else " ; ".join(lines)
+
+
+def statement_is_coordination(words, cwd_own):
+    """One statement: the boss's own tool, a stamp, or a write to its own state."""
+    while words and re.match(r"(?:export$|[A-Za-z_]\w*=)", words[0]):
+        words = words[1:]
+    if not words:
+        return True
+    redirects = [i for i, w in enumerate(words) if w in (">", ">>")]
+    if not all(i + 1 < len(words) and own_state(words[i + 1], cwd_own) for i in redirects):
+        return False
+    if ALLOWED_CMD.fullmatch(words[0]):
+        return True
+    if words[0] in WRITERS:
+        return bool(redirects) or words[0] != "cat"
+    return words[0] == "sed" and len(words) == 4 and words[1] == "-i" and own_state(words[3], cwd_own)
+
+
+def is_coordination(cmd):
+    """True when every statement of a Bash call is coordination.
+
+    An Edit under pm/ was never flagged, and the same line appended from the
+    shell was. Measured on 22 boss sessions: the appended line arrives between
+    `cd pm`, a `$(date)` stamp and the team-line call, so the statements are
+    judged one by one. One statement of anything else flags the call, and so
+    does text that does not parse or a substitution other than `date`. A script
+    is never coordination, wherever it runs: its reach cannot be read from its
+    text, and an unlogged edit costs more here than a noisy line.
+    """
+    if len(cmd) > MAX_PARSED:
+        return False
+    text = split_heredocs(DATE.sub("STAMP", cmd))
+    if text is None or "$(" in text or "`" in text:
+        return False
+    lexer = shlex.shlex(text, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    lexer.commenters = ""
+    try:
+        tokens = list(lexer)
+    except ValueError:
+        return False
+    cwd_own, words, piped, used = False, [], False, False
+    for token in tokens + [";"]:
+        if token not in SEPARATORS:
+            if not token.strip("();<>|&") and token not in REDIRECTS:
+                return False          # `||`, `&`, a subshell: not read further
+            words.append(token)
+            continue
+        if words:
+            if words[0] == "cd" and len(words) == 2:
+                cwd_own = own_state(words[1].rstrip("/") + "/")
+            elif piped and words[0] in FILTERS:
+                if any(w in (">", ">>") for w in words):
+                    return False
+            elif statement_is_coordination(words, cwd_own):
+                used = True
+            else:
+                return False
+        words, piped = [], token == "|"
+    return used
+
+
 WATCHED = {"Bash", "Edit", "Write", "NotebookEdit", "Read", "Glob", "Grep", "Agent"}
 
 
@@ -140,7 +242,7 @@ def main():
     detail = ""
     if tool == "Bash":
         cmd = (ti.get("command") or "").strip()
-        if ALLOWED_CMD.match(cmd) or ALLOWED_CMD.match(strip_prefix(cmd)):
+        if ALLOWED_CMD.match(cmd) or ALLOWED_CMD.match(strip_prefix(cmd)) or is_coordination(cmd):
             return 0
         detail = cmd[:200]
     elif tool == "Agent":
