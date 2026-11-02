@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.20.0 — 2026-11-02
+
+- **A worker proves its run hits its own copy.** A worktree separates files, not
+  what runs. Every dispatch that runs tests, a script or the app now asks for the proof: the
+  path of the import, and where used the database URL and the pid on the port (P17).
+- **The brief names the shared runtime.** `/hand-to-boss` writes one line per repo:
+  what is shared and how a worker gets its own copy. With no own copy, workers run
+  on it one at a time, on a turn the boss gives. This is a written rule; the pulse
+  does not count it. The evidence, and why no slot was built, is in
+  `references/incidents.md`.
+
 ## 0.19.3 — 2026-11-02
 
 - **The guard stops flagging a boss for keeping its own tracker.** An Edit under
