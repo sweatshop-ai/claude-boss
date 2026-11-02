@@ -135,3 +135,29 @@ before any full local run: above the core count, the local run is the slowest pa
 idle. On a shared one it can be the slowest path while the CI has the free
 capacity. Where the capacity sits is a measurement, not a default: read the load
 before choosing.
+
+## 2026-11-02 — a progress watchdog was measured and not built
+
+The workers watch sees crashes, not a live session making no progress, so 14 days
+of transcripts (22 bosses, 312 workers) were replayed before building anything.
+The bar was set first: at least 3 real episodes, across at least 2 sessions, each
+over 30 minutes, that neither the boss nor the owner stepped into.
+
+- **Workers: 30 minutes of working time with no commit, push or message.** CI
+  waits, a running subagent and time at rest did not count. 2 hits in 2 sessions,
+  both read by hand, both a worker fixing its own tests. None real.
+- **Bosses: 3 pulses in a row with an idle worker and no dispatch.** 3 streaks over
+  30 minutes in 2 sessions, read by hand: workers held for a merge order, for runs
+  to count, or for the owner's upload. None real.
+- **Waits of 60 minutes or more, outside the bar:** 48, of which 27 name CI; median
+  108 minutes. 34 ended when the job finished, 14 on a peer's message.
+
+**What it bought:** nothing built. The first version of the worker clock gave 44
+hits, nearly all of them the clock running after a turn had ended, on a person, or
+through a usage limit. Reading the hits is what told them apart.
+
+**What it did not settle:** the boss rule misses the 2026-10-30 parked incident:
+the longest streak that day was 4 pulses in 22 minutes, because any `SendMessage`
+resets it. Counting only messages that name a dispatch gives 39 streaks over 30
+minutes in 10 sessions, not read by hand. So this clears workers, and leaves bosses
+open if the parked pattern comes back after 0.18.1.
