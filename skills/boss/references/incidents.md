@@ -136,6 +136,29 @@ idle. On a shared one it can be the slowest path while the CI has the free
 capacity. Where the capacity sits is a measurement, not a default: read the load
 before choosing.
 
+## 2026-11-02 — worktrees separate files, not what runs
+
+Asked by a colleague how parallel workers test, so all transcripts from 2026-08-07
+to 2026-11-02 were read for runs that reached a runtime they did not own. Only what
+a worker noticed shows up; the search refound all four known incidents it was tried
+on. Boss workers:
+
+- **Green on the wrong code, four times.** A venv's editable install beat the
+  worktree in a `src` layout (piano 2026-08-27, a gate that compared dev with dev and
+  printed "safe to merge"; render-doc 2026-10-24 twice and 2026-10-31). None was
+  merged on that run: CI or the worker caught it. A flat layout with
+  `tests/__init__.py` (library-mcp) imports the worktree and does not have the trap.
+- **Shared runtime, three times.** Two suites blocking on one Postgres (2026-08-29),
+  a migration on the shared database after a typo in the override's name
+  (2026-08-30), a check POSTing to another worker's server (2026-09-29). In the last
+  five weeks collisions were bind errors, which announce themselves.
+
+**What it bought:** P17: the proof line in the dispatch and the Shared runtime table
+in the brief. The two repos with the trap got a `conftest.py` that refuses to start.
+**What it did not buy:** a slot in the pulse. Of the three only the first is one a
+slot would have prevented, and P15 has since moved full suites to the CI. Build it on
+three new cases of two workers on one resource that a written turn did not stop.
+
 ## 2026-11-02 — a progress watchdog was measured and not built
 
 The workers watch sees crashes, not a live session making no progress, so 14 days

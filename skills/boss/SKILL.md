@@ -727,6 +727,22 @@ work, `gh run list --status queued` on the repo. When suites are already queued,
 another pushing worker adds wait, not throughput; give it work that does not push
 yet, or hold it.
 
+### P17. A worktree separates files, not what runs
+
+A worker's run can still reach another checkout's code, a shared database or
+another session's server, and the dangerous runs are green. Measured from
+2026-08-07 to 2026-11-02: four green runs on the wrong code, because a venv's
+editable install beat the worktree, one of which printed "safe to merge" over a
+branch that changed 29 keywords; a migration on the shared Postgres after a typo
+in the override's name; a check that POSTed to another worker's server. The
+receipts are in `references/incidents.md`.
+
+- **Every dispatch that runs tests or the app carries the check** in Phase B.
+- **The brief's Shared runtime table is yours to enforce.** A resource with no
+  own copy goes one at a time: writing code stays parallel, and you give one
+  worker the turn to run on it, then the next. Without a brief, read the same facts
+  from the repo before two workers run the app there.
+
 ### Messaging discipline
 
 - **One message per topic.** There is a per-session cap (~50) and identical
@@ -779,7 +795,11 @@ Parse `$ARGUMENTS`: empty or `status` → **A** · `dispatch <task> [worker]` �
    count against your 150k."* The worker decides; `references/models.md` has the
    criteria. For a branch that deploys nothing, add: *"Run only the test files your
    change touches; the CI runs the full suite (P15)."* When that CI runs on a
-   small shared runner pool, add P16's three push rules word for word.
+   small shared runner pool, add P16's three push rules word for word. For a task
+   that runs tests or the app, add (P17): *"Before you trust a run, prove it hits
+   your own copy: the path of the import, and where the run uses them the database
+   URL and the pid on the port. Put that proof in your report. A run without it
+   does not count."*
 5. **Verification is the tool result.** An error means it didn't land. If the
    dispatch only lands after a GitHub write the classifier blocks in the worker,
    do it yourself through `boss-run --why ... -- gh ...` instead of handing the
