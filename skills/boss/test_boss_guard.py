@@ -12,6 +12,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -174,8 +175,8 @@ class BashWritesToPm(GuardCase):
                     "printf '%s\\n' \"- 17:0xZ Farid\" >> ~/.claude/pm/a.md; /x/team-line abc --n 0 < /dev/null",
                     "cd ~/.claude/pm && printf '%s\\n' \"- x\" | /x/bin/boss-tracker append demo | tail -1",
                     "cd ~/.claude/pm && sed -i 's/a/b/' action-list.md",
-                    "cd ~/.claude/pm && t=$(date +%H:%M) && python3 - \"$t\" <<'EOF'\n"
-                    "p='action-list.md'; s=open(p).read(); open(p,'w').write(s+'x')\nEOF"):
+                    "cd ~/.claude/pm && S=$(date -u +%H:%MZ) && cat >> a.md <<EOF\n- $S done\nEOF",
+                    "cat >> ~/.claude/pm/a.md <<'EOF'\n- the $(literal) text\nEOF"):
             self.assertEqual(self.fire(cmd), "", "scolded for `%s`" % cmd)
         self.assertEqual(self.log_lines(), [])
 
@@ -209,6 +210,64 @@ class BashWritesToPm(GuardCase):
             before = len(self.log_lines())
             self.fire(cmd)
             self.assertEqual(len(self.log_lines()), before + 1, "not logged: `%s`" % cmd)
+
+
+class StillFlagged(GuardCase):
+    """Opus's bug hunt on PR 43: each of these passed unlogged on some version
+    of the statement-by-statement check. An unlogged call costs more than a
+    noisy one, since the log is the evidence."""
+
+    def test_each_is_logged(self):
+        for cmd in (
+                # a prefix must not carry a call past the check of its statements
+                'export PATH=/plugin/bin:$PATH && gh pr checkout 5 && npm test',
+                'export PATH=/plugin/bin:$PATH; boss-goal next demo; cd /repo && npm run build',
+                'export V=$(./build.sh); gh release create $V',
+                'V=$(./build.sh) && gh release create $V',
+                # a script's reach cannot be read from its text
+                "cd ~/.claude/pm && python3 - <<'EOF'\nimport os\nopen(os.path.expanduser('~/x/a.ts'),'w')\nEOF",
+                "cd ~/.claude/pm && python3 - <<'EOF'\nfrom pathlib import Path\n(Path.home()/'x').write_text('x')\nEOF",
+                "cd ~/.claude/pm && python3 - <<'EOF'\nopen('../../x/a.ts','w')\nEOF",
+                # an unquoted heredoc runs its substitutions
+                'cat >> ~/.claude/pm/a.md <<EOF\n- $(npm test 2>&1 | tail -1)\nEOF',
+                'cat >> ~/.claude/pm/a.md <<EOF\n`rm -rf build`\nEOF',
+                # a herestring is no heredoc
+                'echo a <<<EOF\nrm -rf build\nEOF',
+                # redirects, wherever they sit
+                'echo x | tail -1 > /repo/src/app.ts',
+                'echo x >> ~/.claude/pm/a.md; date > /repo/src/app.ts',
+                'echo x >> /repo/src/app.ts >> ~/.claude/pm/a.md',
+                # a tool's name must be the whole name
+                'echo x >> ~/.claude/pm/a.md; gh-deploy.sh',
+                'echo x >> ~/.claude/pm/a.md; date.py --build',
+                # sed: one own file, nothing else
+                'sed -i s/a/b/ /repo/src/app.ts ~/.claude/pm/a.md',
+                'sed -i s/a/b/ /repo/src/app.ts > ~/.claude/pm/log',
+                # only a plain date is a stamp
+                'S=$(date; rm -rf build); echo x >> ~/.claude/pm/a.md',
+                'S=$(date-build.sh); echo x >> ~/.claude/pm/a.md',
+                # paths
+                'echo x >> ~/.claude/pm/../../x/app.ts',
+                'cd ~/.claude/pm/../../x && sed -i s/a/b/ app.ts',
+                'cd ~/.claude/pm && echo x >> sub/../../../x/app.ts',
+                'cd ~/.claude/pm && echo x >> /repo/src/app.ts',
+                'cd ~/.claude/pm; F=/repo/app.ts; echo x >> a$F',
+                'cd ~/.claude/pm; cd /repo; echo x >> a.md',
+                # reads and lone statements are not writes to own state
+                'cat /repo/src/app.ts',
+                'tail -1 /repo/src/app.ts',
+                'cd /repo',
+                'echo a || echo b'):
+            before = len(self.log_lines())
+            self.fire(cmd)
+            self.assertEqual(len(self.log_lines()), before + 1, "not logged: `%s`" % cmd)
+
+    def test_a_huge_command_is_flagged_without_parsing(self):
+        """Quoted text of 1 MB took 28 s to split; the hook's timeout is 5 s."""
+        started = time.monotonic()
+        self.fire('echo "%s" >> ~/.claude/pm/a.md' % ("x" * 1_000_000))
+        self.assertLess(time.monotonic() - started, 4)
+        self.assertEqual(len(self.log_lines()), 1)
 
 
 class AgentTeams(GuardCase):

@@ -6,12 +6,13 @@
   `pm/` was never flagged; the same line appended from the shell was, and so was
   `export PATH=…; boss-lifecycle.sh`. A Bash call now passes when every statement
   in it is coordination: the boss's own tools, a `$(date)` stamp, or a write to
-  its own state by `echo`, `printf`, `cat`, `sed -i` or a `python3 -` heredoc.
-  One statement of anything else still flags the call. Replayed on the 4,968
-  flagged calls of 22 boss sessions over 14 days that could be matched to their
-  full command, 1,462 no longer count and 3,506 still do. Reads of `pm/` from the
-  shell still count: the guard remains a warning, and that number is not yet a
-  count of implementation work.
+  `pm/` by `echo`, `printf`, `cat` or `sed -i`. A script is never coordination,
+  even one run from `pm/`, because its reach cannot be read from its text. The
+  older shortcut stands: a call whose first command is one of the boss's own
+  tools is still not read further. Replayed on the 4,968 flagged calls of 22 boss
+  sessions over 14 days that could be matched to their full command, 964 no
+  longer count and 4,004 still do. Those include reads of `pm/` and tracker edits
+  by script, so that number is not a count of implementation work.
 
 ## 0.19.2 — 2026-11-01
 
