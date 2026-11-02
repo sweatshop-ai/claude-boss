@@ -8,8 +8,8 @@
   in it is coordination: the boss's own tools, a `$(date)` stamp, or a write to
   `pm/` by `echo`, `printf`, `cat` or `sed -i`. A script is never coordination,
   even one run from `pm/`, because its reach cannot be read from its text. The
-  older shortcut stands: a call whose first command is one of the boss's own
-  tools is still not read further. Replayed on the 4,968 flagged calls of 22 boss
+  older shortcut stands: a call whose head, after a `cd` or `VAR=` prefix, matches
+  an allowed tool's name is still not read further. Replayed on the 4,968 flagged calls of 22 boss
   sessions over 14 days that could be matched to their full command, 964 no
   longer count and 4,004 still do. Those include reads of `pm/` and tracker edits
   by script, so that number is not a count of implementation work.

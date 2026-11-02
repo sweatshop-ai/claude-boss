@@ -90,7 +90,7 @@ def owns(path):
 WRITERS = {"echo", "printf", "cat"}
 FILTERS = {"tail", "head", "cut", "wc"}
 HEREDOC = re.compile(r"""(?<!<)<<-?\s*(['"]?)(\w+)\1\s*$""")
-DATE = re.compile(r"\$\(date(?:\s+[^()`;&|<>]*)?\)")
+DATE = re.compile(r"\$\(date(?:[ \t]+[^()`;&|<>\n]*)?\)")
 SEPARATORS = {";", "&&", "|"}
 REDIRECTS = {">", ">>", "<"}
 MAX_PARSED = 20_000     # splitting 1 MB of quoted text took 28 s; the hook has 5
@@ -116,7 +116,7 @@ def split_heredocs(cmd):
             delimiter, quoted = pending
             if line.strip() == delimiter:
                 pending = None
-            elif not quoted and ("$(" in DATE.sub("", line) or "`" in line):
+            elif not quoted and ("$(" in line or "`" in line):
                 return None
             continue
         found = HEREDOC.search(line)
