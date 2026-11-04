@@ -8,7 +8,9 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready
+**Claimed by:** Oskar 2026-11-04 21:29
+
+**Status:** in-progress
 
 - [ ] The cause is named, with the run and the command that show it
 - [ ] The fix is merged, or the finding is reported if the fault is not in sheaf
