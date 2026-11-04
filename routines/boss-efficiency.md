@@ -38,12 +38,15 @@ not the one the boss claims it under), the session counts for that track, from t
 start of the boss's window on the track to the end of the session. The session must
 have been alive at the message, because names are reused. Time a dispatch already
 gave to a track stays with that track, and no stretch is counted twice. A session with
-no recorded name is not guessed at.
+no recorded name is not guessed at. When two sessions share the name at that moment,
+a send to `Name [ref]` counts the one whose own transcript holds that ref (a
+`ListAgents` result reads "This session is Name [ref]"); where none does, neither is
+counted, because the transcript records no ref otherwise.
 
 ## Where a track ends
 
 A track whose goal was last marked met (`boss-goal status <track> met`, read from the
-boss's command) ends at that mark or at its last commit whose command says "done",
+boss's command, and only when the command succeeded) ends at that mark or at its last commit whose command says "done",
 whichever is later, plus a minute. The boss session left open after that is not the
 track: its time, its tokens and the worker messages it gets are left out. A track not
 marked met, or reopened after, runs to the end of its sessions as before. The commit
