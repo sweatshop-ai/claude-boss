@@ -209,7 +209,6 @@ class AttributionByName(unittest.TestCase):
         c.boss("alpha-x", [], NOW - DAY, sends=[(NOW - DAY + 60, "Mira")])
         idx, wk, _ = week(c.dir)
         self.assertEqual(wk["tracks"]["alpha-x"]["tokens"]["build"], 7000)
-        self.assertGreaterEqual(wk["tracks"]["alpha-x"]["worker_s"].get("idle", 0), 0)
 
     def test_a_worker_that_wrote_to_the_boss_counts_by_the_name_it_started_with(self):
         c = Cfg()
@@ -274,7 +273,7 @@ class FinishedTrack(unittest.TestCase):
     def test_the_track_ends_at_the_goal_mark_not_at_the_last_boss_record(self):
         idx, wk, _ = self.finished()
         self.assertAlmostEqual(idx.cut["alpha-x"], NOW - 2 * DAY + 7200 + core.CUT_GRACE_S, delta=1)
-        self.assertAlmostEqual(wk["tracks"]["alpha-x"]["wall_s"], 7200 + core.CUT_GRACE_S - 0, delta=130)
+        self.assertAlmostEqual(wk["tracks"]["alpha-x"]["wall_s"], 7200 + core.CUT_GRACE_S, delta=1)
 
     def test_a_done_commit_after_the_mark_moves_the_end_later(self):
         c = Cfg()
