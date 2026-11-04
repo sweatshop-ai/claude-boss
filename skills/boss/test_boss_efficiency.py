@@ -128,8 +128,42 @@ class Attribution(unittest.TestCase):
         self.assertEqual(wk["tracks"]["alpha-x"]["tokens"]["build"], 10000)
 
     def test_a_saved_tie_survives_a_quiet_week_and_votes_replace_it(self):
-        sessions = [core.scan_session(p, ["alpha-x"]) for p in (Cfg().dir / "projects").glob("*/*.jsonl")]
+        quiet = Cfg()
+        sessions = [core.scan_session(p, ["alpha-x"]) for p in (quiet.dir / "projects").glob("*/*.jsonl")]
         self.assertEqual(core.resolve_sockets(sessions, {"uds:/q.sock": "alpha-x"}), {"uds:/q.sock": "alpha-x"})
+        c = Cfg()
+        seed(c, sock="uds:/q.sock", track="beta-y")
+        sessions = [core.scan_session(p, ["alpha-x", "beta-y"]) for p in (c.dir / "projects").glob("*/*.jsonl")]
+        self.assertEqual(core.resolve_sockets(sessions, {"uds:/q.sock": "alpha-x"})["uds:/q.sock"], "beta-y")
+
+    def test_the_last_message_of_a_session_is_counted(self):
+        c = Cfg()
+        sock = "uds:/run/cc-socks/1.sock"
+        w = "Boss dispatch from A, track `alpha-x`."
+        c.goal("alpha-x")
+        c.worker(NOW - DAY, [(NOW - DAY, sock, w), (NOW - DAY + 10, sock, w)], cost=100)
+        # the session now ends on its own last assistant message, with no result after it
+        path = next(p for p in (c.dir / "projects" / "p").glob("wrk*.jsonl"))
+        with open(path, "a") as f:
+            f.write(json.dumps(dict(type="assistant", timestamp=iso(NOW - DAY + 1800), message=dict(
+                id="last", usage=dict(input_tokens=900000, output_tokens=0), content=[]))) + "\n")
+        c.boss("alpha-x", [], NOW - DAY)
+        _, wk, _ = week(c.dir)
+        self.assertEqual(wk["tracks"]["alpha-x"]["tokens"]["build"], 900100)
+
+    def test_malformed_lines_are_skipped_not_fatal(self):
+        c = Cfg()
+        seed(c)
+        path = next(p for p in (c.dir / "projects" / "p").glob("wrk*.jsonl"))
+        with open(path, "a") as f:
+            for bad in ('[1, 2]', '{"type": "assistant", "timestamp": "bogus"}',
+                        '{"type": "assistant", "timestamp": "%s", "message": "str"}' % iso(NOW - 3600),
+                        '{"type": "assistant", "timestamp": "%s", "message": {"content": ["x"]}}' % iso(NOW - 3000)):
+                f.write(bad + "\n")
+        rec = core.scan_session(path, ["alpha-x"])
+        self.assertGreaterEqual(rec["skipped"], 3)
+        _, wk, _ = week(c.dir)
+        self.assertEqual(wk["tracks"]["alpha-x"]["tokens"]["build"], 5000)
 
     def test_tokens_outside_the_window_are_not_counted(self):
         c = Cfg()
@@ -232,6 +266,15 @@ class Verdict(unittest.TestCase):
         _, flags = self.pair({"alpha-x": self.track(200e6, build=0.9)}, {"alpha-x": self.track(200e6, build=0.5, msgs=30, outside=1)})
         self.assertNotIn("low coverage", flags[0])
 
+    def test_the_week_before_is_the_one_nearest_even_after_a_late_or_manual_run(self):
+        mon = self.fake({}, start=0)
+        late = dict(self.fake({}, start=9 * 3600), end=7 * DAY + 9 * 3600)         # ran Tuesday morning
+        extra = dict(self.fake({}, start=2 * DAY), end=9 * DAY)                    # a manual run on Wednesday
+        week = self.fake({}, start=7 * DAY)
+        week["end"] = 14 * DAY
+        self.assertIs(core.pick_previous([mon, extra], week), mon)
+        self.assertIs(core.pick_previous([late], week), late)
+
     def test_no_sessions_and_no_messages_are_failures_never_a_pass(self):
         fails, _ = core.judge(self.fake({}, msgs=0), None)
         self.assertEqual(len(fails), 2)
@@ -246,6 +289,34 @@ class Verdict(unittest.TestCase):
 
 
 class Alert(unittest.TestCase):
+    def test_export_and_quoted_credentials_are_read(self):
+        import http.server
+        import threading
+        got = []
+
+        class H(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):
+                got.append((self.headers["Authorization"], self.rfile.read(int(self.headers["Content-Length"])).decode()))
+                self.send_response(200); self.end_headers(); self.wfile.write(b'{"ok": true}')
+
+            def log_message(self, *a): pass
+
+        srv = http.server.HTTPServer(("127.0.0.1", 0), H)
+        threading.Thread(target=srv.handle_request, daemon=True).start()
+        envf = Path(tempfile.mkdtemp()) / "slack.env"
+        envf.write_text('export SLACK_BOT_TOKEN="tok"\nSLACK_CHANNEL_ID=C1\n')
+        old = {k: os.environ.get(k) for k in ("BOSS_SLACK_ENV", "BOSS_SLACK_API")}
+        os.environ.update(BOSS_SLACK_ENV=str(envf), BOSS_SLACK_API="http://127.0.0.1:%d/" % srv.server_port)
+        try:
+            self.assertTrue(core.alert("alpha-x: build 50% against 80%", dry=False))
+        finally:
+            for k, v in old.items():
+                if v is None: os.environ.pop(k, None)
+                else: os.environ[k] = v
+        self.assertEqual(got[0][0], "Bearer tok")
+        self.assertIn("channel=C1", got[0][1])
+        self.assertNotIn("blocked", got[0][1])
+
     def test_a_missing_credentials_file_is_reported_not_raised(self):
         old = os.environ.get("BOSS_SLACK_ENV")
         os.environ["BOSS_SLACK_ENV"] = "/nonexistent/slack.env"
@@ -303,6 +374,15 @@ class Run(unittest.TestCase):
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
         self.assertIn("run skipped", r.stdout)
         self.assertIn("nice -n 19", BODY.read_text())
+
+    def test_uninstall_removes_the_timer_too(self):
+        text = (PLUGIN / "uninstall.sh").read_text()
+        self.assertIn("disable --now boss-ladder.timer boss-workers-watch.timer boss-efficiency.timer", text)
+        self.assertIn("boss-efficiency.{service,timer}", text)
+
+    def test_only_dry_run_1_is_a_dry_run_in_the_body_and_the_core(self):
+        self.assertIn('[ "${DRY_RUN:-}" != 1 ] && exec', BODY.read_text())
+        self.assertIn('os.environ.get("DRY_RUN") == "1"', (PLUGIN / "routines" / "boss_efficiency_core.py").read_text())
 
     def test_the_routine_calls_no_model(self):
         for f in (BODY, PLUGIN / "routines" / "boss_efficiency_core.py"):

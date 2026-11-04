@@ -26,7 +26,7 @@ LOG="$ROUTINES/logs/boss-efficiency.log"
 if [ -f "$LOG" ] && [ "$(stat -c%s "$LOG" 2>/dev/null || echo 0)" -gt 262144 ]; then
     tail -n 200 "$LOG" > "$LOG.tmp" && mv "$LOG.tmp" "$LOG"
 fi
-[ -z "${DRY_RUN:-}" ] && exec >> "$LOG" 2>&1
+[ "${DRY_RUN:-}" != 1 ] && exec >> "$LOG" 2>&1
 
 echo "=== run $(date -Is) dry_run=${DRY_RUN:-0} ==="
 exec 9>"$TRANSCRIPTS_LOCK"

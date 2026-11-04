@@ -6,8 +6,8 @@
 #
 #   1. creates the state directories the boss writes to, under your Claude
 #      config dir (pm/ for trackers and markers, routines/ for timer state)
-#   2. installs and enables the two systemd user timers, the escalation ladder
-#      and the worker watchdog. They run through a stable link,
+#   2. installs and enables the systemd user timers: the escalation ladder,
+#      the worker watchdog and the weekly efficiency measure. They run through a stable link,
 #      $CLAUDE_CONFIG_DIR/routines/claude-boss -> this checkout, which the
 #      SessionStart hook (bin/boss-link) moves along when a plugin upgrade
 #      lands in a new cache directory, so the units never go stale
