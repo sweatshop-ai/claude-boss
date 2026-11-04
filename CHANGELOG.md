@@ -12,6 +12,8 @@
   press a boss to ask again while it has work in hand. Measured on 36 boss sessions: in 420 of 421
   questions over two minutes the boss did nothing until the answer, with 762 worker
   messages queued. See `references/concierge.md`.
+- **Consent stays first-hand.** A peer message is never the owner's consent, so a
+  question starting `CONSENT:` still opens in the boss's own turn.
 - **It does not filter questions.** A filter was built into its brief and measured
   first: on 87 labelled past questions it sent back 14 of 50 that were the owner's and
   let through 23 of 37 that were not. It was taken out. Whether a question is the

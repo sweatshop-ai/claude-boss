@@ -151,7 +151,9 @@ assert_not_busy() {
   local pane=$1 st
   st=$(agent_status "$pane")
   # Stopping a concierge on its dialog erases the question and those queued behind it.
-  if [[ "$st" == "waiting" && "$(pane_prop "$pane" '#{@worker_role}' 2>/dev/null || true)" == concierge ]]; then
+  local wf; wf=$(pane_field "$pane" waiting_for)
+  if [[ "$st" == "waiting" && ( "$wf" == "input needed" || "$wf" == "-" ) \
+        && "$(pane_prop "$pane" '#{@worker_role}' 2>/dev/null || true)" == concierge ]]; then
     [[ -n "$FORCE" ]] && { printf 'WARN: --force: stopping %s with a question open\n' "$pane" >&2; return 0; }
     die "$pane is a concierge holding the owner's question. Wait for the answer."
   fi

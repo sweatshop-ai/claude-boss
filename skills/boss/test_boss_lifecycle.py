@@ -171,6 +171,7 @@ elif sys.argv[1:2] == ["get"]:
     name = (open(after).read().strip() if os.path.exists(os.path.join(d, "launched"))
             and os.path.exists(after) else "Wanda")
     known = {"name": name, "session": "w-sid", "owner": "-",
+             "waiting_for": os.environ.get("STUB_WAITING", "-"),
              "status": row[1] if len(row) > 1 else "-"}
     print("\t".join(known.get(f, "-") for f in sys.argv[3:]))
 '''
@@ -396,6 +397,13 @@ class RestartKeepsName(unittest.TestCase):
             self.assertNotEqual(r.returncode, 0, args)
             self.assertIn("question", r.stderr)
         self.assertFalse(self.launches() if (self.tmp / "calls").exists() else [])
+
+    def test_a_concierge_stuck_on_a_prompt_can_be_stopped(self):
+        # No question is on screen, so "wait for the answer" would wait for ever.
+        (self.tmp / "role").write_text("concierge\n")
+        os.environ["STUB_WAITING"] = "permission prompt"
+        self.addCleanup(os.environ.pop, "STUB_WAITING", None)
+        self.assertEqual(self.run_lifecycle("retire", "%5").returncode, 0)
 
     def test_a_worker_waiting_on_a_prompt_can_still_be_retired(self):
         self.assertEqual(self.run_lifecycle("retire", "%5").returncode, 0)

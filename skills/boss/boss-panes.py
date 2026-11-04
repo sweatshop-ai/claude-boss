@@ -97,6 +97,7 @@ def flags_of(seat, ctx, cost):
 FIELDS = {
     "name": lambda s: (s.session or {}).get("name"),
     "status": lambda s: (s.session or {}).get("status"),
+    "waiting_for": lambda s: (s.session or {}).get("waitingFor"),
     "session": lambda s: (s.session or {}).get("sessionId"),
     "owner": lambda s: s.pane.owner,
 }
