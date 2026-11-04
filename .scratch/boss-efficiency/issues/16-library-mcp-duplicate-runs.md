@@ -6,7 +6,9 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready
+**Claimed by:** Yara 2026-11-04 21:33
+
+**Status:** in-progress
 
 - [ ] The change is merged, with a green run on main on record
 - [ ] A pushed branch with a PR runs the suite once, and a pushed branch without a PR still runs it, each shown by a run URL
