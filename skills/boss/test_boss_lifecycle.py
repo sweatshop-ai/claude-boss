@@ -381,6 +381,43 @@ class RestartKeepsName(unittest.TestCase):
         self.assertNotIn("--disallowedTools", launch[0])
         self.assertIn("--model 'sonnet'", launch[0])
 
+    def run_lifecycle(self, *args, row="w-sid\twaiting\tpin1"):
+        (self.tmp / "exits").touch()
+        env = dict(os.environ, PATH="%s:%s" % (self.tmp / "bin", os.environ["PATH"]), TMUX="stub",
+                   TMUX_PANE="%1", STUB_DIR=str(self.tmp), STUB_ROW=row, BOSS_EXIT_WAIT="2")
+        return subprocess.run(["bash", str(self.tmp / "boss-lifecycle.sh")] + list(args),
+                              env=env, capture_output=True, text=True, timeout=60)
+
+    def test_a_concierge_holding_a_question_cannot_be_stopped(self):
+        # Escape, Escape, /exit would erase the question and those queued behind it.
+        (self.tmp / "role").write_text("concierge\n")
+        for args in (["retire", "%5"], ["restart", "%5"], ["move", "%5", str(self.tmp)]):
+            r = self.run_lifecycle(*args)
+            self.assertNotEqual(r.returncode, 0, args)
+            self.assertIn("question", r.stderr)
+        self.assertFalse(self.launches() if (self.tmp / "calls").exists() else [])
+
+    def test_a_worker_waiting_on_a_prompt_can_still_be_retired(self):
+        self.assertEqual(self.run_lifecycle("retire", "%5").returncode, 0)
+
+    def test_a_concierge_gets_its_brief_from_a_file_so_a_restart_keeps_it(self):
+        (self.tmp / "role").write_text("concierge\n")
+        r, _ = self.run_restart()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("--append-system-prompt-file", self.launches()[0])
+        self.assertIn("concierge-brief.md", self.launches()[0])
+
+    def test_a_retired_pane_is_no_concierge_any_more(self):
+        (self.tmp / "role").write_text("concierge\n")
+        r = self.run_lifecycle("retire", "%5", row="w-sid\tidle\tpin1")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("set-option -pu -t %5 @worker_role", (self.tmp / "calls").read_text())
+
+    def test_the_concierge_flag_means_spawn_only(self):
+        r = self.run_lifecycle("restart", "%5", "--concierge", row="w-sid\tidle\tpin1")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertFalse(self.launches() if (self.tmp / "calls").exists() else [])
+
     def test_a_name_held_elsewhere_is_reported_not_claimed(self):
         # Another live session holds Wanda, so the hook names the new one Greta.
         (self.tmp / "name-after").write_text("Greta\n")
@@ -473,6 +510,15 @@ class ListAndFields(unittest.TestCase):
         why = lines[lines.index("\t".join(rows["%5"])) + 1]
         self.assertTrue(why.startswith("  shared-pane: 2 live sessions name pane %5"), why)
         self.assertIn("Casimir (s-casimir", why)
+
+    def test_a_second_concierge_spawn_returns_the_one_that_lives(self):
+        self.session("c-sid", "%7", "Odile", 1000)
+        with (self.tmp / "panes").open("a") as fh:
+            fh.write("%7\tboss:0.2\t%1\tclaude\t/w/pm\tOdile\tconcierge\n")
+        r = self.call("spawn", str(self.tmp), "--concierge")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.strip(), "%7\tOdile")
+        self.assertNotIn("split-window", (self.tmp / "calls").read_text())
 
     def test_list_mine_keeps_only_the_boss_and_its_panes(self):
         r = self.call("list", "--mine")

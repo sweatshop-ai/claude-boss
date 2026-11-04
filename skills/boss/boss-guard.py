@@ -262,9 +262,9 @@ def main():
                     "permissionDecision": "deny",
                     "permissionDecisionReason": (
                         f"An open question stops your turn. Send it to your concierge "
-                        f"{name} by SendMessage, with notify_when_idle: true, and keep "
-                        f"dispatching whatever does not depend on the answer. See "
-                        f"references/concierge.md."),
+                        f"{name} by SendMessage, starting `ASK <id>:`, with "
+                        f"notify_when_idle: true, and keep dispatching whatever does "
+                        f"not depend on the answer. See references/concierge.md."),
                 }
             }))
         return 0

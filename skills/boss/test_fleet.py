@@ -66,6 +66,18 @@ class WhoIsTheConcierge(unittest.TestCase):
         seats = self.seats(fleet.Pane("%6", owner="%1", command="", role="concierge"))
         self.assertIsNone(fleet.concierge_of(seats, "%1"))
 
+    def test_a_concierge_stuck_on_a_permission_prompt_does_not_count(self):
+        pane = fleet.Pane("%6", owner="%1", command="claude", role="concierge")
+        row = dict(rec("c", "%6", "Odile"), status="waiting", waitingFor="permission prompt")
+        seats = fleet.view(fleet.MemoryTmux([pane]), [row])
+        self.assertIsNone(fleet.concierge_of(seats, "%1"))
+
+    def test_a_concierge_holding_a_question_counts(self):
+        pane = fleet.Pane("%6", owner="%1", command="claude", role="concierge")
+        row = dict(rec("c", "%6", "Odile"), status="waiting", waitingFor="input needed")
+        seats = fleet.view(fleet.MemoryTmux([pane]), [row])
+        self.assertEqual(fleet.concierge_of(seats, "%1").pane.id, "%6")
+
     def test_workers_leave_the_concierge_out(self):
         seats = self.seats(fleet.Pane("%5", owner="%1", command="claude"),
                            fleet.Pane("%6", owner="%1", command="claude", role="concierge"))
