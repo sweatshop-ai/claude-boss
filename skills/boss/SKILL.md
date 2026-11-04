@@ -272,11 +272,31 @@ wait for an idle notice, which can be lost (one sampled gap: 92 minutes): add
 `--wait-idle 600` and run it in the background. It reads the status every 20 s,
 types nothing while the worker is busy or waiting, and restarts once a read says
 idle; say on the tracker that you are retrying. A worker still busy when the
-time is up stays refused. A status of `shell` (a background shell running) is
-read mid-turn as well as after it, so it counts as busy: it is retried, never
-typed at. A worker whose turn ended but whose background shell keeps running
-stays refused after the wait; stop its shell, or `retire --kill` it if its
-handoff is on disk.
+time is up stays refused. Run it without `--expect-last`: a pin taken before the
+wait cannot match, because the turn you waited for writes records, and the
+script refuses with "ran a turn during the wait". The wait takes the worker as
+the idle read finds it, including after a task a peer gave it that you never
+saw; that turn is finished and answered, and a restart discards the worker's
+context by design. `--expect-session` still holds across the wait.
+
+A refusal as busy right after the worker's report is not always a lost notice: a
+background subagent the worker started keeps the pane `busy` after its last
+words and holds its idle notice back until the agent reports (measured on Claude
+Code 2.1.311: 2m24s for an agent that ran 2m10s). `--wait-idle` covers it. A
+background shell or a Monitor reads `shell` instead. `shell` stays refused, and
+`--wait-idle` keeps waiting on it, whether the turn is in flight or over: a
+finished turn is not a finished task, and a worker waiting on CI with a Monitor
+armed reads exactly so, turn over and one job left. The refusal says which ("a
+turn is in flight" or "turn over, background work still running") and, for the
+second, the kinds and counts the pane footer shows ("2 shells", "1 monitor"); it
+types nothing, so it cannot list the jobs, and the footer is all it can read.
+Look at the pane or ask the worker. Only `--stop-shells` (with `--require-idle`;
+`--force` does not imply it) lets a `shell` with the turn over go through,
+and only when the transcript shows the turn over (the last turn record is its
+`turn_duration`). It **stops the shell**: it says so before it types and prints
+each job, now that the exit dialog lists them. A job that must outlive the
+restart (a build a later task needs, a CI watch) is the worker's to finish or
+hand off first; do not use the flag until you have looked.
 
 **A task bigger than one smart zone gets split.** Keep `CTX` in view on every
 `list` — `ListAgents` does not carry it. At **150k** a worker shows `CTX-SPLIT`:
