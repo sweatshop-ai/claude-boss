@@ -231,6 +231,15 @@ class AttributionByName(unittest.TestCase):
         _, wk, _ = week(c.dir)
         self.assertEqual(wk["tracks"]["alpha-x"]["tokens"]["build"], 7000)
 
+    def test_a_name_reused_inside_the_slack_counts_only_one_session(self):
+        c = Cfg()
+        c.goal("alpha-x")
+        c.worker(NOW - DAY - 3600, [], cost=900, name="Mira", until=NOW - DAY + 30)
+        c.worker(NOW - DAY + 60, [], cost=7000, name="Mira", until=NOW - DAY + 3600)
+        c.boss("alpha-x", [], NOW - DAY - 3600, sends=[(NOW - DAY + 45, "Mira")], until=NOW - DAY + 3600)
+        idx, _, _ = week(c.dir)
+        self.assertEqual(len({s["sid"] for s, _, _ in idx.workers["alpha-x"]}), 1)
+
     def test_a_session_dispatched_by_socket_is_not_counted_twice(self):
         c = Cfg()
         sock = "uds:/run/cc-socks/1.sock"
@@ -304,6 +313,17 @@ class FinishedTrack(unittest.TestCase):
         c.goal("alpha-x")
         c.boss("alpha-x", [], NOW - 2 * DAY, until=NOW - DAY,
                cmds=[(NOW - 2 * DAY + 100, "grep 'boss-goal status alpha-x met' notes.md")])
+        idx, _, _ = week(c.dir)
+        self.assertNotIn("alpha-x", idx.cut)
+
+    def test_a_search_or_quoted_text_is_not_a_mark_or_a_done_commit(self):
+        c = Cfg()
+        c.goal("alpha-x")
+        c.worker(NOW - 2 * DAY, [], cost=7000, name="Mira", until=NOW - 2 * DAY + 3600,
+                 cmds=[(NOW - 2 * DAY + 1800, "echo \"git commit -m 'Ticket 3 done'\"")])
+        c.boss("alpha-x", [], NOW - 2 * DAY, sends=[(NOW - 2 * DAY + 60, "Mira")], until=NOW - DAY,
+               cmds=[(NOW - 2 * DAY + 100, "git grep 'boss-goal status alpha-x met'"),
+                     (NOW - 2 * DAY + 200, "echo 'boss-goal status alpha-x met x'")])
         idx, _, _ = week(c.dir)
         self.assertNotIn("alpha-x", idx.cut)
 
