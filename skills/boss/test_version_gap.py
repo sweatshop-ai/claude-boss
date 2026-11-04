@@ -9,7 +9,9 @@ Every case builds its own config directory; nothing reads the real ~/.claude or 
 import json
 import os
 import shutil
+import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -81,6 +83,31 @@ class Gap(unittest.TestCase):
         self.install("0.21.0")
         self.mark("0.19.2", LIVE, start="1")        # alive, but not the process that wrote the file
         self.assertEqual(self.gaps("0.21.0"), [])
+
+    def test_a_marker_with_no_start_time_is_not_a_session(self):
+        # A pid alone proves nothing: it may have been reused since the file was written.
+        self.install("0.21.0")
+        d = self.cfg / "plugins" / "cache" / "m" / "claude-boss" / "0.19.2" / ".in_use"
+        d.mkdir(parents=True)
+        (d / str(LIVE)).write_text(json.dumps({"pid": LIVE}))
+        self.assertEqual(self.gaps("0.21.0"), [])
+
+    def test_a_zombie_is_not_a_session(self):
+        self.install("0.21.0")
+        child = subprocess.Popen(["true"])
+        while Path("/proc/%d/stat" % child.pid).read_text().rpartition(")")[2].split()[0] != "Z":
+            time.sleep(0.01)                          # exited, not yet reaped
+        self.addCleanup(child.wait)
+        self.mark("0.19.2", child.pid)
+        self.assertEqual(self.gaps("0.21.0"), [])
+
+    def test_a_cache_dated_far_in_the_future_is_stale(self):
+        # A clock set back once left `until` years ahead and froze the release check.
+        self.install("0.19.1")
+        cache = self.cfg / "pm" / ".pulse" / "version-gap.json"
+        cache.parent.mkdir(parents=True)
+        cache.write_text(json.dumps({"until": 1000 + 10 * 365 * 86400, "version": "0.19.1"}))
+        self.assertIn("0.20.0 is released", self.gaps("0.20.0", now=1000)[0])
 
     def test_offline_is_silent_and_retried_after_ten_minutes(self):
         self.install("0.21.0")
