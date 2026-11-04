@@ -13,7 +13,9 @@ Not a decision, already true of `restart` (`skills/boss/SKILL.md`, "Session age"
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Claimed by:** Aurelio 2026-11-05 00:53
+
+**Status:** in-progress
 
 - [ ] Measured: of the workers past 250k, how many the boss asked for a boundary, and what happened
 - [ ] The rule states when not to restart a worker near the end of its task
