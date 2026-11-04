@@ -21,7 +21,9 @@ Classes, from the audit's codebook. a: a security property broken, data loss, or
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Claimed by:** Birgit 2026-11-05 00:45
+
+**Status:** in-progress
 
 - [x] Grilling round settled: what counts as sensitive, and who decides it for a PR
 - [ ] The rules are in the skill and quoted in the dispatch text
