@@ -14,8 +14,13 @@ Two false alerts stay as known residuals in PR 48: a boss-written option such as
 
 **Claimed by:** Noor 2026-11-04 22:09
 
-**Status:** in-progress
+**Status:** done
 
-- [ ] Real renders captured and kept as fixtures: a concierge question, Bash and Edit permission dialogs at 74, 31 and under 29 columns
-- [ ] A concierge on a permission dialog at each width alerts; a concierge's question worded like a dialog does not
-- [ ] The fixture's footer assumption checked against the real AskUserQuestion render
+- [x] Real renders captured and kept as fixtures: a concierge question, Bash and Edit permission dialogs at 74, 31 and under 29 columns (`skills/boss/fixtures/watch/`, 9 files, Claude Code 2.1.311; 25 columns is the narrowest)
+- [x] A concierge on a permission dialog at each width alerts; a concierge's question worded like a dialog does not (PR 51, merge 6498476: header and option wording in the last 7 non-blank lines, `Tab to amend` and the trust prompt in the last 15, wraps joined; 15 tests, 6 fail on the old script)
+- [x] The fixture's footer assumption checked against the real AskUserQuestion render (no `Tab to amend` at 74, 31 or 25; the inline `QUESTION` fixture now carries the real footer)
+
+**Accepted residuals** (PR 51, Opus round 1, all P3; Codex follow-up owed):
+- Only Bash and Edit dialogs were captured. At 25 to 31 columns detection rests on `Tab to amend`; Write, WebFetch, MCP and trust dialogs have no fixture.
+- A boss-written option or option description such as "Yes, and always ask first" or "Do you want to proceed later" within the last 7 lines alerts.
+- Non-concierge panes now match across wraps and on `Yes, and switch to`; bounded to one alert per pane and condition.
