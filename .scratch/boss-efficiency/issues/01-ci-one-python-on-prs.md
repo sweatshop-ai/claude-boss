@@ -6,7 +6,9 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready
+**Claimed by:** Pablo 2026-11-04 20:49
+
+**Status:** in-progress
 
 - [ ] The repositories with a PR matrix are listed, each read from its workflow file
 - [ ] Each runs one version on PRs and the matrix on main, with a green main run on record
