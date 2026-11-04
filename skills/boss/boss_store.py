@@ -76,6 +76,11 @@ def frontier_cache(track, source, cfg=None):
     return state_dir(cfg) / ("%s.%s.frontier.json" % (track, key))
 
 
+def version_gap_cache(cfg=None):
+    """Where version_gap.py keeps the released version it last read from GitHub."""
+    return state_dir(cfg) / "version-gap.json"
+
+
 def valid_track(track):
     return bool(track) and bool(TRACK_RE.match(track)) and ".." not in track
 

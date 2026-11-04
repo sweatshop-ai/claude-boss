@@ -32,6 +32,10 @@ will compact only at the 1M ceiling, and the fix is the owner typing
    it said `off`, you do not call `mcp__tts__speak` at all — the owner is reached
    by the FleetView chime, which rings the moment your concierge opens a question.
    Only `voice: ON` turns speech back on, and then rule 11 applies.
+   Then run `boss-version-gap`. It prints nothing when the installed, the released
+   and the running claude-boss agree. A line means the owner has to update the
+   plugin or restart sessions (you cannot do either); put it in your first reply
+   to them, once.
 2. **Claim your tracker**: `boss-tracker show <track>` (or `init` if new). See Tracker.
    Then write the track into your marker, so the compaction hook knows which
    tracker to hand back to you after an autocompact:

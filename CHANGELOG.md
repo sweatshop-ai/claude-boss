@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.21.1 — 2026-11-04
+
+- **A boss says when the plugin on this machine is behind.** On 2026-11-04 the
+  installed plugin was 0.19.2 while 0.19.3 and 0.20.0 had been released two days
+  earlier, and nothing said so. Cause: a marketplace install of a third-party
+  repo is not refreshed by itself, so the version moves only when someone runs
+  `marketplace update` and `plugin update`; and a live session keeps the version it
+  started on, with that version's `bin/` ahead on PATH. `boss-version-gap` (the boss runs it at
+  session start, SKILL.md step 1) compares installed, released (`plugin.json` on main) and running
+  (live pids in the plugin cache's `.in_use` markers) and prints a line per gap, nothing
+  when they agree.
+
 ## 0.21.0 — 2026-11-04
 
 - **A question to the owner no longer stops the boss.** A new session, the

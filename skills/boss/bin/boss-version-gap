@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# boss-version-gap — say so when the installed or running claude-boss is older than the released one.
+exec python3 "$(dirname "$(readlink -f -- "${BASH_SOURCE[0]}")")/../version_gap.py" "$@"
