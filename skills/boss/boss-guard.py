@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""PreToolUse guard for boss sessions — warns and logs, never denies.
+"""PreToolUse guard for boss sessions — warns and logs; it denies one thing.
 
 The boss skill has carried three pages of bold FORBIDDEN prose telling the
 coordinator not to implement. Measured across 15 boss sessions it did not work:
@@ -16,6 +16,11 @@ So this warns and records. The log is the thing the prose never produced:
 evidence of which calls actually happen, so a later allowlist can be built from
 data instead of imagination.
 
+The one deny: AskUserQuestion, when this boss has a live concierge. An open
+question stops the boss's turn, and the concierge exists so that it does not.
+It cannot leave a boss stuck: no concierge, a dead one, or a tmux that does not
+answer, and the question goes through as before.
+
 Active only for sessions that registered themselves as a boss:
     ~/.claude/pm/.boss-sessions/<session_id>
 """
@@ -29,6 +34,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import boss_store  # noqa: E402
+import fleet  # noqa: E402
+import registry  # noqa: E402
 
 
 # Commands a coordinator genuinely runs. Everything else is a worker's job.
@@ -224,6 +231,17 @@ def bump(sid):
     return boss_store.update_state(sid, "guard", count)["n"]
 
 
+def concierge_name(sid):
+    """The name of this boss's live concierge, or None."""
+    try:
+        seats = fleet.view(fleet.Tmux(timeout=3), registry.live(boss_store.config_dir()))
+    except fleet.TmuxUnavailable:
+        return None
+    me = fleet.seat_of(seats, sid=sid)
+    seat = fleet.concierge_of(seats, me.pane.id) if me else None
+    return (seat.session.get("name") or seat.pane.coord) if seat else None
+
+
 def main():
     try:
         payload = json.load(sys.stdin)
@@ -235,6 +253,21 @@ def main():
         return 0                      # not a boss session; nothing to say
 
     tool = payload.get("tool_name") or ""
+    if tool == "AskUserQuestion":
+        name = concierge_name(sid)
+        if name:
+            print(json.dumps({
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": (
+                        f"An open question stops your turn. Send it to your concierge "
+                        f"{name} by SendMessage, with notify_when_idle: true, and keep "
+                        f"dispatching whatever does not depend on the answer. See "
+                        f"references/concierge.md."),
+                }
+            }))
+        return 0
     if tool not in WATCHED:
         return 0
     ti = payload.get("tool_input") or {}

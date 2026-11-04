@@ -13,7 +13,7 @@ The owner watches those panes and can talk to any worker directly.
 
 **Argument**: `$ARGUMENTS`
 
-## Session start — do these four things
+## Session start — do these five things
 
 A boss is launched with `boss-start` (`${CLAUDE_PLUGIN_ROOT}/skills/boss/bin/boss-start`),
 which runs `claude --model fable --effort high --autocompact 450k
@@ -47,6 +47,9 @@ will compact only at the 1M ceiling, and the fix is the owner typing
 4. **`boss-lifecycle.sh list --mine`** — your roster. Then plain `list` once, to
    see whether another boss is on this machine and what is unowned. See Who your
    workers are.
+5. **Start your concierge**, so that a question to the owner never stops your turn:
+   `boss-lifecycle.sh spawn "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/pm" --concierge`,
+   then send it its brief. See `references/concierge.md`.
 
 `bin/` is at `${CLAUDE_PLUGIN_ROOT}/skills/boss/bin/`; add it to PATH or call the commands by
 full path. `boss-marker` is the exception: it sits in the plugin's own `bin/`, which Claude
@@ -189,6 +192,7 @@ machinery that watches your team can see it.
 ```bash
 boss-start [track]                                        # the owner runs this: fable, high, autocompact 450k
 boss-lifecycle.sh spawn <project-dir> [name] [--model M]  # prints pane id + name; M defaults to opus, effort medium
+boss-lifecycle.sh spawn <dir> --concierge                 # holds your questions to the owner; sonnet
 boss-lifecycle.sh claim <pane-id> [name]                  # adopt a worker
 boss-lifecycle.sh retire <pane-id> [--kill]               # refuses if BUSY
 boss-lifecycle.sh restart <pane-id>                       # keeps name + model
@@ -578,9 +582,9 @@ concerned — invisibly.
 > cannot make yourself comes to me, with the options and your recommendation.
 
 Workers are started with `--disallowedTools AskUserQuestion` (`launch_claude` in
-`boss-lifecycle.sh`), so only you ask the owner. A worker's question rang the chime
-for a pane nobody watched, and its ticket stalled there. When a worker brings you
-a choice, decide it yourself, or put it to the owner through P12.
+`boss-lifecycle.sh`), so only your concierge asks the owner. A worker's question rang
+the chime for a pane nobody watched, and its ticket stalled there. When a worker
+brings you a choice, decide it yourself, or put it to the owner through P12.
 
 **And arm the subscription in the same call** — `notify_when_idle: true` (Phase D).
 The contract covers a worker that remembers; the subscription covers one that
@@ -642,6 +646,10 @@ command** — that launders a permission decision they made.
 
 **A command only the owner can run goes on your session card as well as in the
 question** (the owner, 2026-11-01). How: `references/escalation.md`, Rules.
+
+**Ask through your concierge, never in your own turn: `references/concierge.md`.**
+An open `AskUserQuestion` stops you; the guard refuses it while your concierge
+lives, and lets it through if the concierge is gone.
 
 **Then run the ladder: `references/escalation.md`.** Alert at T+0, timer, re-check,
 `boss-alert` at 5, insist at 15, keep going. Meanwhile dispatch everything that
@@ -939,6 +947,7 @@ With `voice: ON`, every response to the owner also gets TTS; silent otherwise.
     the one state a boss must not sit in.
 14. **Never go quiet on a blocker** — P12. Finding the owner is part of the job.
 15. **Never report a name that is not visible to the owner.**
+16. **Never hold a question in your own turn** — send it to your concierge.
 
 ## References
 
@@ -947,6 +956,7 @@ Load only when the situation calls for it.
 | File | When |
 |---|---|
 | `references/escalation.md` | Something is blocked on the owner |
+| `references/concierge.md` | Starting your concierge, or about to ask the owner anything |
 | `references/reports.md` | Formatting a report, reading a worker's report, reviewing a plan |
 | `references/models.md` | Choosing a worker's model, or deciding what to delegate cheaply |
 | `references/incidents.md` | Wondering why a rule exists, or about to relax one |

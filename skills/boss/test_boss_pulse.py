@@ -311,6 +311,24 @@ class Frontier(PulseCase):
         self.assertNotIn("11 API", out)
         self.assertIn("acme/other#5 has no sub-issues", out)
 
+    def test_an_idle_concierge_is_not_an_idle_worker(self):
+        # It sits idle by design; a pulse naming it would ask the boss to give it a ticket.
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("pulse_team", str(PULSE))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        tmux = mod.fleet.MemoryTmux([
+            mod.fleet.Pane("%1", coord="b:0.0", owner="%1", command="claude"),
+            mod.fleet.Pane("%5", coord="b:0.1", owner="%1", command="claude"),
+            mod.fleet.Pane("%6", coord="b:0.2", owner="%1", command="claude", role="concierge")])
+        rows = [{"sessionId": s, "tmux": "b:@1.%s" % p, "name": n, "status": "idle",
+                 "startedAt": 1000, "pid": 1}
+                for s, p, n in (("boss", "%1", "Petra"), ("w", "%5", "Wanda"), ("c", "%6", "Odile"))]
+        from unittest import mock
+        with mock.patch.object(mod.fleet, "Tmux", lambda timeout=3: tmux), \
+                mock.patch.object(mod.registry, "live", lambda cfg=None: rows):
+            self.assertEqual(mod.team("boss"), ([("Wanda", "b:0.1")], 1))
+
     def test_more_idle_workers_than_tickets_stops_at_the_frontier(self):
         (self.issues / "01-x.md").write_text(ticket("01", "API"))
         self.goal_with_tickets(self.issues)
