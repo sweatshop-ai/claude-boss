@@ -165,6 +165,21 @@ class Attribution(unittest.TestCase):
         _, wk, _ = week(c.dir)
         self.assertEqual(wk["tracks"]["alpha-x"]["tokens"]["build"], 5000)
 
+    def test_malformed_subagent_lines_are_skipped_not_fatal(self):
+        c = Cfg()
+        seed(c)
+        path = next(p for p in (c.dir / "projects" / "p").glob("wrk*.jsonl"))
+        sub = path.with_suffix("") / "subagents"
+        sub.mkdir(parents=True)
+        good = dict(type="assistant", timestamp=iso(NOW - 3600),
+                    message=dict(id="m1", usage=dict(input_tokens="oops", output_tokens=5)))
+        (sub / "a.jsonl").write_text("\n".join(["null", "5", '{"type": "assistant", "timestamp": "bogus"}',
+                                                json.dumps(good)]) + "\n")
+        rec = core.scan_session(path, ["alpha-x"])
+        self.assertGreaterEqual(rec["skipped"], 3)
+        self.assertEqual(len(rec["subs"]), 1)
+        self.assertEqual(rec["subs"][0]["cost"], core.cost(core.usage(good["message"]["usage"])))
+
     def test_tokens_outside_the_window_are_not_counted(self):
         c = Cfg()
         seed(c, at=NOW - 20 * DAY)
@@ -280,6 +295,12 @@ class Verdict(unittest.TestCase):
         self.assertEqual(len(fails), 2)
         fails, _ = core.judge(self.fake({"alpha-x": self.track(1e6)}, msgs=0), None)
         self.assertEqual(len(fails), 1)
+
+    def test_a_week_with_no_socket_ties_fails_instead_of_becoming_a_baseline(self):
+        week = self.fake({"alpha-x": self.track(1e6)}, msgs=100, outside=95)
+        fails, _ = core.judge(week, None)
+        self.assertEqual(len(fails), 1)
+        self.assertIn("socket lookup", fails[0])
 
     def test_busy_week_coverage_is_in_the_report_not_a_trigger(self):
         week = self.fake({"alpha-x": self.track(200e6, msgs=100, outside=35)}, msgs=100, outside=35)
