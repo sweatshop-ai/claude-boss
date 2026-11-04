@@ -29,10 +29,15 @@ class Gap(unittest.TestCase):
         rec = {"plugins": {"claude-boss@sweatshop-ai": [{"version": version}]}}
         (self.cfg / "plugins" / "installed_plugins.json").write_text(json.dumps(rec))
 
-    def mark(self, version, pid):
+    def mark(self, version, pid, start="auto"):
         d = self.cfg / "plugins" / "cache" / "m" / "claude-boss" / version / ".in_use"
         d.mkdir(parents=True, exist_ok=True)
-        (d / str(pid)).write_text("{}")
+        if start == "auto":
+            try:
+                start = Path("/proc", str(pid), "stat").read_text().rpartition(")")[2].split()[19]
+            except OSError:
+                start = "1"
+        (d / str(pid)).write_text(json.dumps({"pid": pid, "procStart": start}))
 
     def gaps(self, released, now=1000):
         return version_gap.gaps(self.cfg, fetch=lambda: released, now=now)
@@ -72,12 +77,39 @@ class Gap(unittest.TestCase):
         self.mark("0.19.2", 2 ** 22 + 12345)       # above pid_max on this kernel
         self.assertEqual(self.gaps("0.21.0"), [])
 
-    def test_offline_is_silent_and_not_cached(self):
+    def test_reused_pid_is_not_a_session(self):
         self.install("0.21.0")
+        self.mark("0.19.2", LIVE, start="1")        # alive, but not the process that wrote the marker
+        self.assertEqual(self.gaps("0.21.0"), [])
+
+    def test_offline_is_silent_and_retried_after_ten_minutes(self):
+        self.install("0.21.0")
+        calls = []
         def boom():
+            calls.append(1)
             raise OSError("no network")
         self.assertEqual(version_gap.gaps(self.cfg, fetch=boom, now=1000), [])
-        self.assertFalse((self.cfg / "pm" / ".pulse" / "version-gap.json").exists())
+        version_gap.gaps(self.cfg, fetch=boom, now=1000 + 300)
+        self.assertEqual(calls, [1])
+        version_gap.gaps(self.cfg, fetch=boom, now=1000 + 700)
+        self.assertEqual(calls, [1, 1])
+
+    def test_short_and_suffixed_versions(self):
+        self.assertEqual(version_gap.vkey("1.0"), version_gap.vkey("1.0.0"))
+        self.assertEqual(version_gap.vkey("0.21.0-rc1"), version_gap.vkey("0.21.0"))
+
+    def test_only_the_user_scope_install_counts(self):
+        rec = {"plugins": {"claude-boss@x": [{"scope": "project", "version": "0.1.0"}],
+                           "claude-boss@sweatshop-ai": [{"scope": "user", "version": "0.20.0"}]}}
+        (self.cfg / "plugins" / "installed_plugins.json").write_text(json.dumps(rec))
+        self.assertEqual(version_gap.installed(self.cfg)[0], "0.20.0")
+
+    def test_corrupt_cache_is_refetched(self):
+        self.install("0.19.1")
+        cache = self.cfg / "pm" / ".pulse" / "version-gap.json"
+        cache.parent.mkdir(parents=True)
+        cache.write_text("{not json")
+        self.assertIn("0.20.0 is released", self.gaps("0.20.0")[0])
 
     def test_released_is_cached_for_six_hours(self):
         self.install("0.19.1")

@@ -23,6 +23,7 @@ that is silent. Exit 0 always: a report, not a gate.
 Run: python3 skills/boss/version_gap.py        (or `boss-version-gap`)
 """
 import json
+import os
 import re
 import sys
 import time
@@ -36,12 +37,13 @@ PLUGIN = "claude-boss"
 RELEASED_URL = ("https://raw.githubusercontent.com/sweatshop-ai/claude-boss/"
                 "main/.claude-plugin/plugin.json")
 CACHE_TTL = 6 * 3600
+MISS_TTL = 600                  # a failed lookup is not retried for ten minutes
 
 
 def vkey(v):
     """Sortable form of a version: '0.19.2' -> (0, 19, 2); junk sorts lowest."""
-    nums = re.findall(r"\d+", v or "")
-    return tuple(int(n) for n in nums) if nums else (-1,)
+    m = re.match(r"\s*(\d+)(?:\.(\d+))?(?:\.(\d+))?", v or "")
+    return tuple(int(n or 0) for n in m.groups()) if m else (-1, 0, 0)   # '1.0' == '1.0.0'; a suffix is ignored
 
 
 def installed(cfg=None):
@@ -52,8 +54,11 @@ def installed(cfg=None):
     except (OSError, ValueError):
         return None, None
     for key, entries in plugins.items():
-        if key.split("@")[0] == PLUGIN and entries:
-            return entries[0].get("version"), entries[0].get("installPath")
+        if key.split("@")[0] != PLUGIN:
+            continue
+        for e in entries or []:
+            if e.get("scope", "user") == "user":
+                return e.get("version"), e.get("installPath")
     return None, None
 
 
@@ -62,9 +67,20 @@ def running(cfg=None):
     out = {}
     for mark in (boss_store.config_dir(cfg) / "plugins" / "cache").glob(
             f"*/{PLUGIN}/*/.in_use/*"):
-        if mark.name.isdigit() and Path("/proc", mark.name).exists():
+        if mark.name.isdigit() and _same_process(mark):
             out.setdefault(mark.parent.parent.name, []).append(int(mark.name))
     return out
+
+
+def _same_process(mark):
+    """The marker's pid is alive and is the process that wrote it, not a later one with the same pid."""
+    try:
+        want = json.loads(mark.read_text()).get("procStart")
+        # field 22 of /proc/<pid>/stat, counted after the ')' that closes the command name
+        got = Path("/proc", mark.name, "stat").read_text().rpartition(")")[2].split()[19]
+    except (OSError, ValueError, IndexError, AttributeError):
+        return False
+    return want is None or str(want) == got
 
 
 def released(cfg=None, fetch=None, now=None):
@@ -80,10 +96,13 @@ def released(cfg=None, fetch=None, now=None):
     try:
         version = (fetch or _fetch)()
     except Exception:
-        return None
+        version = None                 # remember the miss too: offline, every start would wait again
     try:
         cache.parent.mkdir(parents=True, exist_ok=True)
-        cache.write_text(json.dumps({"at": now, "version": version}))
+        tmp = cache.with_name(f"{cache.name}.{os.getpid()}")
+        tmp.write_text(json.dumps({"at": now - CACHE_TTL + MISS_TTL if version is None else now,
+                                   "version": version}))
+        os.replace(tmp, cache)
     except OSError:
         pass
     return version
@@ -101,7 +120,7 @@ def gaps(cfg=None, fetch=None, now=None):
     lines = []
     if inst and rel and vkey(inst) < vkey(rel):
         lines.append(f"claude-boss {inst} is installed, {rel} is released: "
-                     f"update the plugin, then restart the sessions that matter.")
+                     f"run `claude plugin marketplace update sweatshop-ai` then `claude plugin update claude-boss@sweatshop-ai`, then restart the sessions that matter.")
     newest = max([v for v in (inst, rel) if v], key=vkey, default=None)
     old = {v: p for v, p in running(cfg).items() if newest and vkey(v) < vkey(newest)}
     if old:
