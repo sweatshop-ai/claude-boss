@@ -8,6 +8,8 @@
 
 **Claimed by:**
 
+**Claimed by:** Otilia 2026-11-04 22:23
+
 **Status:** in-progress
 
 - [x] How often a restart was refused as busy and not retried within 10 minutes, counted over the boss transcripts of the last five weeks under the transcript lock, with the count of cases where no idle notice followed
