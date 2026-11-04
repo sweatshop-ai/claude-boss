@@ -103,12 +103,13 @@ while IFS=$'\t' read -r id idx cmd path role name; do
             cond="api-retrying"
         elif grep -qE 'API Error|overloaded_error|rate_limit_error|Request timed out|Connection (error|failed|refused)|fetch failed|ECONNREFUSED|OAuth token has expired' <<<"$cap"; then
             cond="api-error"
-        elif grep -qE 'Do you want to (proceed|allow|make this edit|create|run)' <<<"$cap"; then
+        elif grep -qE 'Do you want to (proceed|allow|make this edit|create|run)|Yes, I trust this folder|Tab to amend' <<<"$cap"; then
             cond="permission-prompt"
         elif [ "$role" != "concierge" ] && grep -qE '❯ 1\. Yes' <<<"$cap"; then
             # A concierge's whole job is an AskUserQuestion dialog whose first
             # option can start with Yes; it is the owner's question, not a
-            # stuck session. Its permission dialog still matches the header above.
+            # stuck session. Its permission dialog still matches above: the
+            # header, the trust prompt, or the permission footer 'Tab to amend'.
             cond="permission-prompt"
         elif grep -qE 'esc to interrupt' <<<"$cap" && [ -n "$prev_hash" ] && [ "$hash" = "$prev_hash" ]; then
             # Mid-turn the TUI spinner redraws constantly; identical content
