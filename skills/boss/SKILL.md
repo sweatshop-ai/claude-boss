@@ -594,15 +594,39 @@ too small to judge and a merge is too late. The routine, run by the worker who w
 the thing: `codex exec -s read-only ... < /dev/null`, briefed to read and not execute,
 output checked in the first minute; posted on the PR (or the plan's PR) as "Codex
 review N (run by <name>)" with every citation marked VERIFIED or NOT FOUND; the
-author replies per finding, fixes the real ones, and reruns until GO, **at most three
-rounds on one PR** (2026-10-21: PR 11 ran twelve, its late findings were edge cases of
-the wrapper itself). After the third, what is still open becomes a ticket and the PR
-merges, unless an open finding is about security or lost data. A verdict on an
+author replies per finding, fixes the real ones, and reruns until GO, within the
+rounds the PR's size and risk allow (below). When the rounds run out, what is still open
+becomes a ticket and the PR merges, unless an open finding is of class a. A verdict on an
 older head is not a verdict on the head you merge: fixes after the last GO get one
 more run unless they are test-only and the reviewed production code is byte-identical
 (say so in the PR). No PR merges without a GO on record; no plan is dispatched from
 without one. A reviewer that fabricates citations can still be right on substance:
 check the citations, then judge the finding.
+
+**How many rounds: graded by risk and size (the owner, 2026-11-05).** PR 11 ran twelve
+rounds and its late findings were edge cases of the wrapper itself; a flat cap
+of three treated every PR alike. Added lines are those of the PR's diff.
+
+- Under 100 added lines and not sensitive: one Codex round; another only if it finds a defect of class a or b.
+- 100 to 500 added lines and not sensitive: up to three rounds, and the stop rule below can end them earlier.
+- Sensitive: up to three rounds.
+- Every PR (the stop rule): when a round brings only tests, docs, style or far-fetched cases, those
+  become tickets and the PR closes: it merges on its last GO, the open findings are not owed a fix.
+- Over 500 added lines, sensitive or not: split before review.
+- The standards review (`code-review`) runs once per PR, not on every head.
+
+Classes. **a**: a security property broken, data loss, or wrong behaviour on a normal path.
+**b**: wrong behaviour on an unusual but realistic path (a crash mid-way, a transient
+failure, a re-run, a non-default config). **c**: a far-fetched edge case. **d**: tests,
+docs, naming, style, prose, standards only. The dispatch text in Phase B step 4 repeats
+these rules: change both together.
+
+**Sensitive** means the PR touches any of: login, auth or access rights; secrets,
+including code that screens or redacts them; deleting, migrating or overwriting stored
+data; anything that runs on a production host; a CI workflow that runs an AI agent.
+**You decide it for each PR**, from the ticket and the diff's file paths, when the PR
+goes to review, and record the call on the PR. The worker may raise a PR to sensitive,
+never lower it. In doubt, it is sensitive.
 
 **Close every dispatch with the reporting contract, verbatim.** Workers default
 to answering whoever spoke last, and the owner talks to them in their own panes all
@@ -835,7 +859,16 @@ Parse `$ARGUMENTS`: empty or `status` → **A** · `dispatch <task> [worker]` �
    subagents, at most 5, each in its own worktree when it edits. Use agent-teams
    teammates instead only when the parts must talk to each other. Their reports
    count against your 150k."* The worker decides; `references/models.md` has the
-   criteria. For a branch that deploys nothing, add: *"Run only the test files your
+   criteria. For review, add: *"Your PR gets Codex rounds by size and risk. Under 100 added
+   lines and not sensitive: one round, another only for a defect of class a or b (a security
+   property broken, data loss, wrong behaviour on a normal path; or wrong behaviour on a
+   realistic unusual path). 100 to 500 and not sensitive: up to three. Sensitive: up to
+   three. I decide sensitive (login, auth or access rights; secrets, and code that screens
+   them; deleting, migrating or overwriting data; anything on a production host; a CI
+   workflow that runs an AI agent) and record it on the PR; you may raise it, never lower
+   it; in doubt it is sensitive. Over 500 added lines: split first. Findings that are only
+   tests, docs, style or far-fetched cases become tickets and the review ends; the PR
+   merges on its last GO."* For a branch that deploys nothing, add: *"Run only the test files your
    change touches; the CI runs the full suite (P15)."* When that CI runs on a
    small shared runner pool, add P16's three push rules word for word. For a task
    that runs tests, a script or the app, add (P17): *"Before you trust a run, prove it hits
