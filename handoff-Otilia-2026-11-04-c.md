@@ -1,6 +1,6 @@
 # Handoff: Otilia, ticket 18 (refused restart retry), 2026-11-04
 
-PR 50 MERGED as fa2062c (squash; branch and worktree deleted). Ticket 22 written for the follow-ups. Ticket 18: boxes 1 and 3 ticked, box 2 open, Status in-progress until the merge.
+PR 50 MERGED as fa2062c (squash; branch and worktree deleted), CI pytest success on it. Tickets pushed to main as 0ffb73c, CI pytest success. Ticket 22 written for the follow-ups.
 
 Reviews: code-review (round 0) and Opus fallback GO on the head (round 1): .scratch/boss-efficiency/reviews/pr-50-round0-code-review.md, pr-50-round1.md. Codex follow-up owed from 23:38. Verdict posted on the PR.
 
