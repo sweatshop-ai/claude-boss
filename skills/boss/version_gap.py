@@ -9,8 +9,8 @@ Three versions can differ, and the number in the install record shows only one:
   installed  plugins/installed_plugins.json, the version Claude Code will load
              into the NEXT session. A third-party marketplace is not refreshed
              on its own, so this moves only when somebody updates it (measured
-             2026-11-04: 0.19.1 sat there for three days while 0.19.3 and 0.20.0
-             were released, then jumped to 0.21.0 in one update).
+             2026-11-04: still on 0.19.x two days after 0.19.3 and 0.20.0 were
+             released, then 0.21.0 in one update).
   running    a live session loaded its plugin at start and keeps it. Claude Code
              marks each version directory in use with plugins/cache/.../<version>/
              .in_use/<pid>; a pid still alive is a session on that version. The
