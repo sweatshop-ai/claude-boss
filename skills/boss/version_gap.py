@@ -47,7 +47,7 @@ def vkey(v):
 
 
 def installed(cfg=None):
-    """(version, install path) of the user-scope install record, or (None, None)."""
+    """(version, marketplace) of the user-scope install record, or (None, None)."""
     rec = boss_store.config_dir(cfg) / "plugins" / "installed_plugins.json"
     try:
         plugins = json.loads(rec.read_text()).get("plugins", {})
@@ -58,12 +58,12 @@ def installed(cfg=None):
             continue
         for e in entries or []:
             if e.get("scope", "user") == "user":
-                return e.get("version"), e.get("installPath")
+                return e.get("version"), key.partition("@")[2]
     return None, None
 
 
 def running(cfg=None):
-    """{version: [live pids]} from the .in_use markers under the plugin cache."""
+    """{version: [live pids]} from the .in_use files under the plugin cache."""
     out = {}
     for mark in (boss_store.config_dir(cfg) / "plugins" / "cache").glob(
             f"*/{PLUGIN}/*/.in_use/*"):
@@ -72,13 +72,18 @@ def running(cfg=None):
     return out
 
 
+def proc_start(pid):
+    """Start time of a process, field 22 of /proc/<pid>/stat (counted after the ')' that closes the command name)."""
+    return Path("/proc", str(pid), "stat").read_text().rpartition(")")[2].split()[19]
+
+
 def _same_process(mark):
-    """The marker's pid is alive and is the process that wrote it, not a later one with the same pid."""
+    """The file's pid is alive and is the process that wrote it, not a later one with the same pid."""
     try:
         want = json.loads(mark.read_text()).get("procStart")
         # field 22 of /proc/<pid>/stat, counted after the ')' that closes the command name
-        got = Path("/proc", mark.name, "stat").read_text().rpartition(")")[2].split()[19]
-    except (OSError, ValueError, IndexError, AttributeError):
+        got = proc_start(mark.name)
+    except (OSError, ValueError, AttributeError):
         return False
     return want is None or str(want) == got
 
@@ -86,10 +91,10 @@ def _same_process(mark):
 def released(cfg=None, fetch=None, now=None):
     """The released version, from the cache when it is fresh, else GitHub; None when unknown."""
     now = time.time() if now is None else now
-    cache = boss_store.state_dir(cfg) / "version-gap.json"
+    cache = boss_store.version_gap_cache(cfg)
     try:
         seen = json.loads(cache.read_text())
-        if now - seen["at"] < CACHE_TTL:
+        if now < seen["until"]:
             return seen["version"]
     except (OSError, ValueError, KeyError, TypeError):
         pass
@@ -97,11 +102,11 @@ def released(cfg=None, fetch=None, now=None):
         version = (fetch or _fetch)()
     except Exception:
         version = None                 # remember the miss too: offline, every start would wait again
+    until = now + (MISS_TTL if version is None else CACHE_TTL)
     try:
         cache.parent.mkdir(parents=True, exist_ok=True)
         tmp = cache.with_name(f"{cache.name}.{os.getpid()}")
-        tmp.write_text(json.dumps({"at": now - CACHE_TTL + MISS_TTL if version is None else now,
-                                   "version": version}))
+        tmp.write_text(json.dumps({"until": until, "version": version}))
         os.replace(tmp, cache)
     except OSError:
         pass
@@ -115,16 +120,17 @@ def _fetch():
 
 def gaps(cfg=None, fetch=None, now=None):
     """The lines to show; empty when installed, released and running agree."""
-    inst, _ = installed(cfg)
+    inst, market = installed(cfg)
     rel = released(cfg, fetch, now)
     lines = []
     if inst and rel and vkey(inst) < vkey(rel):
         lines.append(f"claude-boss {inst} is installed, {rel} is released: "
-                     f"run `claude plugin marketplace update sweatshop-ai` then `claude plugin update claude-boss@sweatshop-ai`, then restart the sessions that matter.")
+                     f"run `claude plugin marketplace update {market}` then "
+                     f"`claude plugin update {PLUGIN}@{market}`, then restart the sessions that matter.")
     newest = max([v for v in (inst, rel) if v], key=vkey, default=None)
-    old = {v: p for v, p in running(cfg).items() if newest and vkey(v) < vkey(newest)}
+    old = {v: pids for v, pids in running(cfg).items() if newest and vkey(v) < vkey(newest)}
     if old:
-        n = sum(len(p) for p in old.values())
+        n = sum(len(pids) for pids in old.values())
         lines.append(f"{n} live session(s) still run an older claude-boss "
                      f"({', '.join(sorted(old, key=vkey))}) than {newest}; their "
                      f"rules and their `bin/` on PATH are the old ones until they restart.")

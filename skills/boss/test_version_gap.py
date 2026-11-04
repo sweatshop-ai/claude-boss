@@ -34,7 +34,7 @@ class Gap(unittest.TestCase):
         d.mkdir(parents=True, exist_ok=True)
         if start == "auto":
             try:
-                start = Path("/proc", str(pid), "stat").read_text().rpartition(")")[2].split()[19]
+                start = version_gap.proc_start(pid)
             except OSError:
                 start = "1"
         (d / str(pid)).write_text(json.dumps({"pid": pid, "procStart": start}))
@@ -79,7 +79,7 @@ class Gap(unittest.TestCase):
 
     def test_reused_pid_is_not_a_session(self):
         self.install("0.21.0")
-        self.mark("0.19.2", LIVE, start="1")        # alive, but not the process that wrote the marker
+        self.mark("0.19.2", LIVE, start="1")        # alive, but not the process that wrote the file
         self.assertEqual(self.gaps("0.21.0"), [])
 
     def test_offline_is_silent_and_retried_after_ten_minutes(self):
@@ -97,6 +97,11 @@ class Gap(unittest.TestCase):
     def test_short_and_suffixed_versions(self):
         self.assertEqual(version_gap.vkey("1.0"), version_gap.vkey("1.0.0"))
         self.assertEqual(version_gap.vkey("0.21.0-rc1"), version_gap.vkey("0.21.0"))
+
+    def test_update_command_names_the_installed_marketplace(self):
+        rec = {"plugins": {"claude-boss@fork": [{"scope": "user", "version": "0.19.1"}]}}
+        (self.cfg / "plugins" / "installed_plugins.json").write_text(json.dumps(rec))
+        self.assertIn("update claude-boss@fork`", self.gaps("0.20.0")[0])
 
     def test_only_the_user_scope_install_counts(self):
         rec = {"plugins": {"claude-boss@x": [{"scope": "project", "version": "0.1.0"}],

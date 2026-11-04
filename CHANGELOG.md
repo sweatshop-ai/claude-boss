@@ -7,8 +7,8 @@
   earlier, and nothing said so. Cause: a marketplace install of a third-party
   repo is not refreshed by itself, so the version moves only when someone runs
   `marketplace update` and `plugin update`; and a live session keeps the version it
-  started on, with that version's `bin/` ahead on PATH. `boss-version-gap` (run at
-  session start) compares installed, released (`plugin.json` on main) and running
+  started on, with that version's `bin/` ahead on PATH. `boss-version-gap` (the boss runs it at
+  session start, SKILL.md step 1) compares installed, released (`plugin.json` on main) and running
   (live pids in the plugin cache's `.in_use` markers) and prints a line per gap, nothing
   when they agree.
 
