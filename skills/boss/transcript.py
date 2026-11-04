@@ -8,6 +8,7 @@ the end, so only the last TAIL bytes are read:
     usage(records)    -> (context of the last turn, priced cost per turn over
                           the last BAND turns, turns seen)
     pin(records)      -> uuid of the last user, assistant or queued_command record
+    turn_over(records) -> True when the last turn has ended and nothing was queued since
 
 The tail is enough. Measured 2026-10-01 on the six largest transcripts on the
 machine (20-33 MB): 4 MB held 264-491 turns, never fewer than BAND, and a full
@@ -104,3 +105,29 @@ def pin(records, past_exit=False):
                 t == "attachment" and (d.get("attachment") or {}).get("type") == "queued_command"):
             last = d.get("uuid") or last
     return last
+
+
+def turn_over(records):
+    """True when the session's last turn has ended: the last record that says
+    anything about a turn is the `system`/`turn_duration` record Claude Code
+    writes after the stop hooks, not a prompt, a reply, a tool result, a queued
+    command or a queued prompt (an `enqueue`, which a shell's completion or a
+    peer's message writes before its turn starts). `/exit`'s own records are
+    skipped, as in `pin`.
+
+    Why it exists: the status reads `shell` for as long as a background shell
+    runs, after the turn ended and while it is still in flight. Measured on
+    Claude Code 2.1.311: a turn with a shell and a foreground tool read `busy`
+    throughout, and `shell` with `turn_duration` last once it ended. False when
+    there is no such record, so a tail that shows nothing is not a turn over."""
+    for d in reversed(records):
+        t = d.get("type")
+        if t == "system" and d.get("subtype") == "turn_duration":
+            return True
+        if t == "user" and is_exit_record(d):
+            continue
+        if t in ("user", "assistant") or (
+                t == "attachment" and (d.get("attachment") or {}).get("type") == "queued_command") or (
+                t == "queue-operation" and d.get("operation") == "enqueue"):
+            return False
+    return False

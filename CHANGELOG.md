@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- **`restart --require-idle` follow-ups (ticket 22).** `--wait-idle 08` is decimal, not octal (it used
+  to skip the wait and refuse); `BOSS_RETRY_EVERY` must be a number (an `ERROR:` line, nothing typed)
+  and is floored at 1 s; `--wait-idle` with `--expect-last` now refuses with "ran a turn during the
+  wait" and SKILL.md says to leave the pin off. `shell` (background work running) stays
+  refused by default, turn over or not, and `--wait-idle` keeps waiting on it: a finished turn is not a
+  finished task (a worker waiting on CI with a Monitor armed reads so). The refusal tells a turn in
+  flight from "turn over, background work still running" and gives the kinds and counts in the pane
+  footer ("2 shells", "1 monitor"), read without typing; the jobs themselves are listed only by the
+  exit dialog. New `--stop-shells` (with `--require-idle`; `--force` does not imply it) lets a `shell`
+  with the turn over go through: it says so, prints each job and confirms the dialog. Look at the pane
+  or ask the worker before using it. `self_register` stamps the calling pane only when the
+  session in it is a boss (`boss-panes.py stamp-self`), so a worker that runs the script is no longer
+  marked as a boss pane; stamps the old script left on worker panes stay until the pane is reused
+  (no cleanup). `boss-panes.py --state` has a fifth field, `1`/`0` for the turn being over.
+
 - **The watchdog reads a concierge's permission dialog on a narrow pane.** Measured on real
   renders at 74, 31 and 25 columns (`skills/boss/fixtures/watch/`): an Edit dialog at 25
   columns went unseen (header and `Tab to amend` both wrapped), and a concierge question

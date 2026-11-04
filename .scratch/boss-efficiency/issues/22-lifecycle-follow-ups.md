@@ -13,7 +13,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Claimed by:** Osman 2026-11-04 22:49
+**Claimed by:** Renzo 2026-11-04 23:30 (Osman before, who handed off)
 
 **Status:** in-progress
 

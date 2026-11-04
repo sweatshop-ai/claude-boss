@@ -177,6 +177,17 @@ def main():
         if seat:
             print("%s\t%s" % (seat.pane.id, seat.session.get("name") or "unnamed"))
         return 0
+    if args and args[0] == "stamp-self":
+        # boss-lifecycle's self_register: stamp the calling pane with itself only
+        # when the session in it is a boss (has a boss file). A worker that runs the
+        # script must not become a boss pane.
+        if len(args) != 2:
+            print("usage: boss-panes.py stamp-self <pane>", file=sys.stderr)
+            return 2
+        for pane_id, rec in resolve():
+            if pane_id == args[1] and boss_store.is_boss(rec.get("sessionId")):
+                return 0 if TMUX.stamp(args[1], args[1]) else 1
+        return 0
     if args and args[0] == "stamp":
         if len(args) != 3:
             print("usage: boss-panes.py stamp <pane> <boss-pane>", file=sys.stderr)
@@ -221,8 +232,9 @@ def main():
         return 1
 
     if args and args[0] == "--state":
-        # boss-lifecycle --require-idle: session id, status and pin, fast (no
-        # usage scan), read immediately before the keystroke.
+        # boss-lifecycle --require-idle: session id, status, pin, past-exit pin
+        # and whether the last turn is over (1/0), fast (no usage scan), read
+        # immediately before the keystroke.
         for pane_id, rec in resolve():
             if pane_id != args[1]:
                 continue
@@ -231,9 +243,9 @@ def main():
             pin = transcript.pin(recs)
             past = transcript.pin(recs, past_exit=True)
             print("\t".join([rec.get("sessionId") or "-", rec.get("status") or "-",
-                             pin or "-", past or "-"]))
+                             pin or "-", past or "-", "1" if transcript.turn_over(recs) else "0"]))
             return 0
-        print("-\t-\t-\t-")
+        print("-\t-\t-\t-\t-")
         return 1
 
     want = args[0] if args else None
