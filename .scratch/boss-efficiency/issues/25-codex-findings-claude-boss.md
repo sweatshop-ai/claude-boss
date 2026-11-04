@@ -22,7 +22,7 @@ PR 43 (guard counts real work): `skills/boss/boss-guard.py`, `is_coordination`. 
 
 PR 44 (P17 proof)
 - [ ] P1 `skills/boss/SKILL.md:841-843` the proof asks for an import path, a database URL and a pid; a standalone script, compiled CLI or PATH executable with none of those proves nothing. Ask for the resolved executable path.
-- (the database-URL finding on this PR: credentials in a reported URL; fixed by Farouk's PR, number to be added here)
+- (the database-URL finding on this PR: credentials in a reported URL; fixed by PR 55 (75b06b6))
 
 PR 47 (plugin update gap): `skills/boss/version_gap.py`
 - [ ] P2 `:88` `_same_process` returns True when the marker has no `procStart` (`want is None`), so a reused pid, a zombie or an orphan counts as a live session. Use `registry.is_live`'s rules.
