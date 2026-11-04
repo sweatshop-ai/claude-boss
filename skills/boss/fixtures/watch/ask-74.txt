@@ -1,0 +1,22 @@
+ ▐▛███▛█   Claude Code v2.1.311
+▝▜██████▀  Haiku 5.5 · Claude Ultra
+ ▝▝   ▝▝   /tmp/nq/demo
+
+
+❯ Call the AskUserQuestion tool once. The question text is: Do you want
+  to proceed with the release? Option one label: Yes, and always use
+  sonnet. Option two label: No, wait. Then stop.
+──────────────────────────────────────────────────────────────────────────
+ ☐ Release
+
+Do you want to proceed with the release?
+
+❯ 1. Yes, and always use sonnet
+     Proceed with the release and use Sonnet for this work from now on.
+  2. No, wait
+     Do not proceed with the release yet.
+  3. Type something.
+──────────────────────────────────────────────────────────────────────────
+  4. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel
