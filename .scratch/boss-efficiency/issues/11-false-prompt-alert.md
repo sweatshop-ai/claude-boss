@@ -6,7 +6,7 @@
 
 **Claimed by:** Wren 2026-11-04 20:49
 
-**Status:** in-progress
+**Status:** done
 
-- [ ] A test with a concierge's question on screen raises no alert
-- [ ] A worker's real permission prompt still does
+- [x] A test with a concierge's question on screen raises no alert
+- [x] A worker's real permission prompt still does
