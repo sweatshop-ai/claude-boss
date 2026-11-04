@@ -84,6 +84,15 @@ NOTIF = re.compile(r"<tool-use-id>(toolu_\w+)</tool-use-id>")
 FROM_NAME = re.compile(r'<cross-session-message[^>]*? from-name="([^"]*)"')
 SESSION_NAME = re.compile(r"Your name in this session is ([A-Za-z0-9_][A-Za-z0-9._-]*?)\.(?:\s|$)")
 GOAL_STATUS = re.compile(r"boss-goal\s+status\s+([a-z0-9._-]+)\s+(open|paused|met)\b")
+_SEARCH_WORD = re.compile(r"\b(?:grep|rg|cat|sed|echo|printf)\b")
+
+
+def _runs(cmd, m):
+    """True when the match is a command that runs, not text inside a search, echo or quote."""
+    seg = re.split(r"[;&|\n]", cmd[:m.start()])[-1]
+    return not _SEARCH_WORD.search(seg) and seg.count("'") % 2 == 0 and seg.count('"') % 2 == 0
+
+
 GIT_COMMIT = re.compile(r"\bgit\s+(?:-C\s+\S+\s+)?commit\b")
 DONE_WORD = re.compile(r"\bdone\b", re.I)
 BOSSREG = re.compile(r"boss-marker\s+register(?:\s+([a-z0-9._-]+))?")
@@ -202,8 +211,9 @@ def scan_session(path, tracks=()):
                         if r and plain:
                             out["boss_regs"].append((T, r.group(1)))
                         g = GOAL_STATUS.search(c)
-                        if g and plain: out["goal_status"].append((T, g.group(1), g.group(2)))
-                        if plain and GIT_COMMIT.search(c) and DONE_WORD.search(c): out["done_commits"].append(T)
+                        if g and plain and _runs(c, g): out["goal_status"].append((T, g.group(1), g.group(2)))
+                        gc = GIT_COMMIT.search(c)
+                        if plain and gc and _runs(c, gc) and DONE_WORD.search(c): out["done_commits"].append(T)
             recs.append((T, "a"))
             return
         is_result = False
@@ -396,8 +406,11 @@ class Index:
             for T, name in b.get("sends", []) + b.get("heard", []):
                 for tr, a, z in windows[b["sid"]]:
                     if not a <= T <= z: continue
-                    for s in by_name.get(name, ()):
-                        if not s["start"] - NAME_SLACK_S <= T <= session_end(s) + NAME_SLACK_S: continue
+                    near = [s for s in by_name.get(name, ())
+                            if s["start"] - NAME_SLACK_S <= T <= session_end(s) + NAME_SLACK_S]
+                    # a reused name inside the slack: only the session alive at T, else the nearest
+                    near.sort(key=lambda s: (max(s["start"] - T, T - session_end(s), 0), -s["start"]))
+                    for s in near[:1]:
                         lo, hi = max(a, s["start"]), min(z, session_end(s))
                         if hi <= lo: continue
                         for x, y in _subtract(lo, hi, taken[s["sid"]]):
