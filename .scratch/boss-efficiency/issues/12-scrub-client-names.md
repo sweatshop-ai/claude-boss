@@ -18,7 +18,7 @@ The dry run answers, with the commands and what came back:
 
 **Status:** in-progress
 
-- [ ] The dry-run report exists under `~/.claude/pm/`, outside the repo, with the commands and results above
+- [x] The dry-run report exists under `~/.claude/pm/`, outside the repo, with the commands and results above (report: `~/.claude/pm/boss-efficiency.scrub-dryrun.md`)
 - [ ] The owner has given consent in the boss's own question, on that report
 - [ ] A fresh clone returns no hit for any name in the list, across all refs, in contents, paths and messages
 - [ ] What git cannot reach is listed, each item done or handed to the owner
