@@ -10,6 +10,14 @@
 
 **Status:** in-progress
 
-- [ ] How often a restart was refused as busy and not retried within 10 minutes, counted over the boss transcripts of the last five weeks under the transcript lock, with the count of cases where no idle notice followed
+- [x] How often a restart was refused as busy and not retried within 10 minutes, counted over the boss transcripts of the last five weeks under the transcript lock, with the count of cases where no idle notice followed
 - [ ] The cause of the busy reading and of the missing notice, shown from a reproduction or from the code
-- [ ] The restart step retries on a timer, with a test that a refused restart is retried once the worker's last turn has ended
+- [x] The restart step retries on a timer, with a test that a refused restart is retried once the worker's last turn has ended
+
+## Result (Otilia, 2026-11-04; PR 50)
+
+- Count, boss transcripts since 2026-09-30 (60 files, under the lock): 237 refusals as not idle in 14 sessions (193 busy, 41 shell, 3 waiting). 49 not retried within 10 minutes (a later restart/retire command naming the pane); 32 of those with no restart or retire command at all; 17 of the 32 with no idle-notice text within 90 minutes (text heuristic).
+- Cause of the false "a turn started": with the exit dialog up the status is `waiting`, the check wanted `idle`. Reproduced in the stub harness and read live in an isolated tmux server. Separate finding: `shell` is read mid-turn too.
+- Box 2 stays open: why the sampled gap's pane read busy and why no notice came is not shown. The `shell` refusals (41) are a likely part of it, but only the status is shown, not the notice.
+- Retry: `--wait-idle <seconds>` (PR 50).
+- Follow-ups: tell "turn over, background shell left" from "turn in flight" for `shell`; `self_register` stamps the calling pane as a boss on every invocation (a worker that runs the script becomes a boss pane).
