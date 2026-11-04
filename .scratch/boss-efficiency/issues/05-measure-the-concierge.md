@@ -6,6 +6,7 @@
 
 **Blocked by:**
 - 04
+- External: three finished tracks run with a concierge
 
 **Status:** waits for three finished tracks with a concierge
 

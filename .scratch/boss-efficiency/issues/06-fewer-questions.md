@@ -4,7 +4,8 @@
 
 **Why:** 18 questions per active day. About 38% break the rule "only when blocked", by a model's reading of their first lines, which is itself unreliable.
 
-**Blocked by:** None (can start immediately)
+**Blocked by:**
+- External: Thierry labels a sample of past questions; not yet asked
 
 **Status:** needs the owner's labels
 

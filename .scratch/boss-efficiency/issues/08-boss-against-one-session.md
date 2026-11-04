@@ -4,7 +4,8 @@
 
 **Why:** the one question the audit could not answer. It says where time goes inside the boss, not whether the boss beats the alternative. Open since 2026-10-27.
 
-**Blocked by:** None (can start immediately)
+**Blocked by:**
+- External: Thierry names a suitable ticket graph; not yet asked
 
 **Status:** waits for a suitable ticket graph
 
