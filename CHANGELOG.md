@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.21.3 — 2026-11-04
+
+- **`restart --require-idle` no longer refuses an idle worker.** With the "Background
+  work is running" dialog up the session's status reads `waiting`, and the check
+  after `/exit` demanded `idle`, so a worker with a leftover background task was
+  refused as "a turn started" and `/exit` stayed typed in its pane. The check now
+  accepts `idle`, `waiting` and `shell` there; the same session on the same input
+  (the past-exit pin) is what says no turn started. `shell` stays "not idle" before
+  `/exit`: it is also read mid-turn (measured), so it is retried, never typed at.
+- **A refused restart is retried on a timer.** `--wait-idle <seconds>` reads the status
+  every `BOSS_RETRY_EVERY` seconds (default 20) while the worker is busy, waiting or running a shell,
+  types nothing meanwhile, and restarts when a read says idle. Still busy at the end
+  is a refusal. The boss no longer depends on an idle notice that may never come.
+
 ## 0.21.2 — 2026-11-04
 
 - **A weekly routine measures where the time and tokens go** (`boss-efficiency`): per

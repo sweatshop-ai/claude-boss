@@ -154,7 +154,13 @@ import os, sys
 if sys.argv[1:2] == ["--state"]:
     d = os.environ["STUB_DIR"]
     seen, later = os.path.join(d, "stated"), os.path.join(d, "row2")
-    if os.path.exists(seen) and os.path.exists(later):
+    seq, count = os.path.join(d, "rows"), os.path.join(d, "reads")
+    if os.path.exists(seq):                        # one row per read, the last one repeats
+        rows = open(seq).read().splitlines()
+        n = int(open(count).read()) if os.path.exists(count) else 0
+        open(count, "w").write(str(n + 1))
+        print(rows[min(n, len(rows) - 1)])
+    elif os.path.exists(seen) and os.path.exists(later):
         print(open(later).read().strip("\n"))      # what a second read sees
     else:
         open(seen, "w").close()
@@ -191,14 +197,15 @@ class RequireIdle(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.tmp)
 
-    def run_retire(self, row, *extra, exits=True, dialog=False, require_idle=True):
+    def run_retire(self, row, *extra, exits=True, dialog=False, require_idle=True, extra_env=None, cmd="retire"):
         if exits:
             (self.tmp / "exits").touch()
         if dialog:
             (self.tmp / "dialog").write_text("" if dialog is True else dialog)
         env = dict(os.environ, PATH="%s:%s" % (self.tmp / "bin", os.environ["PATH"]), TMUX="stub",
-                   TMUX_PANE="%1", STUB_DIR=str(self.tmp), STUB_ROW=row, BOSS_EXIT_WAIT="2")
-        r = subprocess.run(["bash", str(self.tmp / "boss-lifecycle.sh"), "retire", "%5"]
+                   TMUX_PANE="%1", STUB_DIR=str(self.tmp), STUB_ROW=row, BOSS_EXIT_WAIT="2",
+                   **(extra_env or {}))
+        r = subprocess.run(["bash", str(self.tmp / "boss-lifecycle.sh"), cmd, "%5"]
                            + (["--require-idle"] if require_idle else []) + list(extra),
                            env=env, capture_output=True, text=True, timeout=60)
         calls = (self.tmp / "calls").read_text() if (self.tmp / "calls").exists() else ""
@@ -247,6 +254,81 @@ class RequireIdle(unittest.TestCase):
         r, keys = self.run_retire("w-sid\tidle\tpin1\tpin1", exits=False, dialog=True)
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(keys[-1], "send-keys -t %5 Enter")
+
+    def test_the_exit_dialog_itself_reads_as_waiting_not_as_a_turn(self):
+        """Measured on Claude Code 2.1.311: with the "Background work is running"
+        dialog up the session's status is `waiting`, whatever the worker was doing
+        before. Same session, same input past /exit: still no turn."""
+        (self.tmp / "row2").write_text("w-sid\twaiting\tpin-exit\tpin1\n")
+        r, keys = self.run_retire("w-sid\tidle\tpin1\tpin1", exits=False, dialog=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(keys, ["send-keys -t %5 /exit Enter", "send-keys -t %5 Enter"])
+
+    def test_a_turn_that_asks_something_in_the_gap_is_still_a_turn(self):
+        (self.tmp / "row2").write_text("w-sid\twaiting\tpin2\tpin2\n")
+        r, keys = self.run_retire("w-sid\tidle\tpin1\tpin1", exits=False, dialog=True)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("a turn started", r.stderr)
+        self.assertEqual(keys, ["send-keys -t %5 /exit Enter", "send-keys -t %5 Escape"])
+
+    def run_waiting(self, rows, *extra):
+        (self.tmp / "rows").write_text("\n".join(rows) + "\n")
+        return self.run_retire(rows[-1], "--wait-idle", "2", *extra, extra_env={"BOSS_RETRY_EVERY": "0.1"})
+
+    def test_a_busy_worker_is_retried_until_its_turn_ends_and_nothing_is_typed_before(self):
+        r, keys = self.run_waiting(["w-sid\tbusy\tp1\tp1"] * 3 + ["w-sid\tidle\tp2\tp2"])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(keys, ["send-keys -t %5 /exit Enter"])
+        self.assertIn("retrying every", r.stderr)
+
+    def test_a_worker_that_stays_busy_is_refused_when_the_wait_runs_out(self):
+        r, keys = self.run_waiting(["w-sid\tbusy\tp1\tp1"])
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("still busy after 2 s", r.stderr)
+        self.assertEqual(keys, [])
+
+    def test_the_wait_does_not_forgive_a_changed_session_or_input(self):
+        r, keys = self.run_waiting(["other\tbusy\tp1\tp1", "other\tidle\tp1\tp1"], "--expect-session", "w-sid")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("not w-sid", r.stderr)
+        self.assertEqual(keys, [])
+
+    def test_shell_is_not_idle_because_it_is_read_mid_turn_too(self):
+        """Measured on Claude Code 2.1.311: `shell` (a background shell running)
+        is read while a turn is still in flight, so it must not pass as idle."""
+        r, keys = self.run_retire("w-sid\tshell\tpin1\tpin1")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("not idle", r.stderr)
+        self.assertEqual(keys, [])
+
+    def test_shell_and_waiting_are_retried_and_the_wait_can_end_in_a_refusal(self):
+        r, keys = self.run_waiting(["w-sid\tshell\tp1\tp1", "w-sid\twaiting\tp1\tp1"])
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("still waiting after 2 s", r.stderr)
+        self.assertEqual(keys, [])
+        (self.tmp / "reads").unlink()
+        r, keys = self.run_waiting(["w-sid\tshell\tp1\tp1"] * 2 + ["w-sid\tidle\tp1\tp1"])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(keys, ["send-keys -t %5 /exit Enter"])
+
+    def test_a_dialog_read_as_shell_after_exit_is_still_no_turn(self):
+        (self.tmp / "row2").write_text("w-sid\tshell\tpin-exit\tpin1\n")
+        r, keys = self.run_retire("w-sid\tidle\tpin1\tpin1", exits=False, dialog=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(keys, ["send-keys -t %5 /exit Enter", "send-keys -t %5 Enter"])
+
+    def test_restart_waits_too_and_types_nothing_at_a_worker_that_stays_busy(self):
+        (self.tmp / "rows").write_text("w-sid\tbusy\tp1\tp1\n")
+        r, keys = self.run_retire("w-sid\tbusy\tp1\tp1", "--wait-idle", "1", cmd="restart",
+                                  extra_env={"BOSS_RETRY_EVERY": "0.1"})
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("still busy after 1 s", r.stderr)
+        self.assertEqual(keys, [])
+
+    def test_wait_idle_needs_require_idle(self):
+        r, keys = self.run_retire("x", "--wait-idle", "5", require_idle=False)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("only apply with --require-idle", r.stderr)
 
     def test_a_confirmed_exit_that_is_slow_gets_no_escape(self):
         (self.tmp / "slow").touch()
