@@ -12,10 +12,10 @@
 
 **Blocked by:** None (can start immediately)
 
-**Claimed by:** Yara 2026-11-04 22:16
+**Claimed by:** Layla 2026-11-04 22:16
 
 **Status:** in-progress
 
-- [ ] Finding 3: read `request_stop` and say whether a replayed stop can reach a hub that had no stop coming, with the code line, and a test if it can
-- [ ] Findings 1 and 2 decided and written into the PR or the SPEC; 4 and 5 applied
+- [x] Finding 3: read `request_stop` and say whether a replayed stop can reach a hub that had no stop coming, with the code line, and a test if it can
+- [x] Findings 1 and 2 decided and written into the PR or the SPEC; 4 and 5 applied
 - [ ] One PR, one review round, CI green; no tag
