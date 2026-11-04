@@ -6,7 +6,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Claimed by:** Otilia 2026-11-04 21:51
+**Claimed by:**
 
 **Status:** in-progress
 
@@ -18,6 +18,8 @@
 
 - Count, boss transcripts since 2026-09-30 (60 files, under the lock): 237 refusals as not idle in 14 sessions (193 busy, 41 shell, 3 waiting). 49 not retried within 10 minutes (a later restart/retire command naming the pane); 32 of those with no restart or retire command at all; 17 of the 32 with no idle-notice text within 90 minutes (text heuristic).
 - Cause of the false "a turn started": with the exit dialog up the status is `waiting`, the check wanted `idle`. Reproduced in the stub harness and read live in an isolated tmux server. Separate finding: `shell` is read mid-turn too.
-- Box 2 stays open: why the sampled gap's pane read busy and why no notice came is not shown. The `shell` refusals (41) are a likely part of it, but only the status is shown, not the notice.
+- Box 2 stays open: why the sampled gap's pane read busy and why no notice came is not shown. 41 of the 237 refusals read `shell`; the link to the missing notice is not shown.
 - Retry: `--wait-idle <seconds>` (PR 50).
 - Follow-ups: tell "turn over, background shell left" from "turn in flight" for `shell`; `self_register` stamps the calling pane as a boss on every invocation (a worker that runs the script becomes a boss pane).
+
+PR 50 merged fa2062c; box 2 goes to the next worker: reproduce a worker that ends its turn with a background shell, with an idle subscription, and read whether the notice fires.
