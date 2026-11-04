@@ -84,13 +84,45 @@ NOTIF = re.compile(r"<tool-use-id>(toolu_\w+)</tool-use-id>")
 FROM_NAME = re.compile(r'<cross-session-message[^>]*? from-name="([^"]*)"')
 SESSION_NAME = re.compile(r"Your name in this session is ([A-Za-z0-9_][A-Za-z0-9._-]*?)\.(?:\s|$)")
 GOAL_STATUS = re.compile(r"boss-goal\s+status\s+([a-z0-9._-]+)\s+(open|paused|met)\b")
-_SEARCH_WORD = re.compile(r"\b(?:grep|rg|cat|sed|echo|printf)\b")
+_HEREDOC = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
+
+
+def _command_starts(cmd):
+    """Offsets where a command word begins, outside quotes, comments and heredoc bodies."""
+    starts, i, n, fresh, quote = set(), 0, len(cmd), True, None
+    pending = []                                  # heredoc delimiters waiting for the next line
+    while i < n:
+        ch = cmd[i]
+        if quote:
+            if ch == "\\" and quote == '"': i += 1
+            elif ch == quote: quote = None
+        elif ch in "'\"": quote, fresh = ch, False
+        elif ch == "\\": i += 1; fresh = False
+        elif ch == "#" and (i == 0 or cmd[i - 1] in " \t\n;&|("):
+            while i < n and cmd[i] != "\n": i += 1
+            continue
+        elif ch == "\n":
+            fresh = True
+            for d in pending:
+                m = re.compile(r"^[ \t]*" + re.escape(d) + r"[ \t]*$", re.M).search(cmd, i + 1)
+                i = m.end() if m else n
+            pending = []
+        elif ch in ";&|(": fresh = True
+        elif ch in " \t": pass
+        else:
+            if fresh: starts.add(i)
+            fresh = False
+            h = _HEREDOC.match(cmd, i) if ch == "<" else None
+            if h: pending.append(h.group(2)); i = h.end(); continue
+        i += 1
+    return starts
 
 
 def _runs(cmd, m):
-    """True when the match is a command that runs, not text inside a search, echo or quote."""
-    seg = re.split(r"[;&|\n]", cmd[:m.start()])[-1]
-    return not seg.lstrip().startswith("#") and not _SEARCH_WORD.search(seg) and seg.count("'") % 2 == 0 and seg.count('"') % 2 == 0
+    """True when the match is a command that runs, not text in a quote, comment, heredoc or argument."""
+    j = m.start()
+    while j > 0 and not cmd[j - 1].isspace() and cmd[j - 1] not in ";&|(": j -= 1      # a path before the name
+    return j in _command_starts(cmd)
 
 
 GIT_COMMIT = re.compile(r"\bgit\s+(?:-C\s+\S+\s+)?commit\b")

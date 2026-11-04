@@ -343,6 +343,23 @@ class FinishedTrack(unittest.TestCase):
         idx, _, _ = week(c.dir)
         self.assertNotIn("alpha-x", idx.cut)
 
+    def test_an_inline_comment_or_heredoc_body_is_not_a_mark(self):
+        c = Cfg()
+        c.goal("alpha-x")
+        c.boss("alpha-x", [], NOW - 2 * DAY, until=NOW - DAY,
+               cmds=[(NOW - 2 * DAY + 100, "git status # boss-goal status alpha-x met x"),
+                     (NOW - 2 * DAY + 200, "cat <<'EOF'\nboss-goal status alpha-x met x\nEOF")])
+        idx, _, _ = week(c.dir)
+        self.assertNotIn("alpha-x", idx.cut)
+
+    def test_a_mark_after_a_heredoc_in_the_same_command_counts(self):
+        c = Cfg()
+        c.goal("alpha-x")
+        c.boss("alpha-x", [], NOW - 2 * DAY, until=NOW - DAY,
+               cmds=[(NOW - 2 * DAY + 100, "cat <<'EOF'\nnote\nEOF\nboss-goal status alpha-x met x")])
+        idx, _, _ = week(c.dir)
+        self.assertIn("alpha-x", idx.cut)
+
     def test_a_real_mark_after_a_search_in_the_same_command_still_counts(self):
         c = Cfg()
         c.goal("alpha-x")
