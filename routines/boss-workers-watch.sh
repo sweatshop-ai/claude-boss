@@ -26,7 +26,8 @@
 #                        written only if WATCH_STATE_DIR is also overridden
 #   WATCH_STATE_DIR=<d>  use a scratch state dir (lets tests exercise the
 #                        consecutive-run counters without touching real state)
-#   FAKE_PANES=<file>    substitute `tmux list-panes` output (same TSV fields)
+#   FAKE_PANES=<file>    substitute `tmux list-panes` output (same TSV fields:
+#                        id, index, command, path, @worker_role or -, @worker_name)
 #   FAKE_CAP_DIR=<dir>   substitute captures: <dir>/<pane-id-without-%>.txt
 set -uo pipefail
 
@@ -55,7 +56,7 @@ fi
 panes_list() {
     if [ -n "$FAKE_PANES" ]; then cat "$FAKE_PANES"; return; fi
     tmux list-panes -a \
-        -F $'#{pane_id}\t#{pane_index}\t#{pane_current_command}\t#{pane_current_path}\t#{@worker_name}' \
+        -F $'#{pane_id}\t#{pane_index}\t#{pane_current_command}\t#{pane_current_path}\t#{?@worker_role,#{@worker_role},-}\t#{@worker_name}' \
         2>/dev/null
 }
 
@@ -83,7 +84,7 @@ NEW_HASHES=""
 ALERTS=""
 RECOVERIES=""
 
-while IFS=$'\t' read -r id idx cmd path name; do
+while IFS=$'\t' read -r id idx cmd path role name; do
     [ -n "$id" ] || continue
     cond="none"
 
@@ -92,6 +93,11 @@ while IFS=$'\t' read -r id idx cmd path name; do
         hash=$(printf '%s' "$cap" | md5sum | cut -d' ' -f1)
         prev_hash=$(awk -F'\t' -v p="$id" '$1==p{print $2}' "$HASHES")
         NEW_HASHES+="$id"$'\t'"$hash"$'\n'
+        # A live dialog sits at the bottom of the screen. A concierge relays
+        # questions that may themselves read "Do you want to proceed ...?", so
+        # for it only the last lines count, not the scrollback.
+        dialog_cap="$cap"
+        [ "$role" = "concierge" ] && dialog_cap=$(tail -n 15 <<<"$cap")
 
         # Case-sensitive on purpose: the TUI banner says "API Error"; a
         # transcribed conversation about "an API error" (lowercase) must not
@@ -102,7 +108,14 @@ while IFS=$'\t' read -r id idx cmd path name; do
             cond="api-retrying"
         elif grep -qE 'API Error|overloaded_error|rate_limit_error|Request timed out|Connection (error|failed|refused)|fetch failed|ECONNREFUSED|OAuth token has expired' <<<"$cap"; then
             cond="api-error"
-        elif grep -qE 'Do you want to (proceed|allow|make this edit|create|run)|❯ 1\. Yes' <<<"$cap"; then
+        elif grep -qE 'Do you want to (proceed|allow|make this edit|create|run)|Yes, I trust this folder|Tab to amend|Yes, and (always|don.t ask)' <<<"$dialog_cap"; then
+            cond="permission-prompt"
+        elif [ "$role" != "concierge" ] && grep -qE '❯ 1\. Yes' <<<"$cap"; then
+            # A concierge's whole job is an AskUserQuestion dialog whose first
+            # option can start with Yes; it is the owner's question, not a
+            # stuck session. Its permission dialog still matches above: the
+            # header, the trust prompt, the permission footer 'Tab to amend', or the 'Yes, and always ...' option
+            # (on a very narrow pane the header scrolls out of the last 15 lines).
             cond="permission-prompt"
         elif grep -qE 'esc to interrupt' <<<"$cap" && [ -n "$prev_hash" ] && [ "$hash" = "$prev_hash" ]; then
             # Mid-turn the TUI spinner redraws constantly; identical content
