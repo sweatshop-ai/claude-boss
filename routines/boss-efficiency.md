@@ -31,6 +31,24 @@ worker session belongs to that track until its next message. A boss session is a
 marker in `pm/.boss-sessions/` or a `boss-marker register <track>` call. Only
 tracks with a `pm/<track>.goal.md` (or seen before) are accepted as names.
 
+**By name, for the workers no dispatch reaches** (ticket 17). A session records the
+name it started with ("Your name in this session is X"). When the boss sent to X
+(`SendMessage`) or heard from X (`from-name` is the name the session started with,
+not the one the boss claims it under), the session counts for that track, from the
+start of the boss's window on the track to the end of the session. The session must
+have been alive at the message, because names are reused. Time a dispatch already
+gave to a track stays with that track, and no stretch is counted twice. A session with
+no recorded name is not guessed at.
+
+## Where a track ends
+
+A track whose goal was last marked met (`boss-goal status <track> met`, read from the
+boss's command) ends at that mark or at its last commit whose command says "done",
+whichever is later, plus a minute. The boss session left open after that is not the
+track: its time, its tokens and the worker messages it gets are left out. A track not
+marked met, or reopened after, runs to the end of its sessions as before. The commit
+is read from the `git commit` command in the transcript, not from git history.
+
 ## Coverage check
 
 Share of worker messages to a boss that no tracked worker session of that track
