@@ -311,8 +311,14 @@ class RequireIdle(unittest.TestCase):
         return self.run_retire(rows[-1], "--wait-idle", wait, *extra,
                                extra_env={"BOSS_RETRY_EVERY": "1", **(extra_env or {})}, **kw)
 
+    # The wait is a wall-clock budget: a test that must see several busy reads
+    # before an idle one fails when a slow runner spends the budget on the reads
+    # themselves. These tests get room and still end after the two one-second
+    # retries they need.
+    ROOM = "30"
+
     def test_a_busy_worker_is_retried_until_its_turn_ends_and_nothing_is_typed_before(self):
-        r, keys = self.run_waiting(["w-sid\tbusy\tp1\tp1"] * 2 + ["w-sid\tidle\tp2\tp2"])
+        r, keys = self.run_waiting(["w-sid\tbusy\tp1\tp1"] * 2 + ["w-sid\tidle\tp2\tp2"], wait=self.ROOM)
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(keys, ["send-keys -t %5 /exit Enter"])
         self.assertIn("retrying every", r.stderr)
@@ -343,7 +349,7 @@ class RequireIdle(unittest.TestCase):
         self.assertIn("still waiting after 2 s", r.stderr)
         self.assertEqual(keys, [])
         (self.tmp / "reads").unlink()
-        r, keys = self.run_waiting(["w-sid\tshell\tp1\tp1"] * 2 + ["w-sid\tidle\tp1\tp1"])
+        r, keys = self.run_waiting(["w-sid\tshell\tp1\tp1"] * 2 + ["w-sid\tidle\tp1\tp1"], wait=self.ROOM)
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(keys, ["send-keys -t %5 /exit Enter"])
 
