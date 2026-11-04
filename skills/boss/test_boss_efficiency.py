@@ -240,6 +240,14 @@ class AttributionByName(unittest.TestCase):
         idx, _, _ = week(c.dir)
         self.assertEqual(len({s["sid"] for s, _, _ in idx.workers["alpha-x"]}), 1)
 
+    def test_a_recipient_with_a_session_ref_still_matches_the_name(self):
+        c = Cfg()
+        c.goal("alpha-x")
+        c.worker(NOW - DAY, [], cost=7000, name="Mira", until=NOW - DAY + 3600)
+        c.boss("alpha-x", [], NOW - DAY, sends=[(NOW - DAY + 60, "Mira [ab12]")])
+        _, wk, _ = week(c.dir)
+        self.assertEqual(wk["tracks"]["alpha-x"]["tokens"]["build"], 7000)
+
     def test_a_session_dispatched_by_socket_is_not_counted_twice(self):
         c = Cfg()
         sock = "uds:/run/cc-socks/1.sock"
@@ -324,6 +332,31 @@ class FinishedTrack(unittest.TestCase):
         c.boss("alpha-x", [], NOW - 2 * DAY, sends=[(NOW - 2 * DAY + 60, "Mira")], until=NOW - DAY,
                cmds=[(NOW - 2 * DAY + 100, "git grep 'boss-goal status alpha-x met'"),
                      (NOW - 2 * DAY + 200, "echo 'boss-goal status alpha-x met x'")])
+        idx, _, _ = week(c.dir)
+        self.assertNotIn("alpha-x", idx.cut)
+
+    def test_a_comment_line_is_not_a_mark(self):
+        c = Cfg()
+        c.goal("alpha-x")
+        c.boss("alpha-x", [], NOW - 2 * DAY, until=NOW - DAY,
+               cmds=[(NOW - 2 * DAY + 100, "git status\n# boss-goal status alpha-x met x")])
+        idx, _, _ = week(c.dir)
+        self.assertNotIn("alpha-x", idx.cut)
+
+    def test_a_real_mark_after_a_search_in_the_same_command_still_counts(self):
+        c = Cfg()
+        c.goal("alpha-x")
+        c.boss("alpha-x", [], NOW - 2 * DAY, until=NOW - DAY,
+               cmds=[(NOW - 2 * DAY + 100, "grep 'boss-goal status alpha-x met' n; boss-goal status alpha-x met 'x'")])
+        idx, _, _ = week(c.dir)
+        self.assertIn("alpha-x", idx.cut)
+
+    def test_a_workers_mark_does_not_cut_the_track(self):
+        c = Cfg()
+        c.goal("alpha-x")
+        c.worker(NOW - 2 * DAY, [], cost=7000, name="Mira", until=NOW - 2 * DAY + 3600,
+                 cmds=[(NOW - 2 * DAY + 100, "boss-goal status alpha-x met 'x'")])
+        c.boss("alpha-x", [], NOW - 2 * DAY, sends=[(NOW - 2 * DAY + 60, "Mira")], until=NOW - DAY)
         idx, _, _ = week(c.dir)
         self.assertNotIn("alpha-x", idx.cut)
 
