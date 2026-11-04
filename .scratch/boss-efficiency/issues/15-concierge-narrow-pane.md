@@ -12,7 +12,7 @@ Two false alerts stay as known residuals in PR 48: a boss-written option such as
 
 **Blocked by:** External: a real AskUserQuestion capture, which the boss takes at the next question through its concierge
 
-**Status:** waits for a capture
+**Status:** ready
 
 - [ ] Real renders captured and kept as fixtures: a concierge question, Bash and Edit permission dialogs at 74, 31 and under 29 columns
 - [ ] A concierge on a permission dialog at each width alerts; a concierge's question worded like a dialog does not
