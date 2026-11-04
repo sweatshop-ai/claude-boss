@@ -10,7 +10,7 @@ Build it in this order: capture real renders first (a real concierge AskUserQues
 
 Two false alerts stay as known residuals in PR 48: a boss-written option such as "Yes, and always use sonnet" in a concierge's question, and a worker printing "Yes, and always allow access" within its last 40 lines.
 
-**Blocked by:** External: a real AskUserQuestion capture, which the boss takes at the next question through its concierge
+**Blocked by:** None (the AskUserQuestion render was captured on 2026-11-04 at `~/.claude/pm/boss-efficiency.askuserquestion-render-2026-11-04.txt`: footer `Enter to select · ↑/↓ to navigate · Esc to cancel`, no `Tab to amend`, so the fixture assumption holds at that width; the dialogs still need capturing)
 
 **Status:** ready
 
