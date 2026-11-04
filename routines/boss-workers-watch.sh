@@ -93,6 +93,11 @@ while IFS=$'\t' read -r id idx cmd path role name; do
         hash=$(printf '%s' "$cap" | md5sum | cut -d' ' -f1)
         prev_hash=$(awk -F'\t' -v p="$id" '$1==p{print $2}' "$HASHES")
         NEW_HASHES+="$id"$'\t'"$hash"$'\n'
+        # A live dialog sits at the bottom of the screen. A concierge relays
+        # questions that may themselves read "Do you want to proceed ...?", so
+        # for it only the last lines count, not the scrollback.
+        dialog_cap="$cap"
+        [ "$role" = "concierge" ] && dialog_cap=$(tail -n 15 <<<"$cap")
 
         # Case-sensitive on purpose: the TUI banner says "API Error"; a
         # transcribed conversation about "an API error" (lowercase) must not
@@ -103,7 +108,7 @@ while IFS=$'\t' read -r id idx cmd path role name; do
             cond="api-retrying"
         elif grep -qE 'API Error|overloaded_error|rate_limit_error|Request timed out|Connection (error|failed|refused)|fetch failed|ECONNREFUSED|OAuth token has expired' <<<"$cap"; then
             cond="api-error"
-        elif grep -qE 'Do you want to (proceed|allow|make this edit|create|run)|Yes, I trust this folder|Tab to amend' <<<"$cap"; then
+        elif grep -qE 'Do you want to (proceed|allow|make this edit|create|run)|Yes, I trust this folder|Tab to amend' <<<"$dialog_cap"; then
             cond="permission-prompt"
         elif [ "$role" != "concierge" ] && grep -qE '❯ 1\. Yes' <<<"$cap"; then
             # A concierge's whole job is an AskUserQuestion dialog whose first
