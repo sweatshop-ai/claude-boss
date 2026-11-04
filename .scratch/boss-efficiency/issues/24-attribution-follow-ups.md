@@ -10,7 +10,9 @@
 **Blocked by:**
 - 17 (merged)
 
-**Status:** open
+**Claimed by:** Oskar 2026-11-05 00:28
+
+**Status:** in-progress
 
 - [ ] A `met` mark counts only when its command succeeded, shown by two tests (failed, succeeded)
 - [ ] A ref-qualified send picks the session it names, or none when the ref cannot decide; two tests
