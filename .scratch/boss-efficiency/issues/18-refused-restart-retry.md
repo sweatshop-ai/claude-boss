@@ -6,7 +6,9 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Claimed by:** Otilia 2026-11-04 21:51
+
+**Status:** in-progress
 
 - [ ] How often a restart was refused as busy and not retried within 10 minutes, counted over the boss transcripts of the last five weeks under the transcript lock, with the count of cases where no idle notice followed
 - [ ] The cause of the busy reading and of the missing notice, shown from a reproduction or from the code
