@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **The P17 dispatch text no longer asks for the database URL.** A URL can carry `user:pass@`, and the
+  worker's report is copied into the boss's messages and transcripts. The worker now reports the
+  database's host, port and name, never the URL as a whole and never a password or token. Found by
+  Codex on PR 44.
+
 - **`restart --require-idle` follow-ups (ticket 22).** `--wait-idle 08` is decimal, not octal (it used
   to skip the wait and refuse); `BOSS_RETRY_EVERY` must be a number (an `ERROR:` line, nothing typed)
   and is floored at 1 s; `--wait-idle` with `--expect-last` now refuses with "ran a turn during the
