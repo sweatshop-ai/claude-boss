@@ -20,7 +20,7 @@ plain bash, with no dependency on the Claude API, Claude Code, or any MCP.
 |---|---|---|
 | `api-error` | error banner (API Error, overloaded, rate limit, timeout, connection failure, expired OAuth), not currently retrying | 2 consecutive minutes |
 | `api-retrying` | `Retrying in Ns…` visible — auto-retry usually heals itself | 5 consecutive minutes |
-| `permission-prompt` | a tool-permission dialog sitting unanswered (`Do you want to proceed/allow/…`, or an `❯ 1. Yes` option). On a pane with `@worker_role=concierge` only the header counts: its own AskUserQuestion options may start with Yes | 2 consecutive minutes |
+| `permission-prompt` | a tool-permission dialog sitting unanswered (`Do you want to proceed/allow/…`, or an `❯ 1. Yes` option). On a pane with `@worker_role=concierge` the `❯ 1. Yes` option does not count, and the header and option wording is read only in the last 7 non-blank lines (the footer `Tab to amend` and the trust prompt in the last 15), wraps joined: its own AskUserQuestion options may start with Yes and its question may read like a dialog | 2 consecutive minutes |
 | `frozen` | `esc to interrupt` shown but pane content hash identical across runs (a live TUI redraws its spinner constantly) | 3 consecutive minutes |
 | `at-shell` | a pane with `@worker_name` set (spawned by `boss-lifecycle.sh`) back at a bare shell — crashed or retired | 2 consecutive minutes |
 
