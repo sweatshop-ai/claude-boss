@@ -36,3 +36,5 @@ The figures above came from the code before the review rounds, which fixed how s
 - **Track end:** 14 of the 30 tracks are cut at their last done mark or commit now (the first run said eleven; I did not trace the difference).
 - **Boxes:** all four still hold; none moved by more than 0.2 points.
 
+
+**Correction (ticket 24, 2026-11-05):** "the 30 tracks" above is the audit list, which holds 28 tracks with activity in the window; the figures are unchanged.
