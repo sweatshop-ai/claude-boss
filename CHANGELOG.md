@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Reviews graded by risk and size (ticket 02, owner's decision of 2026-11-05).** P6 no longer
+  says "every PR, up to three rounds". Under 100 added lines and not sensitive: one Codex round,
+  another only for a defect of class a or b. 100 to 500 and not sensitive, or sensitive: up to
+  three. Over 500: split before review. Findings that are only tests, docs, style or far-fetched
+  cases become tickets and the PR closes. The standards review runs once per PR. The boss decides
+  "sensitive" and records it on the PR; the worker may raise it, never lower it. The dispatch
+  carries a short text of the rules.
+
 - **The P17 dispatch text no longer asks for the database URL.** A URL can carry `user:pass@`, and the
   worker's report is copied into the boss's messages and transcripts. The worker now reports the
   database's host, port and name, never the URL as a whole and never a password or token. Found by
