@@ -7,7 +7,9 @@
 **Blocked by:**
 - 04
 
-**Status:** ready-for-agent
+**Claimed by:** Otilia 2026-11-04 22:58
+
+**Status:** in-progress
 
 - [ ] The same 50 gaps, rerun with the new attribution: the hidden-work class falls to 0 or each remaining case is named with its reason
 - [ ] The share of worker messages to the boss that fall outside tracked activity is reported before and after (19% on 2026-11-04)
