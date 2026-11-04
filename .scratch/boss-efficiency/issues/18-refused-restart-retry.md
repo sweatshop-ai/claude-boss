@@ -13,7 +13,7 @@
 **Status:** in-progress
 
 - [x] How often a restart was refused as busy and not retried within 10 minutes, counted over the boss transcripts of the last five weeks under the transcript lock, with the count of cases where no idle notice followed
-- [x] The cause of the busy reading and of the missing notice, shown from a reproduction or from the code
+- [ ] The cause of the busy reading and of the missing notice, shown from a reproduction or from the code
 - [x] The restart step retries on a timer, with a test that a refused restart is retried once the worker's last turn has ended
 
 ## Result (Otilia, 2026-11-04; PR 50)
@@ -44,3 +44,18 @@ Not tested: a scheduled wake (ScheduleWakeup/Cron); a `waiting` pane.
 **Cause, shown.** (1) The pane reads `busy` after the worker's last words while a background subagent runs: the turn does not end until the agent reports, so the idle notice is not sent until then (here 2m24s, as long as the agent runs). The final text is not the end of the turn. (2) A background shell or Monitor reads `shell` and does not delay the notice. (3) A notice is not lost: it was delivered in every state, but only at a turn boundary of the subscriber. A boss that is inside a long turn sees it late, and it reports the time the worker's turn ended, so it can describe a turn that ended long before the notice is read (the 22:16 datum). (4) Subscribing to an idle session fires at once: state (e) does not lose a notice.
 
 **What this does not show.** Which state the sampled worker was in during its 92 minutes. A background subagent (or any long task the worker waited on) fits both readings, busy pane and late notice; no transcript was read to confirm it, and a scheduled wake was not tried. The notice code is in Claude Code, not in this repo. The retry on a timer (`--wait-idle`, PR 50) does not depend on any of it: it reads the status itself.
+
+### The sampled gap read against the table (Otilia, 2026-11-04; worker and boss transcripts, structure only: record types, tool names, durations)
+
+Times are seconds from the boss's first refused restart (T).
+
+- T+0: restart refused as busy. The worker's last turn had ended 5 s earlier (its stop hooks had finished).
+- T+3: the boss subscribed (`notify_when_idle`) with a message; the worker took a turn that ended at T+30.
+- T+27: second restart refused as busy, in the same second the worker's turn ended (T+30).
+- T+33: the boss subscribed again with a message; the worker took a turn that ended at T+41.
+- The boss's turn ended at T+38 and it slept 92 minutes. It was not in a long turn. Its transcript holds no idle notice between T+38 and T+92 min; the first notice it reads then is an expiry for another session.
+- Background work in the worker: none running at its last words. Its last background shell and its last Monitor had completed 62 s and 75 s before them; nothing was started in the four hours before.
+
+**It fits none of states (a) to (e).** (d) needs a background agent, there was none. (b) and (c) read `shell` and notify at the turn end. (a) and (e) notify at once or at the subscriber's turn end: both subscriptions were followed by a worker turn end and the boss's own turn end, and neither notice reached it, although all seven did in the probe. The first `busy` read, 5 s after the worker's stop hooks finished, is also not explained by any probe state.
+
+**Missing.** (1) Why a status read 5 s after a finished turn says `busy`: the probe shows `idle` within the second, so a lag in the status file or a queued wake is a candidate, not shown. (2) Why two subscriptions made 3 s and 33 s before a worker turn end gave no notice: a subscription made while the worker was between turns and with a message in the same call is the closest probe state ((a), (b), (c), (d) all did that and notified); what differs is the worker's two back-to-back turns (T+3, T+33) and the earlier restart attempts. A probe with two such back-to-back messages is the next step. Box 2 stays open.

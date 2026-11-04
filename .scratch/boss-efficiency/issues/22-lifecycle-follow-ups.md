@@ -7,6 +7,7 @@
 4. Tests for a non-numeric `--wait-idle` value and for `--wait-idle --force`.
 5. `shell` (a background shell running) is read mid-turn and after the turn, so it is refused as not idle. Find a signal that tells "turn over, background shell left running" from "turn in flight" (the transcript's last record, the screen), so a worker that finished is restartable; 41 of 237 refusals in five weeks of boss transcripts read `shell`.
 6. `self_register` (`boss-lifecycle.sh:171-172`) stamps the calling pane with itself on every invocation, so a worker that runs the script becomes a boss pane (`@boss_pane` set to its own pane id; the guard and pulse then treat it as a boss). Stamp only a pane that is a boss.
+7. SKILL.md (restart paragraph, near `--wait-idle`): say that a background subagent a worker started keeps the pane `busy` after its last words and holds its idle notice back until the agent reports (measured 2.1.311, 2m24s for a 2m10s agent), so a refusal as busy right after a report can be a subagent still running, not a lost notice; a background shell or Monitor reads `shell`. The skill already tells the boss to use `--wait-idle` instead of waiting on a notice.
 
 **Why:** found while building ticket 18. Items 1 to 4 are minor and nothing is typed in any of them; item 5 is the larger share of refusals the retry cannot clear; item 6 changed a worker pane's ownership on a real machine.
 
