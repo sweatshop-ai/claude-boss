@@ -186,7 +186,7 @@ assert_not_busy() {
 # refuses it too — otherwise the guard would protect workers but not bosses.
 # Runs on every invocation, so a boss claims itself by doing anything at all;
 # a pane whose session is not a boss (a worker that ran this script) is left
-# alone: stamp-self checks the session's boss marker.
+# alone: stamp-self checks for the session's boss file.
 self_register() {
   [[ -n "$BOSS_PANE" ]] || return 0
   python3 "$PANES_PY" stamp-self "$BOSS_PANE" 2>/dev/null || true
@@ -360,7 +360,7 @@ retire_require_idle() {
   # typed until a read says idle, and the session and pin checks below still
   # run on that last read, so a busy worker is never typed at.
   if [[ -n "$WAIT_IDLE" ]] && still_busy "$st" "$over"; then
-    local t0=$SECONDS first=$pin
+    local t0=$SECONDS first_pin=$pin
     printf '%s is %s: retrying every %s s for up to %s s, nothing is typed meanwhile\n' \
       "$pane" "$st" "$RETRY_EVERY" "$WAIT_IDLE" >&2
     while still_busy "$st" "$over" && (( SECONDS - t0 < WAIT_IDLE )); do
@@ -371,7 +371,7 @@ retire_require_idle() {
     still_busy "$st" "$over" && die "$pane is still $st after $WAIT_IDLE s: not retiring (--require-idle)"
     # A turn that ran meanwhile wrote records, so a pin taken before the wait
     # cannot match. Say that, not "new input since the check".
-    [[ -z "$EXPECT_LAST" || "$pin" == "$EXPECT_LAST" || "$pin" == "$first" ]] ||
+    [[ -z "$EXPECT_LAST" || "$pin" == "$EXPECT_LAST" || "$pin" == "$first_pin" ]] ||
       die "$pane ran a turn during the wait (last record ${pin:--}, expected $EXPECT_LAST): --expect-last cannot hold across --wait-idle; not retiring"
   fi
   [[ -z "$EXPECT_SESSION" || "$sid" == "$EXPECT_SESSION" ]] ||
@@ -383,7 +383,7 @@ retire_require_idle() {
   # `shell` is idle only when the transcript shows the turn over (the
   # status alone does not say); then /exit opens the dialog that lists the
   # background work and stop_leftover_background prints and confirms it.
-  [[ "$st" == "idle" || "$st" == "shell" && "$over" == 1 ]] ||
+  [[ "$st" == "idle" || "$st" == "shell" ]] && ! still_busy "$st" "$over" ||
     die "$pane status is '${st:-unknown}', not idle: not retiring (--require-idle)"
   if [[ "$st" == "shell" ]]; then
     printf '%s: its turn is over and a background shell is still running; the restart will stop it (the list follows)\n' \
@@ -401,8 +401,8 @@ retire_require_idle() {
     # asked to read idle here: with this dialog up the session reports
     # `waiting` (measured 2026-11-04, Claude Code 2.1.311), which refused every
     # idle worker that had background work left.
-    local sid2 st2 pin2 past2 over2 rc=1
-    IFS=$'\t' read -r sid2 st2 pin2 past2 over2 <<<"$(python3 "$PANES_PY" --state "$pane" 2>/dev/null)"
+    local sid2 st2 pin2 past2 rc=1
+    IFS=$'\t' read -r sid2 st2 pin2 past2 _ <<<"$(python3 "$PANES_PY" --state "$pane" 2>/dev/null)"
     if [[ "$sid2" == "$sid" && "$st2" =~ ^(idle|waiting|shell)$ && "$past2" == "$past" ]]; then
       rc=0; stop_leftover_background "$pane" || rc=$?
     fi

@@ -8,7 +8,7 @@ the end, so only the last TAIL bytes are read:
     usage(records)    -> (context of the last turn, priced cost per turn over
                           the last BAND turns, turns seen)
     pin(records)      -> uuid of the last user, assistant or queued_command record
-    turn_over(records)-> True when the last turn has ended and nothing was queued since
+    turn_over(records) -> True when the last turn has ended and nothing was queued since
 
 The tail is enough. Measured 2026-10-01 on the six largest transcripts on the
 machine (20-33 MB): 4 MB held 264-491 turns, never fewer than BAND, and a full

@@ -67,6 +67,40 @@ class PanesState(unittest.TestCase):
             kid.wait()
             shutil.rmtree(tmp)
 
+    def test_state_reads_the_turn_over_field_from_the_transcript_on_disk(self):
+        tmp = Path(tempfile.mkdtemp())
+        kid = subprocess.Popen(["sleep", "30"])
+        try:
+            (tmp / "sessions").mkdir()
+            (tmp / "projects" / "p1").mkdir(parents=True)
+            stat = Path("/proc/%d/stat" % kid.pid).read_text()
+            (tmp / "sessions" / ("%d.json" % kid.pid)).write_text(json.dumps(
+                {"pid": kid.pid, "sessionId": "s1", "status": "shell", "cwd": str(tmp), "tmux": "w:@1.%7",
+                 "procStart": stat[stat.rindex(")") + 2:].split()[19]}))
+            bp = self.load_panes(tmp)
+            os.environ["CLAUDE_CONFIG_DIR"] = str(tmp)
+            bp.TMUX = bp.fleet.MemoryTmux([bp.fleet.Pane("%7")])
+            done = [{"type": "assistant", "uuid": "a1"}, {"type": "system", "subtype": "turn_duration"}]
+            fields = {}
+            for name, recs in (("over", done), ("running", done + [{"type": "user", "uuid": "u2"}]), ("none", [])):
+                (tmp / "projects" / "p1" / "s1.jsonl").write_text("".join(json.dumps(r) + "\n" for r in recs))
+                import io, contextlib
+                buf = io.StringIO()
+                with contextlib.redirect_stdout(buf):
+                    old = sys.argv
+                    sys.argv = ["boss-panes.py", "--state", "%7"]
+                    try:
+                        bp.main()
+                    finally:
+                        sys.argv = old
+                fields[name] = buf.getvalue().rstrip("\n").split("\t")[4]
+            self.assertEqual(fields, {"over": "1", "running": "0", "none": "0"})
+        finally:
+            os.environ.pop("CLAUDE_CONFIG_DIR", None)
+            kid.kill()
+            kid.wait()
+            shutil.rmtree(tmp)
+
     def set_name(self, with_agent_name):
         """Run --set-name for pane %7 against a live peer; returns (peer name, agent-name calls)."""
         tmp = Path(tempfile.mkdtemp())

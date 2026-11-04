@@ -179,7 +179,7 @@ def main():
         return 0
     if args and args[0] == "stamp-self":
         # boss-lifecycle's self_register: stamp the calling pane with itself only
-        # when the session in it is a boss (has a marker). A worker that runs the
+        # when the session in it is a boss (has a boss file). A worker that runs the
         # script must not become a boss pane.
         if len(args) != 2:
             print("usage: boss-panes.py stamp-self <pane>", file=sys.stderr)
