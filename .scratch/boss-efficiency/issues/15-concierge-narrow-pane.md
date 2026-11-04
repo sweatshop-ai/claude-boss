@@ -12,7 +12,9 @@ Two false alerts stay as known residuals in PR 48: a boss-written option such as
 
 **Blocked by:** None (the AskUserQuestion render was captured on 2026-11-04 at `~/.claude/pm/boss-efficiency.askuserquestion-render-2026-11-04.txt`: footer `Enter to select · ↑/↓ to navigate · Esc to cancel`, no `Tab to amend`, so the fixture assumption holds at that width; the dialogs still need capturing)
 
-**Status:** ready
+**Claimed by:** Noor 2026-11-04 22:09
+
+**Status:** in-progress
 
 - [ ] Real renders captured and kept as fixtures: a concierge question, Bash and Edit permission dialogs at 74, 31 and under 29 columns
 - [ ] A concierge on a permission dialog at each width alerts; a concierge's question worded like a dialog does not
