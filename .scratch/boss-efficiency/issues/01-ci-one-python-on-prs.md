@@ -11,6 +11,6 @@
 **Status:** in-progress
 
 - [ ] The repositories with a PR matrix are listed, each read from its workflow file
-- [ ] Each runs one version on PRs and the matrix on main, with a green main run on record
-- [ ] Wait until the last job starts, before and after, per repository, with the sample size
+- [ ] Each runs one version on PRs and the matrix nightly, with a green nightly run on record (amended 2026-11-04: render-doc and sheaf moved the matrix from main to nightly on 2026-10-25/26, on purpose, because three jobs held the pool for about 25 minutes per merge; that decision stands)
+- [ ] Wait until the last job starts, before and after, per repository, with the sample size and the pool load; an after sample too small to read moves to ticket 13
 - [ ] The reason for the cancelled runs is counted: superseded by a push, cancelled by a worker, other
