@@ -19,6 +19,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+import boss_store  # noqa: E402
 
 
 class PanesState(unittest.TestCase):
@@ -271,12 +272,13 @@ class RequireIdle(unittest.TestCase):
         self.assertIn("a turn started", r.stderr)
         self.assertEqual(keys, ["send-keys -t %5 /exit Enter", "send-keys -t %5 Escape"])
 
-    def run_waiting(self, rows, *extra):
+    def run_waiting(self, rows, *extra, extra_env=None, wait="2", **kw):
         (self.tmp / "rows").write_text("\n".join(rows) + "\n")
-        return self.run_retire(rows[-1], "--wait-idle", "2", *extra, extra_env={"BOSS_RETRY_EVERY": "0.1"})
+        return self.run_retire(rows[-1], "--wait-idle", wait, *extra,
+                               extra_env={"BOSS_RETRY_EVERY": "1", **(extra_env or {})}, **kw)
 
     def test_a_busy_worker_is_retried_until_its_turn_ends_and_nothing_is_typed_before(self):
-        r, keys = self.run_waiting(["w-sid\tbusy\tp1\tp1"] * 3 + ["w-sid\tidle\tp2\tp2"])
+        r, keys = self.run_waiting(["w-sid\tbusy\tp1\tp1"] * 2 + ["w-sid\tidle\tp2\tp2"])
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(keys, ["send-keys -t %5 /exit Enter"])
         self.assertIn("retrying every", r.stderr)
@@ -324,6 +326,91 @@ class RequireIdle(unittest.TestCase):
         self.assertEqual(r.returncode, 1)
         self.assertIn("still busy after 1 s", r.stderr)
         self.assertEqual(keys, [])
+
+    def test_a_wait_written_with_a_leading_zero_is_read_as_decimal(self):
+        # "08" is not octal: the loop used to be skipped and the restart died
+        # "still busy" without waiting.
+        r, keys = self.run_waiting(["w-sid\tbusy\tp1\tp1", "w-sid\tidle\tp2\tp2"], wait="08")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("value too great", r.stderr)
+        self.assertEqual(keys, ["send-keys -t %5 /exit Enter"])
+        (self.tmp / "calls").unlink()
+        (self.tmp / "cmd").write_text("claude\n")
+        (self.tmp / "reads").unlink()
+        r, keys = self.run_waiting(["w-sid\tbusy\tp1\tp1"], wait="09")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("still busy after 9 s", r.stderr)
+        self.assertNotIn("value too great", r.stderr)
+
+    def test_a_retry_interval_that_is_not_a_number_stops_with_an_error_line(self):
+        for bad in ("abc", "1x", "-2", "1.2.3"):
+            (self.tmp / "calls").unlink(missing_ok=True)
+            r, keys = self.run_retire("w-sid\tbusy\tp1\tp1", "--wait-idle", "5", extra_env={"BOSS_RETRY_EVERY": bad})
+            self.assertEqual(r.returncode, 1, bad)
+            self.assertIn("ERROR: BOSS_RETRY_EVERY", r.stderr, bad)
+            self.assertEqual(keys, [], bad)
+
+    def test_a_retry_interval_below_one_second_is_raised_to_one(self):
+        # 0 used to busy-loop a python status read for the whole wait.
+        for tiny in ("0", "0.01"):
+            (self.tmp / "reads").unlink(missing_ok=True)
+            (self.tmp / "calls").unlink(missing_ok=True)
+            r, keys = self.run_waiting(["w-sid\tbusy\tp1\tp1"], extra_env={"BOSS_RETRY_EVERY": tiny})
+            self.assertEqual(r.returncode, 1, tiny)
+            self.assertIn("retrying every 1 s", r.stderr, tiny)
+            self.assertLessEqual(int((self.tmp / "reads").read_text()), 4, tiny)    # 1 + 2 s / 1 s
+
+    def test_a_wait_that_is_not_a_whole_number_is_refused_before_anything_is_typed(self):
+        for bad in ("abc", "1.5", "-1", "5s"):
+            (self.tmp / "calls").unlink(missing_ok=True)
+            r, keys = self.run_retire("w-sid\tidle\tp1\tp1", "--wait-idle", bad)
+            self.assertEqual(r.returncode, 1, bad)
+            self.assertIn("--wait-idle takes a number of seconds", r.stderr, bad)
+            self.assertEqual(keys, [], bad)
+
+    def test_wait_idle_takes_force_as_its_value_and_so_is_refused(self):
+        # `--wait-idle --force` must not read as a wait of --force with the
+        # force switch on: the number check refuses it and nothing is typed.
+        r, keys = self.run_retire("w-sid\tbusy\tp1\tp1", "--wait-idle", "--force")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("--wait-idle takes a number of seconds", r.stderr)
+        self.assertEqual(keys, [])
+        r, keys = self.run_retire("w-sid\tbusy\tp1\tp1", "--force", "--wait-idle", "1",
+                                  extra_env={"BOSS_RETRY_EVERY": "1"})
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("still busy after 1 s", r.stderr)          # --force does not relax --require-idle
+        self.assertEqual(keys, [])
+
+    def test_a_pin_cannot_hold_across_a_wait_and_the_refusal_says_so(self):
+        r, keys = self.run_waiting(["w-sid\tbusy\tp1\tp1", "w-sid\tidle\tp2\tp2"], "--expect-last", "p1")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("during the wait", r.stderr)
+        self.assertEqual(keys, [])
+
+    def test_shell_with_the_turn_over_is_restartable_and_the_stop_is_said_first(self):
+        """The turn ended (the transcript's last record is turn_duration) and a
+        background shell is left: the status reads `shell` for as long as it runs.
+        /exit opens the background-work dialog; its list is printed, then confirmed."""
+        r, keys = self.run_retire("w-sid\tshell\tp1\tp1\t1", exits=False, dialog=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(keys, ["send-keys -t %5 /exit Enter", "send-keys -t %5 Enter"])
+        self.assertIn("turn is over", r.stderr)
+        self.assertIn("will be stopped", r.stderr)
+        self.assertIn("curl -s https://example.org/slow", r.stderr)
+
+    def test_shell_with_a_turn_in_flight_or_unknown_stays_refused(self):
+        for row in ("w-sid\tshell\tp1\tp1\t0", "w-sid\tshell\tp1\tp1\t-", "w-sid\tshell\tp1\tp1"):
+            (self.tmp / "calls").unlink(missing_ok=True)
+            r, keys = self.run_retire(row, exits=False, dialog=True)
+            self.assertEqual(r.returncode, 1, row)
+            self.assertIn("not idle", r.stderr, row)
+            self.assertEqual(keys, [], row)
+
+    def test_the_wait_ends_when_a_shell_is_left_after_the_turn(self):
+        r, keys = self.run_waiting(["w-sid\tshell\tp1\tp1\t0", "w-sid\tshell\tp1\tp1\t1"], exits=False, dialog=True,
+                                   extra_env={"BOSS_RETRY_EVERY": "1"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(keys, ["send-keys -t %5 /exit Enter", "send-keys -t %5 Enter"])
 
     def test_wait_idle_needs_require_idle(self):
         r, keys = self.run_retire("x", "--wait-idle", "5", require_idle=False)
@@ -638,6 +725,26 @@ class ListAndFields(unittest.TestCase):
         self.assertEqual(r.returncode, 1)
         r = self.call("stamp", "%6", script="boss-panes.py")
         self.assertEqual((r.returncode, "Traceback" in r.stderr), (2, False))
+
+    def test_a_worker_that_runs_the_script_is_not_stamped_a_boss_but_a_boss_is(self):
+        # self_register used to stamp the calling pane on every invocation, so a
+        # worker that ran the script became a boss pane.
+        self.session("s-lucas", "%1", "Lucas", 500)
+        stamp_self = "set-option -p -t %1 @boss_pane %1"
+        r = self.call("list")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn(stamp_self, (self.tmp / "calls").read_text())
+        (self.tmp / "calls").unlink()
+        boss_store.register("s-lucas", cfg=self.tmp)
+        r = self.call("list")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn(stamp_self, (self.tmp / "calls").read_text())
+
+    def test_a_pane_with_no_session_is_not_stamped_either(self):
+        stamp_self = "set-option -p -t %1 @boss_pane %1"
+        r = self.call("list")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn(stamp_self, (self.tmp / "calls").read_text())
 
     def test_claim_stamps_through_the_fleet(self):
         self.session("s-x", "%6", "Xavi", 1000)

@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **`restart --require-idle` follow-ups (ticket 22).** `--wait-idle 08` is decimal, not octal (it used
+  to skip the wait and refuse); `BOSS_RETRY_EVERY` must be a number (an `ERROR:` line, nothing typed)
+  and is floored at 1 s; `--wait-idle` with `--expect-last` now refuses with "ran a turn during the
+  wait" and SKILL.md says to leave the pin off. A worker whose turn is over and that left a background
+  shell running (status `shell`, last turn record `turn_duration`) is restartable: the restart says it
+  will stop the shell, prints each job it stops, and confirms the exit dialog. `shell` with the turn
+  still running stays refused and is retried. `self_register` stamps the calling pane only when the
+  session in it is a boss (`boss-panes.py stamp-self`), so a worker that runs the script is no longer
+  marked as a boss pane. `boss-panes.py --state` has a fifth field, `1`/`0` for the turn being over.
+
 - **The watchdog reads a concierge's permission dialog on a narrow pane.** Measured on real
   renders at 74, 31 and 25 columns (`skills/boss/fixtures/watch/`): an Edit dialog at 25
   columns went unseen (header and `Tab to amend` both wrapped), and a concierge question

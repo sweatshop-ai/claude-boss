@@ -70,6 +70,18 @@ fi
 if [[ -n "$WAIT_IDLE" && ! "$WAIT_IDLE" =~ ^[0-9]+$ ]]; then
   printf '%s\n' "--wait-idle takes a number of seconds" >&2; exit 1
 fi
+# "08" is a decimal number of seconds, not an octal one the arithmetic rejects.
+if [[ -n "$WAIT_IDLE" ]]; then WAIT_IDLE=$((10#$WAIT_IDLE)); fi
+# How often a waiting restart reads the status. A word sleep cannot read stops
+# the script with no ERROR line, and below one second the wait is a tight loop
+# of python status reads, so it is floored at 1 s.
+RETRY_EVERY="${BOSS_RETRY_EVERY:-20}"
+if [[ -n "$WAIT_IDLE" ]]; then
+  if [[ ! "$RETRY_EVERY" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+    printf 'ERROR: BOSS_RETRY_EVERY takes a number of seconds, got "%s"\n' "$RETRY_EVERY" >&2; exit 1
+  fi
+  RETRY_EVERY=$(awk -v e="$RETRY_EVERY" 'BEGIN { print (e < 1) ? 1 : e }')
+fi
 set -- ${_args[@]+"${_args[@]}"}
 if [[ -n "$ROLE" && "${1:-}" != spawn ]]; then
   printf '%s\n' "--concierge only applies to spawn: a worker must not get AskUserQuestion" >&2; exit 1
@@ -172,10 +184,12 @@ assert_not_busy() {
 
 # Mark this boss's own pane as owned-by-itself, so a PEER boss's resolve_pane
 # refuses it too — otherwise the guard would protect workers but not bosses.
-# Runs on every invocation, so a boss claims itself by doing anything at all.
+# Runs on every invocation, so a boss claims itself by doing anything at all;
+# a pane whose session is not a boss (a worker that ran this script) is left
+# alone: stamp-self checks the session's boss marker.
 self_register() {
   [[ -n "$BOSS_PANE" ]] || return 0
-  python3 "$PANES_PY" stamp "$BOSS_PANE" "$BOSS_PANE" 2>/dev/null || true
+  python3 "$PANES_PY" stamp-self "$BOSS_PANE" 2>/dev/null || true
 }
 
 claim_pane() {
@@ -314,10 +328,18 @@ stop_leftover_background() {
   screen=$(tmux capture-pane -t "$pane" -p)
   grep -q 'Background work is running' <<<"$screen" || return 1
   grep -q '❯ 1\. Exit and stop tasks' <<<"$screen" || return 1
-  printf 'stopping background work %s left running:\n' "$pane" >&2
+  printf 'background work %s left running will be stopped:\n' "$pane" >&2
   awk '/will stop when you exit/{f=1;next} /❯/{f=0} f&&NF{print "  " $0}' <<<"$screen" >&2
   tmux send-keys -t "$pane" Enter
   wait_for_cmd "$pane" "$SHELL_CMDS" "${BOSS_EXIT_WAIT:-15}" || return 2
+}
+
+# A status that still bars the restart. `busy` and `waiting` always do. `shell`
+# (a background shell running) does until the transcript shows the turn over:
+# only then is it a worker that finished and left a shell behind.
+still_busy() {
+  local st=$1 over=$2
+  [[ "$st" =~ ^(busy|waiting)$ || "$st" == shell && "$over" != 1 ]]
 }
 
 # --require-idle: stop the session only if it is idle at the last possible
@@ -329,24 +351,28 @@ stop_leftover_background() {
 # Escapes abort ANY busy turn, so this path sends none before /exit. What is
 # left is the gap between the read below and the keystroke.
 retire_require_idle() {
-  local pane=$1 row sid st pin past
+  local pane=$1 row sid st pin past over
   row=$(python3 "$PANES_PY" --state "$pane" 2>/dev/null) || true
-  IFS=$'\t' read -r sid st pin past <<<"$row"
+  IFS=$'\t' read -r sid st pin past over <<<"$row"
   # --wait-idle: a busy worker is read again on a timer instead of being
   # refused, and the boss is not left waiting on an idle notice that may never
   # come (a sampled gap: 92 minutes). Only the status read repeats; nothing is
   # typed until a read says idle, and the session and pin checks below still
   # run on that last read, so a busy worker is never typed at.
-  if [[ -n "$WAIT_IDLE" && "$st" =~ ^(busy|waiting|shell)$ ]]; then
-    local every=${BOSS_RETRY_EVERY:-20} t0=$SECONDS
+  if [[ -n "$WAIT_IDLE" ]] && still_busy "$st" "$over"; then
+    local t0=$SECONDS first=$pin
     printf '%s is %s: retrying every %s s for up to %s s, nothing is typed meanwhile\n' \
-      "$pane" "$st" "$every" "$WAIT_IDLE" >&2
-    while [[ "$st" =~ ^(busy|waiting|shell)$ ]] && (( SECONDS - t0 < WAIT_IDLE )); do
-      sleep "$every"
+      "$pane" "$st" "$RETRY_EVERY" "$WAIT_IDLE" >&2
+    while still_busy "$st" "$over" && (( SECONDS - t0 < WAIT_IDLE )); do
+      sleep "$RETRY_EVERY"
       row=$(python3 "$PANES_PY" --state "$pane" 2>/dev/null) || true
-      IFS=$'\t' read -r sid st pin past <<<"$row"
+      IFS=$'\t' read -r sid st pin past over <<<"$row"
     done
-    [[ "$st" =~ ^(busy|waiting|shell)$ ]] && die "$pane is still $st after $WAIT_IDLE s: not retiring (--require-idle)"
+    still_busy "$st" "$over" && die "$pane is still $st after $WAIT_IDLE s: not retiring (--require-idle)"
+    # A turn that ran meanwhile wrote records, so a pin taken before the wait
+    # cannot match. Say that, not "new input since the check".
+    [[ -z "$EXPECT_LAST" || "$pin" == "$EXPECT_LAST" || "$pin" == "$first" ]] ||
+      die "$pane ran a turn during the wait (last record ${pin:--}, expected $EXPECT_LAST): --expect-last cannot hold across --wait-idle; not retiring"
   fi
   [[ -z "$EXPECT_SESSION" || "$sid" == "$EXPECT_SESSION" ]] ||
     die "$pane runs session ${sid:--}, not $EXPECT_SESSION: not retiring (--require-idle)"
@@ -354,21 +380,29 @@ retire_require_idle() {
     die "$pane: no pin to compare (expected ${EXPECT_LAST}, found ${pin:--}): not retiring"
   [[ -z "$EXPECT_LAST" || "$pin" == "$EXPECT_LAST" ]] ||
     die "$pane has new input since the check (last record ${pin:--}, expected $EXPECT_LAST): not retiring"
-  # `shell` is no idle: it is read mid-turn too, with a background shell running
-  # (measured 2.1.311, a turn waiting on a Monitor), so /exit would hit a busy worker.
-  [[ "$st" == "idle" ]] ||
+  # `shell` is idle only when the transcript shows the turn over (the
+  # status alone does not say); then /exit opens the dialog that lists the
+  # background work and stop_leftover_background prints and confirms it.
+  [[ "$st" == "idle" || "$st" == "shell" && "$over" == 1 ]] ||
     die "$pane status is '${st:-unknown}', not idle: not retiring (--require-idle)"
+  if [[ "$st" == "shell" ]]; then
+    printf '%s: its turn is over and a background shell is still running; the restart will stop it (the list follows)\n' \
+      "$pane" >&2
+  fi
   tmux send-keys -t "$pane" '/exit' Enter
   wait_for_cmd "$pane" "$SHELL_CMDS" "${BOSS_EXIT_WAIT:-15}" && return 0
-  if tmux capture-pane -t "$pane" -p | grep -q 'Background work is running'; then
+  # The screen goes into a variable first: with `| grep -q` under pipefail, grep
+  # leaving at its first match can make the writer fail on a loaded machine.
+  local dialog_screen; dialog_screen=$(tmux capture-pane -t "$pane" -p)
+  if grep -q 'Background work is running' <<<"$dialog_screen"; then
     # Same session on the same input as before /exit (the 4th field leaves out
     # the records /exit writes itself): no turn started, so the dialog lists
     # leftovers. Anything else is a turn in the gap. The status cannot be
     # asked to read idle here: with this dialog up the session reports
     # `waiting` (measured 2026-11-04, Claude Code 2.1.311), which refused every
     # idle worker that had background work left.
-    local sid2 st2 pin2 past2 rc=1
-    IFS=$'\t' read -r sid2 st2 pin2 past2 <<<"$(python3 "$PANES_PY" --state "$pane" 2>/dev/null)"
+    local sid2 st2 pin2 past2 over2 rc=1
+    IFS=$'\t' read -r sid2 st2 pin2 past2 over2 <<<"$(python3 "$PANES_PY" --state "$pane" 2>/dev/null)"
     if [[ "$sid2" == "$sid" && "$st2" =~ ^(idle|waiting|shell)$ && "$past2" == "$past" ]]; then
       rc=0; stop_leftover_background "$pane" || rc=$?
     fi

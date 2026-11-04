@@ -128,6 +128,34 @@ class Pin(unittest.TestCase):
         self.assertIsNone(transcript.pin([{"type": "system", "uuid": "s1"}]))
 
 
+class TurnOver(unittest.TestCase):
+    """`shell` is read after a turn ends and while a background shell runs; the
+    turn_duration record Claude Code writes after the stop hooks tells them apart."""
+    END = [{"type": "assistant", "uuid": "a1", "message": {"stop_reason": "end_turn"}},
+           {"type": "system", "subtype": "stop_hook_summary"},
+           {"type": "system", "subtype": "turn_duration"}]
+
+    def test_over_when_turn_duration_is_the_last_word(self):
+        self.assertTrue(transcript.turn_over(self.END))
+        self.assertTrue(transcript.turn_over(self.END + [{"type": "ai-title"}, {"type": "permission-mode"},
+                                                         {"type": "queue-operation", "operation": "dequeue"}]))
+
+    def test_not_over_while_the_turn_writes_records(self):
+        for rec in ({"type": "user", "uuid": "u2", "message": {"content": "next"}},
+                    {"type": "assistant", "uuid": "a2", "message": {"stop_reason": "tool_use"}},
+                    {"type": "attachment", "uuid": "q1", "attachment": {"type": "queued_command"}},
+                    {"type": "queue-operation", "operation": "enqueue", "timestamp": "t"}):
+            self.assertFalse(transcript.turn_over(self.END + [rec]), rec["type"])
+
+    def test_exit_records_do_not_reopen_the_turn(self):
+        exit_rec = {"type": "user", "uuid": "c1", "message": {"content": "<command-name>/exit</command-name>"}}
+        self.assertTrue(transcript.turn_over(self.END + [exit_rec]))
+
+    def test_not_over_without_the_record(self):
+        self.assertFalse(transcript.turn_over([]))
+        self.assertFalse(transcript.turn_over([{"type": "assistant", "uuid": "a1"}]))
+
+
 class FromDisk(Fixture):
     def test_pin_and_usage_read_through_tail(self):
         self.write([
