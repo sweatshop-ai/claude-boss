@@ -13,7 +13,9 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready
+**Claimed by:** Osman 2026-11-04 22:49
+
+**Status:** in-progress
 
 - [ ] Items 1 to 4, each with a test that is red before and green after
 - [ ] Item 5: a reproduction of a worker with a finished turn and a background shell, the signal chosen, and a restart that goes through on it; a turn in flight with a shell stays refused
