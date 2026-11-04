@@ -4,7 +4,9 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready
+**Claimed by:** Ruben 2026-11-04 20:52
+
+**Status:** in-progress
 
 - [ ] The cause is named, with evidence
 - [ ] A gap between installed and released version is reported where the owner sees it
