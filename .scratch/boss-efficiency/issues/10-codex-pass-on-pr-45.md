@@ -4,7 +4,9 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready
+**Claimed by:** Ruben 2026-11-04 20:49
+
+**Status:** in-progress
 
 - [ ] The output is in a file and the verdict on the PR
 - [ ] Every finding answered: fixed, ticket, or rejected with the reason
