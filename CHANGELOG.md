@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- **The watchdog reads a concierge's permission dialog on a narrow pane.** Measured on real
+  renders at 74, 31 and 25 columns (`skills/boss/fixtures/watch/`): an Edit dialog at 25
+  columns went unseen (header and `Tab to amend` both wrapped), and a concierge question
+  worded like a dialog ("Do you want to proceed ...?" with a "Yes, and always ..." option)
+  alerted at every width, because the 15-line window reaches it from 8 lines up. Now wraps are
+  joined and blank rows dropped before matching; the header and option wording is read in the
+  last 7 lines, the footer `Tab to amend` and the trust prompt in the last 15, and the real
+  option `Yes, and switch to ...` is matched.
+
 ## 0.21.3 — 2026-11-04
 
 - **`restart --require-idle` no longer refuses an idle worker.** With the "Background

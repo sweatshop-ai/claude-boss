@@ -94,10 +94,19 @@ while IFS=$'\t' read -r id idx cmd path role name; do
         prev_hash=$(awk -F'\t' -v p="$id" '$1==p{print $2}' "$HASHES")
         NEW_HASHES+="$id"$'\t'"$hash"$'\n'
         # A live dialog sits at the bottom of the screen. A concierge relays
-        # questions that may themselves read "Do you want to proceed ...?", so
-        # for it only the last lines count, not the scrollback.
-        dialog_cap="$cap"
-        [ "$role" = "concierge" ] && dialog_cap=$(tail -n 15 <<<"$cap")
+        # questions that may themselves read "Do you want to proceed ...?" or
+        # offer "Yes, and always ...", so for it only the last lines count, not
+        # the scrollback: 7 non-blank lines for the header and option wording
+        # (a worst-case question starts matching at 8), 15 for the permission
+        # footer and trust prompt, which no question carries. Wraps on a narrow
+        # pane split a phrase over two lines, so each window is joined into one.
+        dialog_cap=$(tr -s '[:space:]' ' ' <<<"$cap")
+        dialog_foot="$dialog_cap"
+        if [ "$role" = "concierge" ]; then
+            nb=$(grep -v '^[[:space:]]*$' <<<"$cap")
+            dialog_cap=$(tail -n 7 <<<"$nb" | tr -s '[:space:]' ' ')
+            dialog_foot=$(tail -n 15 <<<"$nb" | tr -s '[:space:]' ' ')
+        fi
 
         # Case-sensitive on purpose: the TUI banner says "API Error"; a
         # transcribed conversation about "an API error" (lowercase) must not
@@ -108,14 +117,15 @@ while IFS=$'\t' read -r id idx cmd path role name; do
             cond="api-retrying"
         elif grep -qE 'API Error|overloaded_error|rate_limit_error|Request timed out|Connection (error|failed|refused)|fetch failed|ECONNREFUSED|OAuth token has expired' <<<"$cap"; then
             cond="api-error"
-        elif grep -qE 'Do you want to (proceed|allow|make this edit|create|run)|Yes, I trust this folder|Tab to amend|Yes, and (always|don.t ask)' <<<"$dialog_cap"; then
+        elif grep -qE 'Do you want to (proceed|allow|make this edit|create|run)|Yes, and (always|don.t ask|switch to)' <<<"$dialog_cap" \
+             || grep -qE 'Yes, I trust this folder|Tab to amend' <<<"$dialog_foot"; then
             cond="permission-prompt"
         elif [ "$role" != "concierge" ] && grep -qE '❯ 1\. Yes' <<<"$cap"; then
             # A concierge's whole job is an AskUserQuestion dialog whose first
             # option can start with Yes; it is the owner's question, not a
             # stuck session. Its permission dialog still matches above: the
-            # header, the trust prompt, the permission footer 'Tab to amend', or the 'Yes, and always ...' option
-            # (on a very narrow pane the header scrolls out of the last 15 lines).
+            # header, the trust prompt, the permission footer 'Tab to amend'
+            # or a 'Yes, and always|switch to ...' option.
             cond="permission-prompt"
         elif grep -qE 'esc to interrupt' <<<"$cap" && [ -n "$prev_hash" ] && [ "$hash" = "$prev_hash" ]; then
             # Mid-turn the TUI spinner redraws constantly; identical content
