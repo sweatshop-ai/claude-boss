@@ -16,6 +16,14 @@ socket is tied to a track by the explicit dispatches it sent (or, for a message
 whose socket is unknown, by the dispatch wording), and the tie is kept in state
 so a boss that changes its name or socket is picked up from its new dispatches.
 
+A worker the boss never dispatched by a recognised message is found by name:
+a session carries the name it started with ("Your name in this session is X"),
+and the boss either sent to that name or heard from it (`from-name` is the name
+the session started with, not the one the boss claims it under). The session
+counts for the track in the boss's window, where it was alive. A track whose
+goal was last marked met ends at that mark or at its last "done" commit,
+whichever is later: the boss session left open after that is not the track.
+
 Reports and state are written outside the plugin, under the config dir:
 transcripts name clients, and the plugin repo is public. `write_outputs` refuses
 a directory inside the plugin.
@@ -64,6 +72,8 @@ MAX_UNCOVERED = 0.40        # not a trigger: shown beside the numbers of a track
 COVER_NOTE = 0.20           # a track with this share of its worker messages outside tracked activity is marked
 HISTORY_WEEKS = 8           # weeks kept in state for the trailing mean
 PARK_S = 4 * 3600           # a background task older than this is parked, not working
+NAME_SLACK_S = 120          # a message to or from a name reaches a session starting or ending this close to it
+CUT_GRACE_S = 60            # a finished track keeps this much after its last mark, for the reply to the command
 COST_WEIGHT = dict(i=1.0, cw=1.25, cr=0.1, o=5.0)           # cost units per token kind
 PHASES = ("build", "fix", "sub_rev", "sub_oth", "boss")
 STATES = ("work", "fix", "test", "review", "ci", "bg_other", "ask", "bossact", "parked", "nobody")
@@ -71,6 +81,52 @@ STATES = ("work", "fix", "test", "review", "ci", "bg_other", "ask", "bossact", "
 FROM = re.compile(r'<cross-session-message from="([^"]+)"')
 DISP = re.compile(r"Boss dispatch from ([^,\n]+), track [`'\"]?([A-Za-z0-9._-]+)")
 NOTIF = re.compile(r"<tool-use-id>(toolu_\w+)</tool-use-id>")
+FROM_NAME = re.compile(r'<cross-session-message[^>]*? from-name="([^"]*)"')
+SESSION_NAME = re.compile(r"Your name in this session is ([A-Za-z0-9_][A-Za-z0-9._-]*?)\.(?:\s|$)")
+GOAL_STATUS = re.compile(r"boss-goal\s+status\s+([a-z0-9._-]+)\s+(open|paused|met)\b")
+_HEREDOC = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
+
+
+def _command_starts(cmd):
+    """Offsets where a command word begins, outside quotes, comments and heredoc bodies."""
+    starts, i, n, fresh, quote = set(), 0, len(cmd), True, None
+    pending = []                                  # heredoc delimiters waiting for the next line
+    while i < n:
+        ch = cmd[i]
+        if quote:
+            if ch == "\\" and quote == '"': i += 1
+            elif ch == quote: quote = None
+        elif ch in "'\"": quote, fresh = ch, False
+        elif ch == "\\": i += 1; fresh = False
+        elif ch == "#" and (i == 0 or cmd[i - 1] in " \t\n;&|("):
+            while i < n and cmd[i] != "\n": i += 1
+            continue
+        elif ch == "\n":
+            fresh = True
+            for d in pending:
+                m = re.compile(r"^[ \t]*" + re.escape(d) + r"[ \t]*$", re.M).search(cmd, i + 1)
+                i = m.end() if m else n
+            pending = []
+        elif ch in ";&|(": fresh = True
+        elif ch in " \t": pass
+        else:
+            if fresh: starts.add(i)
+            fresh = False
+            h = _HEREDOC.match(cmd, i) if ch == "<" else None
+            if h: pending.append(h.group(2)); i = h.end(); continue
+        i += 1
+    return starts
+
+
+def _runs(cmd, m):
+    """True when the match is a command that runs, not text in a quote, comment, heredoc or argument."""
+    j = m.start()
+    while j > 0 and not cmd[j - 1].isspace() and cmd[j - 1] not in ";&|(": j -= 1      # a path before the name
+    return j in _command_starts(cmd)
+
+
+GIT_COMMIT = re.compile(r"\bgit\s+(?:-C\s+\S+\s+)?commit\b")
+DONE_WORD = re.compile(r"\bdone\b", re.I)
 BOSSREG = re.compile(r"boss-marker\s+register(?:\s+([a-z0-9._-]+))?")
 REV_AGENT = re.compile(r"review|audit|second opinion|verif|adversar|lens|standards|spec check|critic|finding", re.I)
 
@@ -152,7 +208,8 @@ def scan_session(path, tracks=()):
     """
     path = str(path)
     recs, tools, notif, msgs = [], {}, {}, {}
-    out = dict(sid=os.path.basename(path)[:-6], boss_regs=[], asks=[], xmsgs=[], dispatches=[], subs=[])
+    out = dict(sid=os.path.basename(path)[:-6], boss_regs=[], asks=[], xmsgs=[], dispatches=[], subs=[],
+               name=None, sends=[], heard=[], done_commits=[], goal_status=[])
     tracks = set(tracks)
     alt = "|".join(re.escape(t) for t in sorted(tracks, key=len, reverse=True))
     disp3 = re.compile(r"pm/(" + alt + r")\.(?:dispatch|md|goal)") if alt else None
@@ -160,6 +217,9 @@ def scan_session(path, tracks=()):
 
     def take(d, line):
         t = d.get("timestamp")
+        if out["name"] is None and d.get("type") == "attachment" and "Your name in this session" in line:
+            m = SESSION_NAME.search(json.dumps(d.get("attachment")))
+            if m: out["name"] = m.group(1)
         if "<task-notification>" in line and t:
             for m in NOTIF.findall(line): notif.setdefault(m, ts(t))
         if d.get("type") not in ("user", "assistant") or not t or d.get("isSidechain"): return
@@ -175,11 +235,17 @@ def scan_session(path, tracks=()):
                                           bg=bool(inp.get("run_in_background")) or b["name"] == "Monitor",
                                           cmd=(inp.get("command") or "")[:260])
                     if b["name"] == "AskUserQuestion": out["asks"].append(T)
+                    if b["name"] == "SendMessage" and isinstance(inp.get("to"), str): out["sends"].append((T, re.sub(r"\s*\[[^\]]*\]$", "", inp["to"])))
                     if b["name"] == "Bash":
                         c = inp.get("command", "") or ""
                         r = BOSSREG.search(c)
-                        if r and not c.lstrip().startswith(("grep", "rg", "cat", "sed")):
+                        plain = not c.lstrip().startswith(("grep", "rg", "cat", "sed"))
+                        if r and plain:
                             out["boss_regs"].append((T, r.group(1)))
+                        for g in GOAL_STATUS.finditer(c):
+                            if _runs(c, g): out["goal_status"].append((T, g.group(1), g.group(2)))
+                        if DONE_WORD.search(c) and any(_runs(c, gc) for gc in GIT_COMMIT.finditer(c)):
+                            out["done_commits"].append(T)
             recs.append((T, "a"))
             return
         is_result = False
@@ -203,6 +269,8 @@ def scan_session(path, tracks=()):
                 trk = (g.group(2).rstrip(".`") if g else g3.group(1) if g3 else None)
                 if trk and g and trk not in tracks: trk, g = None, None
                 out["xmsgs"].append((T, f.group(1), trk, bool(g)))
+                n = FROM_NAME.search(tx[:400])
+                if n: out["heard"].append((T, n.group(1)))
         recs.append((T, "r" if is_result else "u"))
 
     with open(path, errors="replace") as fh:
@@ -312,6 +380,17 @@ def resolve_sockets(sessions, saved=None):
     return socks
 
 
+def _subtract(a, b, taken):
+    """[a, b) minus the intervals in `taken`, as a list of intervals."""
+    out, x = [], a
+    for ta, tb in sorted(taken):
+        if tb <= x or ta >= b: continue
+        if ta > x: out.append((x, ta))
+        x = max(x, tb)
+    if x < b: out.append((x, b))
+    return out
+
+
 class Index:
     """Everything a measure needs, built once per scan."""
 
@@ -320,21 +399,72 @@ class Index:
         self.workers = collections.defaultdict(list)   # track -> [(session, start, end)]
         self.bosses = collections.defaultdict(list)    # track -> [(session, start, end)]
         self.worker_msgs = collections.defaultdict(list)   # track -> [T] messages arriving at its boss
+        self.cut = {}                                   # track -> where a finished track ends
         boss_sids = set()
+        windows = {}
         for s in sessions:
             bw = boss_windows(s, markers.get(s["sid"]))
+            windows[s["sid"]] = bw
             if bw: boss_sids.add(s["sid"])
             for tr, a, b in bw: self.bosses[tr].append((s, a, b))
+        taken = collections.defaultdict(list)          # sid -> intervals already given to a track
         for s in sessions:
             if s["sid"] in boss_sids:
                 for T, sock, _, _ in s["xmsgs"]:
                     if sock in socks: continue                # another boss, not a worker
-                    for tr, a, b in boss_windows(s, markers.get(s["sid"])):
+                    for tr, a, b in windows[s["sid"]]:
                         if a <= T <= b: self.worker_msgs[tr].append(T)
                 continue
             ev = [(T, socks.get(sock) or trk) for T, sock, trk, _ in s["xmsgs"] if socks.get(sock) or trk]
             for i, (T, tr) in enumerate(ev):
-                self.workers[tr].append((s, T, ev[i + 1][0] if i + 1 < len(ev) else session_end(s)))
+                end = ev[i + 1][0] if i + 1 < len(ev) else session_end(s)
+                self.workers[tr].append((s, T, end))
+                taken[s["sid"]].append((T, end))
+        self._attribute_by_name(sessions, boss_sids, windows, taken)
+        self._cut_finished(sessions, boss_sids)
+
+    def _attribute_by_name(self, sessions, boss_sids, windows, taken):
+        """A worker the boss sent to or heard from by name counts in the boss's window.
+
+        The session must have been alive at the message (a name is reused by
+        later sessions). Time already given to a track by a dispatch or a
+        socket stays with that track.
+        """
+        by_name = collections.defaultdict(list)
+        for s in sessions:
+            if s["sid"] not in boss_sids and s.get("name"): by_name[s["name"]].append(s)
+        for b in sessions:
+            if b["sid"] not in boss_sids: continue
+            for T, name in b.get("sends", []) + b.get("heard", []):
+                for tr, a, z in windows[b["sid"]]:
+                    if not a <= T <= z: continue
+                    near = [s for s in by_name.get(name, ())
+                            if s["start"] - NAME_SLACK_S <= T <= session_end(s) + NAME_SLACK_S]
+                    # a reused name inside the slack: only the session alive at T, else the nearest
+                    near.sort(key=lambda s: (max(s["start"] - T, T - session_end(s), 0), -s["start"]))
+                    for s in near[:1]:
+                        lo, hi = max(a, s["start"]), min(z, session_end(s))
+                        if hi <= lo: continue
+                        for x, y in _subtract(lo, hi, taken[s["sid"]]):
+                            self.workers[tr].append((s, x, y))
+                            taken[s["sid"]].append((x, y))
+
+    def _cut_finished(self, sessions, boss_sids):
+        """A track whose goal was last marked met ends at that mark or its last done commit."""
+        last = {}
+        for s in sessions:
+            if s["sid"] not in boss_sids: continue
+            for T, tr, value in s.get("goal_status", []):
+                if tr not in last or T >= last[tr][0]: last[tr] = (T, value)
+        for tr, (T, value) in last.items():
+            if value != "met": continue
+            done = [c for src in (self.workers.get(tr, []), self.bosses.get(tr, []))
+                    for s, a, b in src for c in s.get("done_commits", []) if a <= c < b]
+            self.cut[tr] = max([T] + done) + CUT_GRACE_S
+
+    def clip_end(self, track, end):
+        """A window's end, or where the track finished if that is sooner."""
+        return min(end, self.cut.get(track, end))
 
     def tracks(self):
         return sorted(set(self.workers) | set(self.bosses))
@@ -367,6 +497,8 @@ def _boundary(s):
 
 def measure_track(index, track, start, end):
     """One track in one window: seconds by state, tokens by phase, asks, CI waits."""
+    days = (end - start) / 86400          # a rate stays per day of the window, not of the shortened track
+    end = index.clip_end(track, end)
     ev, wh, tok = [], collections.Counter(), collections.Counter()
     spans = []
     ci_waits = 0
@@ -400,7 +532,6 @@ def measure_track(index, track, start, end):
     states = _states(ev)
     wall = (max(y for _, y in spans) - min(x for x, _ in spans)) if spans else 0
     states["nobody"] = max(0, wall - sum(states.values()))
-    days = (end - start) / 86400
     return dict(track=track, wall_s=round(wall), states={k: round(states.get(k, 0)) for k in STATES},
                 worker_s={k: round(v) for k, v in wh.items()},
                 tokens={k: tok.get(k, 0) for k in PHASES}, total_tokens=sum(tok.values()),
@@ -430,8 +561,11 @@ def coverage(index, track, start, end):
     something within COVER_GRACE_S of it. Uncovered ones come from workers this
     routine did not attribute.
     """
+    end = index.clip_end(track, end)
     live = []
     for s, a, b in index.workers.get(track, []):
+        b = min(b, end)
+        if b <= a: continue
         live += [(x - COVER_GRACE_S, y + COVER_GRACE_S) for x, y, c in _clip(s["segs"], a, b) if c != "idle"]
     live.sort()
     merged = []                       # disjoint union, so one bisect finds the cover

@@ -41,20 +41,34 @@ class Cfg:
     def goal(self, track):
         (self.dir / "pm" / (track + ".goal.md")).write_text("goal\n")
 
-    def boss(self, track, sock_msgs, at, asks=0, cost=1000):
+    def boss(self, track, sock_msgs, at, asks=0, cost=1000, **kw):
         """A boss session on `track`. sock_msgs: [(T, sock, text)] it receives."""
         sid = "boss%d" % self.n; self.n += 1
         (self.dir / "pm" / ".boss-sessions" / sid).write_text(track + "\n")
-        self.session(sid, at, sock_msgs, cost, asks=asks)
+        self.session(sid, at, sock_msgs, cost, asks=asks, **kw)
         return sid
 
-    def worker(self, at, sock_msgs, cost=1000, bash=None):
+    def worker(self, at, sock_msgs, cost=1000, bash=None, **kw):
         sid = "wrk%d" % self.n; self.n += 1
-        self.session(sid, at, sock_msgs, cost, bash=bash)
+        self.session(sid, at, sock_msgs, cost, bash=bash, **kw)
         return sid
 
-    def session(self, sid, at, sock_msgs, cost, asks=0, bash=None):
+    def session(self, sid, at, sock_msgs, cost, asks=0, bash=None, name=None, until=None, sends=(), cmds=()):
+        """`name`: the start name the hook records. `until`: a last record at that time.
+        `sends`: [(T, to)] SendMessage calls. `cmds`: [(T, command)] Bash calls."""
         recs = []
+        if name:
+            recs.append(dict(type="attachment", timestamp=iso(at), attachment=dict(
+                type="hook_additional_context", content=["Your name in this session is %s. Other Claude Code "
+                                                         "sessions on this machine see you as it." % name])))
+        for i, (T, to) in enumerate(sends):
+            recs.append(dict(type="assistant", timestamp=iso(T), message=dict(id="s%d%s" % (i, sid), usage={}, content=[
+                dict(type="tool_use", id="send%d%s" % (i, sid), name="SendMessage", input=dict(to=to, message="go"))])))
+        for i, (T, cmd) in enumerate(cmds):
+            recs.append(dict(type="assistant", timestamp=iso(T), message=dict(id="c%d%s" % (i, sid), usage={}, content=[
+                dict(type="tool_use", id="cmd%d%s" % (i, sid), name="Bash", input=dict(command=cmd))])))
+        if until:
+            recs.append(dict(type="assistant", timestamp=iso(until), message=dict(id="end" + sid, usage={}, content=[])))
         for T, sock, text in sock_msgs:
             recs.append(dict(type="user", timestamp=iso(T), message=dict(
                 content='<cross-session-message from="%s" from-name="x">\n%s\n</cross-session-message>' % (sock, text))))
@@ -185,6 +199,191 @@ class Attribution(unittest.TestCase):
         seed(c, at=NOW - 20 * DAY)
         _, wk, _ = week(c.dir)
         self.assertEqual(wk["tracks"], {})
+
+
+class AttributionByName(unittest.TestCase):
+    def test_a_worker_the_boss_wrote_to_by_name_counts_without_a_dispatch(self):
+        c = Cfg()
+        c.goal("alpha-x")
+        c.worker(NOW - DAY, [], cost=7000, name="Mira", until=NOW - DAY + 3600)
+        c.boss("alpha-x", [], NOW - DAY, sends=[(NOW - DAY + 60, "Mira")])
+        idx, wk, _ = week(c.dir)
+        self.assertEqual(wk["tracks"]["alpha-x"]["tokens"]["build"], 7000)
+
+    def test_a_worker_that_wrote_to_the_boss_counts_by_the_name_it_started_with(self):
+        c = Cfg()
+        c.goal("alpha-x")
+        c.worker(NOW - DAY, [], cost=7000, name="Mira", until=NOW - DAY + 3600)
+        c.boss("alpha-x", [(NOW - DAY + 600, "uds:/run/cc-socks/m.sock", "done")], NOW - DAY)
+        path = next(p for p in (c.dir / "projects" / "p").glob("boss*.jsonl"))
+        text = path.read_text().replace('from-name=\\"x\\"', 'from-name=\\"Mira\\"')
+        path.write_text(text)
+        idx, wk, _ = week(c.dir)
+        self.assertEqual(wk["tracks"]["alpha-x"]["tokens"]["build"], 7000)
+        self.assertEqual(wk["coverage"], dict(messages=1, outside=0, share=0.0))
+
+    def test_a_reused_name_matches_only_the_session_alive_at_the_message(self):
+        c = Cfg()
+        c.goal("alpha-x")
+        c.worker(NOW - 3 * DAY, [], cost=900, name="Mira", until=NOW - 3 * DAY + 3600)
+        c.worker(NOW - DAY, [], cost=7000, name="Mira", until=NOW - DAY + 3600)
+        c.boss("alpha-x", [], NOW - DAY, sends=[(NOW - DAY + 60, "Mira")])
+        _, wk, _ = week(c.dir)
+        self.assertEqual(wk["tracks"]["alpha-x"]["tokens"]["build"], 7000)
+
+    def test_a_name_reused_inside_the_slack_counts_only_one_session(self):
+        c = Cfg()
+        c.goal("alpha-x")
+        c.worker(NOW - DAY - 3600, [], cost=900, name="Mira", until=NOW - DAY + 30)
+        c.worker(NOW - DAY + 60, [], cost=7000, name="Mira", until=NOW - DAY + 3600)
+        c.boss("alpha-x", [], NOW - DAY - 3600, sends=[(NOW - DAY + 45, "Mira")], until=NOW - DAY + 3600)
+        idx, _, _ = week(c.dir)
+        self.assertEqual(len({s["sid"] for s, _, _ in idx.workers["alpha-x"]}), 1)
+
+    def test_a_recipient_with_a_session_ref_still_matches_the_name(self):
+        c = Cfg()
+        c.goal("alpha-x")
+        c.worker(NOW - DAY, [], cost=7000, name="Mira", until=NOW - DAY + 3600)
+        c.boss("alpha-x", [], NOW - DAY, sends=[(NOW - DAY + 60, "Mira [ab12]")])
+        _, wk, _ = week(c.dir)
+        self.assertEqual(wk["tracks"]["alpha-x"]["tokens"]["build"], 7000)
+
+    def test_a_session_dispatched_by_socket_is_not_counted_twice(self):
+        c = Cfg()
+        sock = "uds:/run/cc-socks/1.sock"
+        w = "Boss dispatch from A, track `alpha-x`."
+        c.goal("alpha-x")
+        c.worker(NOW - DAY, [(NOW - DAY, sock, w), (NOW - DAY + 120, sock, w)], cost=5000, name="Mira",
+                 until=NOW - DAY + 3600)
+        c.boss("alpha-x", [], NOW - DAY, sends=[(NOW - DAY + 60, "Mira")])
+        _, wk, _ = week(c.dir)
+        self.assertEqual(wk["tracks"]["alpha-x"]["tokens"]["build"], 5000)
+
+    def test_a_name_in_another_tracks_window_goes_to_that_track(self):
+        c = Cfg()
+        c.goal("alpha-x"); c.goal("beta-y")
+        c.worker(NOW - DAY, [], cost=7000, name="Mira", until=NOW - DAY + 7200)
+        c.boss("beta-y", [], NOW - DAY, sends=[(NOW - DAY + 60, "Mira")])
+        _, wk, _ = week(c.dir)
+        self.assertEqual(wk["tracks"]["beta-y"]["tokens"]["build"], 7000)
+        self.assertNotIn("alpha-x", wk["tracks"])
+
+    def test_a_session_without_a_recorded_name_is_not_guessed(self):
+        c = Cfg()
+        c.goal("alpha-x")
+        c.worker(NOW - DAY, [], cost=7000, until=NOW - DAY + 3600)
+        c.boss("alpha-x", [], NOW - DAY, sends=[(NOW - DAY + 60, "Mira")])
+        _, wk, _ = week(c.dir)
+        self.assertEqual(wk["tracks"]["alpha-x"]["tokens"]["build"], 0)
+
+
+class FinishedTrack(unittest.TestCase):
+    def finished(self, status="met", commit=True):
+        c = Cfg()
+        c.goal("alpha-x")
+        c.worker(NOW - 2 * DAY, [], cost=7000, name="Mira", until=NOW - 2 * DAY + 3600,
+                 cmds=[(NOW - 2 * DAY + 1800, "git commit -m 'Ticket 3 done'")] if commit else [])
+        c.boss("alpha-x", [], NOW - 2 * DAY, sends=[(NOW - 2 * DAY + 60, "Mira")], until=NOW - DAY,
+               cmds=[(NOW - 2 * DAY + 7200, "boss-goal status alpha-x %s 'all ticked'" % status)])
+        return week(c.dir)
+
+    def test_the_track_ends_at_the_goal_mark_not_at_the_last_boss_record(self):
+        idx, wk, _ = self.finished()
+        self.assertAlmostEqual(idx.cut["alpha-x"], NOW - 2 * DAY + 7200 + core.CUT_GRACE_S, delta=1)
+        self.assertAlmostEqual(wk["tracks"]["alpha-x"]["wall_s"], 7200 + core.CUT_GRACE_S, delta=1)
+
+    def test_a_done_commit_after_the_mark_moves_the_end_later(self):
+        c = Cfg()
+        c.goal("alpha-x")
+        c.worker(NOW - 2 * DAY, [], name="Mira", until=NOW - 2 * DAY + 20000,
+                 cmds=[(NOW - 2 * DAY + 9000, "git commit -m 'Ticket 9 done'")])
+        c.boss("alpha-x", [], NOW - 2 * DAY, sends=[(NOW - 2 * DAY + 60, "Mira")], until=NOW - DAY,
+               cmds=[(NOW - 2 * DAY + 7200, "boss-goal status alpha-x met 'x'")])
+        idx, _, _ = week(c.dir)
+        self.assertAlmostEqual(idx.cut["alpha-x"], NOW - 2 * DAY + 9000 + core.CUT_GRACE_S, delta=1)
+
+    def test_a_track_not_marked_met_runs_to_the_end_of_its_boss(self):
+        idx, wk, _ = self.finished(status="open")
+        self.assertNotIn("alpha-x", idx.cut)
+        self.assertGreater(wk["tracks"]["alpha-x"]["wall_s"], DAY * 0.9)
+
+    def test_a_reopened_track_is_not_cut(self):
+        c = Cfg()
+        c.goal("alpha-x")
+        c.boss("alpha-x", [], NOW - 2 * DAY, until=NOW - DAY, cmds=[
+            (NOW - 2 * DAY + 100, "boss-goal status alpha-x met 'x'"),
+            (NOW - 2 * DAY + 200, "boss-goal status alpha-x open 'more'")])
+        idx, _, _ = week(c.dir)
+        self.assertNotIn("alpha-x", idx.cut)
+
+    def test_a_grep_for_the_command_is_not_a_mark(self):
+        c = Cfg()
+        c.goal("alpha-x")
+        c.boss("alpha-x", [], NOW - 2 * DAY, until=NOW - DAY,
+               cmds=[(NOW - 2 * DAY + 100, "grep 'boss-goal status alpha-x met' notes.md")])
+        idx, _, _ = week(c.dir)
+        self.assertNotIn("alpha-x", idx.cut)
+
+    def test_a_search_or_quoted_text_is_not_a_mark_or_a_done_commit(self):
+        c = Cfg()
+        c.goal("alpha-x")
+        c.worker(NOW - 2 * DAY, [], cost=7000, name="Mira", until=NOW - 2 * DAY + 3600,
+                 cmds=[(NOW - 2 * DAY + 1800, "echo \"git commit -m 'Ticket 3 done'\"")])
+        c.boss("alpha-x", [], NOW - 2 * DAY, sends=[(NOW - 2 * DAY + 60, "Mira")], until=NOW - DAY,
+               cmds=[(NOW - 2 * DAY + 100, "git grep 'boss-goal status alpha-x met'"),
+                     (NOW - 2 * DAY + 200, "echo 'boss-goal status alpha-x met x'")])
+        idx, _, _ = week(c.dir)
+        self.assertNotIn("alpha-x", idx.cut)
+
+    def test_a_comment_line_is_not_a_mark(self):
+        c = Cfg()
+        c.goal("alpha-x")
+        c.boss("alpha-x", [], NOW - 2 * DAY, until=NOW - DAY,
+               cmds=[(NOW - 2 * DAY + 100, "git status\n# boss-goal status alpha-x met x")])
+        idx, _, _ = week(c.dir)
+        self.assertNotIn("alpha-x", idx.cut)
+
+    def test_an_inline_comment_or_heredoc_body_is_not_a_mark(self):
+        c = Cfg()
+        c.goal("alpha-x")
+        c.boss("alpha-x", [], NOW - 2 * DAY, until=NOW - DAY,
+               cmds=[(NOW - 2 * DAY + 100, "git status # boss-goal status alpha-x met x"),
+                     (NOW - 2 * DAY + 200, "cat <<'EOF'\nboss-goal status alpha-x met x\nEOF")])
+        idx, _, _ = week(c.dir)
+        self.assertNotIn("alpha-x", idx.cut)
+
+    def test_a_mark_after_a_heredoc_in_the_same_command_counts(self):
+        c = Cfg()
+        c.goal("alpha-x")
+        c.boss("alpha-x", [], NOW - 2 * DAY, until=NOW - DAY,
+               cmds=[(NOW - 2 * DAY + 100, "cat <<'EOF'\nnote\nEOF\nboss-goal status alpha-x met x")])
+        idx, _, _ = week(c.dir)
+        self.assertIn("alpha-x", idx.cut)
+
+    def test_a_real_mark_after_a_search_in_the_same_command_still_counts(self):
+        c = Cfg()
+        c.goal("alpha-x")
+        c.boss("alpha-x", [], NOW - 2 * DAY, until=NOW - DAY,
+               cmds=[(NOW - 2 * DAY + 100, "grep 'boss-goal status alpha-x met' n; boss-goal status alpha-x met 'x'")])
+        idx, _, _ = week(c.dir)
+        self.assertIn("alpha-x", idx.cut)
+
+    def test_a_workers_mark_does_not_cut_the_track(self):
+        c = Cfg()
+        c.goal("alpha-x")
+        c.worker(NOW - 2 * DAY, [], cost=7000, name="Mira", until=NOW - 2 * DAY + 3600,
+                 cmds=[(NOW - 2 * DAY + 100, "boss-goal status alpha-x met 'x'")])
+        c.boss("alpha-x", [], NOW - 2 * DAY, sends=[(NOW - 2 * DAY + 60, "Mira")], until=NOW - DAY)
+        idx, _, _ = week(c.dir)
+        self.assertNotIn("alpha-x", idx.cut)
+
+    def test_a_worker_message_after_the_end_is_not_outside_activity(self):
+        c = Cfg()
+        c.goal("alpha-x")
+        c.boss("alpha-x", [(NOW - DAY, "uds:/run/cc-socks/z.sock", "late")], NOW - 2 * DAY, until=NOW - DAY + 1,
+               cmds=[(NOW - 2 * DAY + 100, "boss-goal status alpha-x met 'x'")])
+        _, wk, _ = week(c.dir)
+        self.assertEqual(wk["coverage"]["messages"], 0)
 
 
 class Coverage(unittest.TestCase):
