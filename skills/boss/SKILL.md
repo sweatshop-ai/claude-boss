@@ -859,14 +859,16 @@ Parse `$ARGUMENTS`: empty or `status` → **A** · `dispatch <task> [worker]` �
    subagents, at most 5, each in its own worktree when it edits. Use agent-teams
    teammates instead only when the parts must talk to each other. Their reports
    count against your 150k."* The worker decides; `references/models.md` has the
-   criteria. For review, add: *"Your PR gets Codex rounds by size and risk. Under 100 added lines and
-   not sensitive: one round, another only for a defect of class a or b (a security property broken,
-   data loss, wrong behaviour on a normal path; or wrong behaviour on a realistic unusual path).
-   100 to 500 and not sensitive: up to three. Sensitive: up to three. I decide sensitive (login, auth, secrets, deleting or migrating data, anything on a
-   production host, a CI workflow that runs an AI agent) and record it on the PR; you may
-   raise it, never lower it; in doubt it is sensitive. Over 500 added lines: split first.
-   Findings that are only tests, docs, style or far-fetched cases become tickets and the PR
-   closes."* For a branch that deploys nothing, add: *"Run only the test files your
+   criteria. For review, add: *"Your PR gets Codex rounds by size and risk. Under 100 added
+   lines and not sensitive: one round, another only for a defect of class a or b (a security
+   property broken, data loss, wrong behaviour on a normal path; or wrong behaviour on a
+   realistic unusual path). 100 to 500 and not sensitive: up to three. Sensitive: up to
+   three. I decide sensitive (login, auth or access rights; secrets, and code that screens
+   them; deleting, migrating or overwriting data; anything on a production host; a CI
+   workflow that runs an AI agent) and record it on the PR; you may raise it, never lower
+   it; in doubt it is sensitive. Over 500 added lines: split first. Findings that are only
+   tests, docs, style or far-fetched cases become tickets and the review ends; the PR
+   merges on its last GO."* For a branch that deploys nothing, add: *"Run only the test files your
    change touches; the CI runs the full suite (P15)."* When that CI runs on a
    small shared runner pool, add P16's three push rules word for word. For a task
    that runs tests, a script or the app, add (P17): *"Before you trust a run, prove it hits
