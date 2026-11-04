@@ -9,7 +9,12 @@
   alerted at every width, because the 15-line window reaches it from 8 lines up. Now wraps are
   joined and blank rows dropped before matching; the header and option wording is read in the
   last 7 lines, the footer `Tab to amend` and the trust prompt in the last 15, and the real
-  option `Yes, and switch to ...` is matched.
+  option `Yes, and switch to ...` is matched (the Edit dialog's real option 2 reads "Yes, and
+  switch to accept edits", not the recalled "allow all edits"). Miss side, joined: `Tab to amend`
+  is 1-2 lines from the bottom of every captured dialog, the header up to 13 lines at 25
+  columns, so at 25 columns only the footer window catches the Edit dialog. Known residuals: a
+  boss-written option "Yes, and always|switch to ..." in the last 7 lines of a concierge's
+  question, and a captured width of 25 as the narrowest.
 
 ## 0.21.3 — 2026-11-04
 

@@ -15,7 +15,7 @@ SCRIPT = Path(__file__).resolve().parents[2] / "routines" / "boss-workers-watch.
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "watch"
 
 # A concierge's AskUserQuestion dialog: the options belong to the sender.
-QUESTION = "Merge PR 46 now?\n❯ 1. Yes, merge\n  2. No, wait\n  3. Type something.\nEnter to select · Esc to cancel\n"
+QUESTION = "Merge PR 46 now?\n❯ 1. Yes, merge\n  2. No, wait\n  3. Type something.\nEnter to select · ↑/↓ to navigate · Esc to cancel\n"
 # A tool-permission dialog.
 PERMISSION = "Bash command\n  git push\nDo you want to proceed?\n❯ 1. Yes\n  2. No\n"
 # The trust prompt, as the current build renders it.
