@@ -10,10 +10,9 @@
 
 **Claimed by:** Otilia 2026-11-04 22:23
 
-**Status:** in-progress
+**Status:** done
 
 - [x] How often a restart was refused as busy and not retried within 10 minutes, counted over the boss transcripts of the last five weeks under the transcript lock, with the count of cases where no idle notice followed
-- [ ] The cause of the busy reading and of the missing notice, shown from a reproduction or from the code
 - [x] The restart step retries on a timer, with a test that a refused restart is retried once the worker's last turn has ended
 
 ## Result (Otilia, 2026-11-04; PR 50)
@@ -68,3 +67,7 @@ Same setup as the table above (2.1.311, sonnet probe, status logged every 0.5 s)
 - Status: busy spans of 33.0 to 40.5 s and 10.2 to 16.8 s, matching the turn lengths the probe's screen reported (e.g. "33s" against a 33.5 s span); every turn ended on an `idle` line with no `busy` tail afterwards. The 5 s busy read after a finished turn did not show.
 
 **Answers neither question.** The miss and the early busy read were not reproduced in 10 subscriptions, so no cause is shown. What the probe did not copy: the worker's own Stop hooks and background-task completions seconds before the turn ends, a boss that had just run `boss-lifecycle.sh` (the refused restarts) before subscribing, and the worker's session being a long one (about 6 h old, many tasks). Box 2 stays unticked and Status stays in-progress; how the ticket closes is the boss's decision.
+
+## How this ticket closed (Anton, 2026-11-04)
+
+The cause of the sampled gap's busy reading and missing notice is NOT shown. Two probes (7 and 10 subscriptions) did not reproduce it, and the notice code is in Claude Code, not in this repo. A third probe would cost more than the gap: the retry (`--wait-idle`, PR 50) reads the status itself and does not depend on the notice, and it worked on live panes tonight. Shown along the way: a background subagent holds a pane busy and delays its notice. The open question moved to ticket 23, which waits on a recurrence. It is not answered.
