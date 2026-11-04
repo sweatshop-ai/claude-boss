@@ -283,14 +283,20 @@ A refusal as busy right after the worker's report is not always a lost notice: a
 background subagent the worker started keeps the pane `busy` after its last
 words and holds its idle notice back until the agent reports (measured on Claude
 Code 2.1.311: 2m24s for an agent that ran 2m10s). `--wait-idle` covers it. A
-background shell or a Monitor reads `shell` instead. `shell` counts as idle
-only when the transcript shows the turn over (the last turn record is its
-`turn_duration`); a `shell` read with the turn still running stays refused and
-is retried. When the turn is over, the restart goes through and **stops the
-shell**: it says so before it types (`its turn is over and a background shell
-is still running`) and prints each job it stops. A job that must outlive the
-restart (a build a later task needs) is the worker's to finish or hand off
-first; do not restart it until then.
+background shell or a Monitor reads `shell` instead. `shell` stays refused, and
+`--wait-idle` keeps waiting on it, whether the turn is in flight or over: a
+finished turn is not a finished task, and a worker waiting on CI with a Monitor
+armed reads exactly so, turn over and one job left. The refusal says which ("a
+turn is in flight" or "turn over, background work still running") and, for the
+second, the kinds and counts the pane footer shows ("2 shells", "1 monitor"); it
+types nothing, so it cannot list the jobs, and the footer is all it can read.
+Look at the pane or ask the worker. Only `--stop-shells` (with `--require-idle`;
+`--force` does not imply it) lets a `shell` with the turn over go through,
+and only when the transcript shows the turn over (the last turn record is its
+`turn_duration`). It **stops the shell**: it says so before it types and prints
+each job, now that the exit dialog lists them. A job that must outlive the
+restart (a build a later task needs, a CI watch) is the worker's to finish or
+hand off first; do not use the flag until you have looked.
 
 **A task bigger than one smart zone gets split.** Keep `CTX` in view on every
 `list` — `ListAgents` does not carry it. At **150k** a worker shows `CTX-SPLIT`:

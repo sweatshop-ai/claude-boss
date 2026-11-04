@@ -334,7 +334,7 @@ class RequireIdle(unittest.TestCase):
         is read while a turn is still in flight, so it must not pass as idle."""
         r, keys = self.run_retire("w-sid\tshell\tpin1\tpin1")
         self.assertEqual(r.returncode, 1)
-        self.assertIn("not idle", r.stderr)
+        self.assertIn("a turn is in flight", r.stderr)
         self.assertEqual(keys, [])
 
     def test_shell_and_waiting_are_retried_and_the_wait_can_end_in_a_refusal(self):
@@ -421,30 +421,58 @@ class RequireIdle(unittest.TestCase):
         self.assertIn("during the wait", r.stderr)
         self.assertEqual(keys, [])
 
-    def test_shell_with_the_turn_over_is_restartable_and_the_stop_is_said_first(self):
-        """The turn ended (the transcript's last record is turn_duration) and a
-        background shell is left: the status reads `shell` for as long as it runs.
-        /exit opens the background-work dialog; its list is printed, then confirmed."""
-        r, keys = self.run_retire("w-sid\tshell\tp1\tp1\t1", exits=False, dialog=True)
+    FOOTER = ["  Cooked for 10s · done 11:22 PM · 2 shells still running", "  ⏵⏵ auto mode on · 2 shells · 1 monitor · ← 4 agents"]
+
+    def test_shell_with_the_turn_over_is_refused_by_default_and_says_what_it_knows(self):
+        """A finished turn is not a finished task: a worker waiting on CI with a
+        Monitor armed reads like this. The footer's counts are read without a
+        keystroke; the job list only exists once /exit opens the dialog."""
+        r, keys = self.run_retire("w-sid\tshell\tp1\tp1\t1", exits=False, dialog="\n".join(self.FOOTER))
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("turn over, background work still running (1 monitor, 2 shells)", r.stderr)
+        self.assertIn("--stop-shells", r.stderr)
+        self.assertNotIn("curl -s", r.stderr)
+        self.assertEqual(keys, [])
+
+    def test_shell_with_the_turn_over_goes_through_with_stop_shells_and_the_stop_is_said_first(self):
+        r, keys = self.run_retire("w-sid\tshell\tp1\tp1\t1", "--stop-shells", exits=False, dialog=True)
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(keys, ["send-keys -t %5 /exit Enter", "send-keys -t %5 Enter"])
         self.assertIn("turn is over", r.stderr)
         self.assertIn("will be stopped", r.stderr)
         self.assertIn("curl -s https://example.org/slow", r.stderr)
 
-    def test_shell_with_a_turn_in_flight_or_unknown_stays_refused(self):
-        for row in ("w-sid\tshell\tp1\tp1\t0", "w-sid\tshell\tp1\tp1\t-", "w-sid\tshell\tp1\tp1"):
-            (self.tmp / "calls").unlink(missing_ok=True)
-            r, keys = self.run_retire(row, exits=False, dialog=True)
-            self.assertEqual(r.returncode, 1, row)
-            self.assertIn("not idle", r.stderr, row)
-            self.assertEqual(keys, [], row)
+    def test_force_does_not_imply_stop_shells(self):
+        r, keys = self.run_retire("w-sid\tshell\tp1\tp1\t1", "--force", exits=False, dialog=True)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("turn over, background work still running", r.stderr)
+        self.assertEqual(keys, [])
 
-    def test_the_wait_ends_when_a_shell_is_left_after_the_turn(self):
-        r, keys = self.run_waiting(["w-sid\tshell\tp1\tp1\t0", "w-sid\tshell\tp1\tp1\t1"], exits=False, dialog=True,
-                                   extra_env={"BOSS_RETRY_EVERY": "1"})
+    def test_shell_with_a_turn_in_flight_or_unknown_stays_refused_even_with_stop_shells(self):
+        for row in ("w-sid\tshell\tp1\tp1\t0", "w-sid\tshell\tp1\tp1\t-", "w-sid\tshell\tp1\tp1"):
+            for flag in ((), ("--stop-shells",)):
+                (self.tmp / "calls").unlink(missing_ok=True)
+                r, keys = self.run_retire(row, *flag, exits=False, dialog=True)
+                self.assertEqual(r.returncode, 1, (row, flag))
+                self.assertIn("a turn is in flight", r.stderr, (row, flag))
+                self.assertEqual(keys, [], (row, flag))
+
+    def test_the_wait_keeps_waiting_on_a_shell_with_the_turn_over_unless_stop_shells(self):
+        rows = ["w-sid\tshell\tp1\tp1\t0", "w-sid\tshell\tp1\tp1\t1"]
+        r, keys = self.run_waiting(rows, exits=False, dialog=True)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("turn over, background work still running", r.stderr)
+        self.assertIn("after 2 s", r.stderr)
+        self.assertEqual(keys, [])
+        (self.tmp / "reads").unlink()
+        r, keys = self.run_waiting(rows, "--stop-shells", exits=False, dialog=True)
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(keys, ["send-keys -t %5 /exit Enter", "send-keys -t %5 Enter"])
+
+    def test_stop_shells_needs_require_idle(self):
+        r, keys = self.run_retire("x", "--stop-shells", require_idle=False)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("only apply with --require-idle", r.stderr)
 
     def test_wait_idle_needs_require_idle(self):
         r, keys = self.run_retire("x", "--wait-idle", "5", require_idle=False)

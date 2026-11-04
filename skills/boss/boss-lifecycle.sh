@@ -9,8 +9,8 @@
 # Usage:
 #   boss-lifecycle.sh spawn <project-dir> [name-hint] [--model <name>] [--concierge]
 #   boss-lifecycle.sh claim <pane-id> [name]
-#   boss-lifecycle.sh retire <pane-id> [--kill] [--require-idle [--expect-session S] [--expect-last U] [--wait-idle SECONDS]]
-#   boss-lifecycle.sh restart <pane-id> [--require-idle [--expect-session S] [--expect-last U] [--wait-idle SECONDS]]
+#   boss-lifecycle.sh retire <pane-id> [--kill] [--require-idle [--expect-session S] [--expect-last U] [--wait-idle SECONDS [--stop-shells]]
+#   boss-lifecycle.sh restart <pane-id> [--require-idle [--expect-session S] [--expect-last U] [--wait-idle SECONDS] [--stop-shells]]
 #   boss-lifecycle.sh move <pane-id> <new-project-dir>
 #   boss-lifecycle.sh list [--mine]
 #
@@ -42,10 +42,13 @@ SHELL_CMDS='^(bash|zsh|fish|sh|dash)$'
 # --require-idle, --expect-session <id> and --expect-last <uuid> are the
 # require-idle restart path (see retire_require_idle); --force does not relax them.
 # --wait-idle <seconds> turns the busy refusal into a timer: see retire_require_idle.
+# --stop-shells lets a restart go through on a worker whose turn is over and that
+# still has background work running; --force does not imply it.
 FORCE=""
 MODEL=""
 ROLE=""
 REQUIRE_IDLE=""
+STOP_SHELLS=""
 EXPECT_SESSION=""
 EXPECT_LAST=""
 WAIT_IDLE=""
@@ -55,6 +58,7 @@ for _a in "$@"; do
   if [[ -n "$_want" ]]; then printf -v "$_want" '%s' "$_a"; _want=""
   elif [[ "$_a" == "--force" ]]; then FORCE=1
   elif [[ "$_a" == "--require-idle" ]]; then REQUIRE_IDLE=1
+  elif [[ "$_a" == "--stop-shells" ]]; then STOP_SHELLS=1
   elif [[ "$_a" == "--concierge" ]]; then ROLE=concierge
   elif [[ "$_a" == "--model" ]]; then _want=MODEL
   elif [[ "$_a" == --model=* ]]; then MODEL="${_a#--model=}"
@@ -64,8 +68,8 @@ for _a in "$@"; do
   else _args+=("$_a"); fi
 done
 if [[ -n "$_want" ]]; then printf '%s\n' "an option needs a value" >&2; exit 1; fi
-if [[ -z "$REQUIRE_IDLE" && ( -n "$EXPECT_SESSION" || -n "$EXPECT_LAST" || -n "$WAIT_IDLE" ) ]]; then
-  printf '%s\n' "--expect-session / --expect-last / --wait-idle only apply with --require-idle" >&2; exit 1
+if [[ -z "$REQUIRE_IDLE" && ( -n "$EXPECT_SESSION" || -n "$EXPECT_LAST" || -n "$WAIT_IDLE" || -n "$STOP_SHELLS" ) ]]; then
+  printf '%s\n' "--expect-session / --expect-last / --wait-idle / --stop-shells only apply with --require-idle" >&2; exit 1
 fi
 if [[ -n "$WAIT_IDLE" && ! "$WAIT_IDLE" =~ ^[0-9]+$ ]]; then
   printf '%s\n' "--wait-idle takes a number of seconds" >&2; exit 1
@@ -335,11 +339,35 @@ stop_leftover_background() {
 }
 
 # A status that still bars the restart. `busy` and `waiting` always do. `shell`
-# (a background shell running) does until the transcript shows the turn over:
-# only then is it a worker that finished and left a shell behind.
+# (background work running) does too, unless --stop-shells was given and the
+# transcript shows the turn over: a finished turn is not a finished task (a
+# worker waiting on CI with a Monitor armed reads exactly so), so without the
+# flag the wait keeps waiting and the restart refuses.
 still_busy() {
   local st=$1 over=$2
-  [[ "$st" =~ ^(busy|waiting)$ || "$st" == shell && "$over" != 1 ]]
+  [[ "$st" =~ ^(busy|waiting)$ || "$st" == shell && ( -z "$STOP_SHELLS" || "$over" != 1 ) ]]
+}
+
+# What a refusal can say about background work without typing at the pane: the
+# kinds and counts in the footer ("2 shells", "1 monitor"; measured on Claude
+# Code 2.1.311). The commands are listed only by the exit dialog, which opens
+# on /exit, so they are printed under --stop-shells and never here.
+background_counts() {
+  local screen; screen=$(tmux capture-pane -t "$1" -p 2>/dev/null | tail -5)
+  { grep -oE '[0-9]+ (shell|monitor)s?' <<<"$screen" || true; } | sort -u | paste -sd, - | sed 's/,/, /g'
+}
+
+# The refusal for a worker the status calls busy: `shell` says whether the turn
+# is over, so the boss can tell a finished task from one in flight.
+refuse_busy() {
+  local pane=$1 st=$2 over=$3 after=${4:-} counts
+  if [[ "$st" == shell && "$over" == 1 ]]; then
+    counts=$(background_counts "$pane")
+    die "$pane: turn over, background work still running${counts:+ ($counts)}$after: not retiring (--require-idle); a Monitor waiting on CI looks exactly like this. Look at the pane or ask the worker; --stop-shells stops it and prints each job"
+  elif [[ "$st" == shell ]]; then
+    die "$pane: a turn is in flight with background work running$after: not retiring (--require-idle)"
+  fi
+  die "$pane is still $st$after: not retiring (--require-idle)"
 }
 
 # --require-idle: stop the session only if it is idle at the last possible
@@ -368,7 +396,7 @@ retire_require_idle() {
       row=$(python3 "$PANES_PY" --state "$pane" 2>/dev/null) || true
       IFS=$'\t' read -r sid st pin past over <<<"$row"
     done
-    still_busy "$st" "$over" && die "$pane is still $st after $WAIT_IDLE s: not retiring (--require-idle)"
+    still_busy "$st" "$over" && refuse_busy "$pane" "$st" "$over" " after $WAIT_IDLE s"
     # A turn that ran meanwhile wrote records, so a pin taken before the wait
     # cannot match. Say that, not "new input since the check".
     [[ -z "$EXPECT_LAST" || "$pin" == "$EXPECT_LAST" || "$pin" == "$first_pin" ]] ||
@@ -380,13 +408,16 @@ retire_require_idle() {
     die "$pane: no pin to compare (expected ${EXPECT_LAST}, found ${pin:--}): not retiring"
   [[ -z "$EXPECT_LAST" || "$pin" == "$EXPECT_LAST" ]] ||
     die "$pane has new input since the check (last record ${pin:--}, expected $EXPECT_LAST): not retiring"
-  # `shell` is idle only when the transcript shows the turn over (the
-  # status alone does not say); then /exit opens the dialog that lists the
-  # background work and stop_leftover_background prints and confirms it.
-  [[ "$st" == "idle" || "$st" == "shell" ]] && ! still_busy "$st" "$over" ||
-    die "$pane status is '${st:-unknown}', not idle: not retiring (--require-idle)"
+  # `shell` passes only under --stop-shells and only when the transcript shows
+  # the turn over; then /exit opens the dialog that lists the background work
+  # and stop_leftover_background prints and confirms it.
   if [[ "$st" == "shell" ]]; then
-    printf '%s: its turn is over and a background shell is still running; the restart will stop it (the list follows)\n' \
+    still_busy "$st" "$over" && refuse_busy "$pane" "$st" "$over"
+  elif [[ "$st" != "idle" ]]; then
+    die "$pane status is '${st:-unknown}', not idle: not retiring (--require-idle)"
+  fi
+  if [[ "$st" == "shell" ]]; then
+    printf '%s: its turn is over and background work is still running; --stop-shells: the restart will stop it (the list follows)\n' \
       "$pane" >&2
   fi
   tmux send-keys -t "$pane" '/exit' Enter
@@ -528,5 +559,5 @@ case "${1:-}" in
   move)    shift; cmd_move "$@" ;;
   list)    shift; cmd_list "$@" ;;
   ctx)     shift; python3 "$PANES_PY" "$@" ;;
-  *) die "usage: $(basename "$0") {spawn <dir> [name] [--model M] [--concierge] | claim <pane> [name] | retire <pane> [--kill] | restart <pane> | move <pane> <dir> | list [--mine] | ctx [pane]} [--force] [--require-idle [--expect-session S] [--expect-last U] [--wait-idle SECONDS]]" ;;
+  *) die "usage: $(basename "$0") {spawn <dir> [name] [--model M] [--concierge] | claim <pane> [name] | retire <pane> [--kill] | restart <pane> | move <pane> <dir> | list [--mine] | ctx [pane]} [--force] [--require-idle [--expect-session S] [--expect-last U] [--wait-idle SECONDS] [--stop-shells]]" ;;
 esac
