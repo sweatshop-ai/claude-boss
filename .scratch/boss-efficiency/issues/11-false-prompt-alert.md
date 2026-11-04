@@ -6,9 +6,7 @@
 
 **Claimed by:** Wren 2026-11-04 20:49
 
-**Status:** in-progress
-
-Waits for the merge of PR 48 (sweatshop-ai/claude-boss#48); the boxes are ticked, their evidence is its tests.
+**Status:** done
 
 - [x] A test with a concierge's question on screen raises no alert
 - [x] A worker's real permission prompt still does
