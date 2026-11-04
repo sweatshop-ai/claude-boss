@@ -6,7 +6,9 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready
+**Claimed by:** Otilia 2026-11-04 21:32
+
+**Status:** in-progress
 
 - [ ] A sample of at least 30 gaps, classified
 - [ ] Each class with its hours, and a ticket for any that a change could close
