@@ -14,7 +14,9 @@ The dry run answers, with the commands and what came back:
 
 **Blocked by:** None (the dry run can start immediately; the force-push waits on the owner's consent and on every open PR of this track being merged)
 
-**Status:** ready
+**Claimed by:** Ruben 2026-11-04 21:12
+
+**Status:** in-progress
 
 - [ ] The dry-run report exists under `~/.claude/pm/`, outside the repo, with the commands and results above
 - [ ] The owner has given consent in the boss's own question, on that report
