@@ -178,7 +178,7 @@ class Attribution(unittest.TestCase):
         rec = core.scan_session(path, ["alpha-x"])
         self.assertGreaterEqual(rec["skipped"], 3)
         self.assertEqual(len(rec["subs"]), 1)
-        self.assertEqual(rec["subs"][0]["cost"], core.cost(core.usage(good["message"]["usage"])))
+        self.assertEqual(rec["subs"][0]["cost"], 25)       # "oops" input counts 0; 5 output tokens at weight 5
 
     def test_tokens_outside_the_window_are_not_counted(self):
         c = Cfg()
@@ -302,11 +302,28 @@ class Verdict(unittest.TestCase):
         self.assertEqual(len(fails), 1)
         self.assertIn("socket lookup", fails[0])
 
+    def test_the_uncovered_failure_has_a_floor_and_a_boundary_at_90_percent(self):
+        def fails(msgs, outside):
+            return core.judge(self.fake({"alpha-x": self.track(1e6)}, msgs=msgs, outside=outside), None)[0]
+        self.assertEqual(fails(10, 9), [])                   # exactly 90%: healthy side
+        self.assertEqual(len(fails(100, 91)), 1)             # just over
+        self.assertEqual(fails(3, 3), [])                    # all outside, but too few messages to say
+        self.assertEqual(len(fails(core.MIN_MESSAGES, core.MIN_MESSAGES)), 1)
+
     def test_busy_week_coverage_is_in_the_report_not_a_trigger(self):
         week = self.fake({"alpha-x": self.track(200e6, msgs=100, outside=35)}, msgs=100, outside=35)
         week["tracks"]["alpha-x"].update(wall_s=3600, states={k: 0 for k in core.STATES}, asks_per_day=0, ci_waits=0, ci_s=0)
         self.assertEqual(core.judge(week, None), ([], []))
         self.assertIn("35/100", core.render(week, "x", [], []))
+
+
+class Usage(unittest.TestCase):
+    def test_only_finite_numbers_of_zero_or_more_count(self):
+        bad = dict(input_tokens=float("nan"), cache_read_input_tokens=float("inf"),
+                   cache_creation_input_tokens=-5, output_tokens=True)
+        self.assertEqual(core.usage(bad), dict(i=0, cw=0, cr=0, o=0))
+        self.assertEqual(core.usage(dict(output_tokens=7, input_tokens=2.5)), dict(i=2.5, cw=0, cr=0, o=7))
+        self.assertEqual(core.cost(core.usage(dict(output_tokens=10 ** 400))), 0)     # too big for a float: no OverflowError
 
 
 class Alert(unittest.TestCase):
@@ -395,6 +412,23 @@ class Run(unittest.TestCase):
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
         self.assertIn("run skipped", r.stdout)
         self.assertIn("nice -n 19", BODY.read_text())
+        self.assertIn("ionice -c2 -n7", BODY.read_text())
+
+    def test_a_dry_run_of_the_body_makes_no_directory_and_no_log(self):
+        c = Cfg()
+        seed(c)
+        r = subprocess.run([str(BODY), "--end", dt.datetime.fromtimestamp(NOW).isoformat()],
+                           env=self.env(c, DRY_RUN="1"), capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertFalse((c.dir / "routines").exists())
+
+    def test_a_rerun_of_one_week_replaces_it_in_history(self):
+        c = Cfg()
+        seed(c)
+        for end in (NOW, NOW + 3600):                         # the same calendar week, two runs
+            core.run(c.dir, end, 1, False)
+        weeks = json.loads((c.dir / "routines" / "state" / "boss-efficiency.json").read_text())["weeks"]
+        self.assertEqual(len(weeks), 1)
 
     def test_uninstall_removes_the_timer_too(self):
         text = (PLUGIN / "uninstall.sh").read_text()
@@ -402,7 +436,7 @@ class Run(unittest.TestCase):
         self.assertIn("boss-efficiency.{service,timer}", text)
 
     def test_only_dry_run_1_is_a_dry_run_in_the_body_and_the_core(self):
-        self.assertIn('[ "${DRY_RUN:-}" != 1 ] && exec', BODY.read_text())
+        self.assertIn('if [ "${DRY_RUN:-}" != 1 ]; then', BODY.read_text())
         self.assertIn('os.environ.get("DRY_RUN") == "1"', (PLUGIN / "routines" / "boss_efficiency_core.py").read_text())
 
     def test_the_routine_calls_no_model(self):
