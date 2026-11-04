@@ -97,7 +97,11 @@ def owns(path):
 
 WRITERS = {"echo", "printf", "cat"}
 FILTERS = {"tail", "head", "cut", "wc"}
-HEREDOC = re.compile(r"""(?<!<)<<-?\s*(['"]?)(\w+)\1\s*$""")
+HEREDOC = re.compile(r"""(?<!<)<<-?\s*(['"]?)(\w+)\1(?=\s|$|[;&|<>])""")
+# `s/a/b/g`: one delimiter, no escapes, flags that neither write (`w`) nor run (`e`).
+# Any other sed program is not read; it counts as work.
+SED_SUBSTITUTE = re.compile(r"s([/|#,:@])[^\\]*?\1[^\\]*?\1[gpI0-9]*")
+FLAG_ARGUMENT = {"-n", "-c", "-d", "-f", "-b"}
 DATE = re.compile(r"\$\(date(?:[ \t]+[^()`;&|<>\n]*)?\)")
 SEPARATORS = {";", "&&", "|"}
 REDIRECTS = {">", ">>", "<"}
@@ -129,8 +133,11 @@ def split_heredocs(cmd):
             continue
         found = HEREDOC.search(line)
         if found:
+            before = line[:found.start()]
+            if "#" in before or before.count("'") % 2 or before.count('"') % 2:
+                return None     # the marker may be a comment or quoted text: not read
             pending = (found.group(2), bool(found.group(1)))
-            line = line[:found.start()]
+            line = before + line[found.end():]
         lines.append(line)
     return None if pending is not None else " ; ".join(lines)
 
@@ -146,9 +153,29 @@ def statement_is_coordination(words, cwd_own):
         return False
     if ALLOWED_CMD.fullmatch(words[0]):
         return True
+    if words[0] == "cat":
+        # what cat reads is as much its business as what it writes
+        inputs = [w for i, w in enumerate(words[1:], 1)
+                  if i - 1 not in redirects and i not in redirects and w not in REDIRECTS]
+        inputs += [words[i + 1] for i, w in enumerate(words) if w == "<" and i + 1 < len(words)]
+        return bool(redirects) and all(w == "-" or own_state(w, cwd_own) for w in inputs)
     if words[0] in WRITERS:
-        return bool(redirects) or words[0] != "cat"
-    return words[0] == "sed" and len(words) == 4 and words[1] == "-i" and own_state(words[3], cwd_own)
+        return True
+    return (words[0] == "sed" and len(words) == 4 and words[1] == "-i"
+            and bool(SED_SUBSTITUTE.fullmatch(words[2])) and own_state(words[3], cwd_own))
+
+
+def filter_is_plain(words):
+    """`head -n 5`, `cut -d , -f 2`, `wc -l`: flags and their values, no file, no `<`."""
+    takes_value = False
+    for w in words[1:]:
+        if takes_value:
+            takes_value = False
+        elif w in FLAG_ARGUMENT:
+            takes_value = True
+        elif not (w.startswith("-") and w not in REDIRECTS):
+            return False
+    return True
 
 
 def is_coordination(cmd):
@@ -184,8 +211,11 @@ def is_coordination(cmd):
         if words:
             if words[0] == "cd" and len(words) == 2:
                 cwd_own = own_state(words[1].rstrip("/") + "/")
+                if cwd_own and token != "&&":
+                    # after `;` the next statement runs even when the cd failed
+                    cwd_own = os.path.isdir(os.path.expanduser(words[1]))
             elif piped and words[0] in FILTERS:
-                if any(w in (">", ">>") for w in words):
+                if not filter_is_plain(words):
                     return False
             elif statement_is_coordination(words, cwd_own):
                 used = True
