@@ -10,8 +10,8 @@
 
 **Claimed by:** Oskar 2026-11-04 21:29
 
-**Status:** in-progress
+**Status:** done
 
-- [ ] The cause is named, with the run and the command that show it
-- [ ] The fix is merged, or the finding is reported if the fault is not in sheaf
-- [ ] A nightly run with py3.14 is green on record
+- [x] The cause is named, with the run and the command that show it: sheaf#78 guard took CPython's unfilled sigtimedwait siginfo (si_signo 2 on 3.14) for SIGINT; failing run 41792145531 (first red 41178289633, last green 41017156953); `nice .venv/bin/python -m pytest tests/test_hub_lifecycle.py::test_a_hub_that_is_stopped_and_continued_keeps_running` failed 5/5 on 3.14.9, probe results in sheaf PR 195
+- [x] The fix is merged, or the finding is reported if the fault is not in sheaf: PR 195 merged as 11ae9522692f2e677aabbd29d26fbb7aa117efd6 (CI success on 8d03fbc), not tagged; follow-ups in ticket 20; Codex follow-up owed
+- [x] A nightly run with py3.14 is green on record: manual workflow_dispatch python=3.14 on main at 11ae952, run 41914458641, ubuntu-24.04 py3.14 success, https://github.com/sweatshop-ai/sheaf/actions/runs/41914458641 (tonight's 01:00 schedule is the second record)
