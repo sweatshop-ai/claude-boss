@@ -595,7 +595,8 @@ the thing: `codex exec -s read-only ... < /dev/null`, briefed to read and not ex
 output checked in the first minute; posted on the PR (or the plan's PR) as "Codex
 review N (run by <name>)" with every citation marked VERIFIED or NOT FOUND; the
 author replies per finding, fixes the real ones, and reruns until GO, within the
-rounds the PR's size and risk allow (below). A verdict on an
+rounds the PR's size and risk allow (below). When the rounds run out, what is still open
+becomes a ticket and the PR merges, unless an open finding is of class a. A verdict on an
 older head is not a verdict on the head you merge: fixes after the last GO get one
 more run unless they are test-only and the reviewed production code is byte-identical
 (say so in the PR). No PR merges without a GO on record; no plan is dispatched from
@@ -609,14 +610,16 @@ of three treated every PR alike. Added lines are those of the PR's diff.
 - Under 100 added lines and not sensitive: one Codex round; another only if it finds a defect of class a or b.
 - 100 to 500 added lines and not sensitive: up to three rounds, and the stop rule below can end them earlier.
 - Sensitive: up to three rounds.
-- Every PR: when a round brings only tests, docs, style or far-fetched cases, those become tickets and the PR closes.
+- Every PR (the stop rule): when a round brings only tests, docs, style or far-fetched cases, those
+  become tickets and the PR closes: it merges on its last GO, the open findings are not owed a fix.
 - Over 500 added lines, sensitive or not: split before review.
 - The standards review (`code-review`) runs once per PR, not on every head.
 
 Classes. **a**: a security property broken, data loss, or wrong behaviour on a normal path.
 **b**: wrong behaviour on an unusual but realistic path (a crash mid-way, a transient
 failure, a re-run, a non-default config). **c**: a far-fetched edge case. **d**: tests,
-docs, naming, style, prose, standards only.
+docs, naming, style, prose, standards only. The dispatch text in Phase B step 4 repeats
+these rules: change both together.
 
 **Sensitive** means the PR touches any of: login, auth or access rights; secrets,
 including code that screens or redacts them; deleting, migrating or overwriting stored
@@ -857,10 +860,11 @@ Parse `$ARGUMENTS`: empty or `status` → **A** · `dispatch <task> [worker]` �
    teammates instead only when the parts must talk to each other. Their reports
    count against your 150k."* The worker decides; `references/models.md` has the
    criteria. For review, add: *"Your PR gets Codex rounds by size and risk. Under 100 added lines and
-   not sensitive: one round, another only for a defect of class a or b (a security property,
+   not sensitive: one round, another only for a defect of class a or b (a security property broken,
    data loss, wrong behaviour on a normal path; or wrong behaviour on a realistic unusual path).
-   100 to 500 and not sensitive: up to three. Sensitive: up to three. I decide sensitive and
-   record it on the PR; you may raise it, never lower it. Over 500 added lines: split first.
+   100 to 500 and not sensitive: up to three. Sensitive: up to three. I decide sensitive (login, auth, secrets, deleting or migrating data, anything on a
+   production host, a CI workflow that runs an AI agent) and record it on the PR; you may
+   raise it, never lower it; in doubt it is sensitive. Over 500 added lines: split first.
    Findings that are only tests, docs, style or far-fetched cases become tickets and the PR
    closes."* For a branch that deploys nothing, add: *"Run only the test files your
    change touches; the CI runs the full suite (P15)."* When that CI runs on a
