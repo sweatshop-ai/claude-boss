@@ -8,8 +8,8 @@
 
 **Claimed by:** Yara 2026-11-04 21:33
 
-**Status:** in-progress
+**Status:** done
 
-- [ ] The change is merged, with a green run on main on record
-- [ ] A pushed branch with a PR runs the suite once, and a pushed branch without a PR still runs it, each shown by a run URL
-- [ ] What a pull request gives up is stated in the PR
+- [x] The change is merged, with a green run on main on record (PR 227 merged as e20a4c4; main push run https://github.com/thinkingtoo/tiroir-library-mcp/actions/runs/41911317136 success, total_count 1)
+- [x] A pushed branch with a PR runs the suite once, and a pushed branch without a PR still runs it, each shown by a run URL (no PR: .../actions/runs/41907967336; with PR #227: .../actions/runs/41908217190, check-runs total 1, success)
+- [x] What a pull request gives up is stated in the PR (thinkingtoo/tiroir-library-mcp#227, Merge Danger)
