@@ -713,14 +713,15 @@ class ListAndFields(unittest.TestCase):
             k.wait()
         shutil.rmtree(self.tmp)
 
-    def session(self, sid, pane, name, started, status="idle"):
+    def session(self, sid, pane, name, started, status="idle", waiting_for=None):
         kid = subprocess.Popen(["sleep", "60"])
         self.kids.append(kid)
         stat = Path("/proc/%d/stat" % kid.pid).read_text()
         (self.tmp / "sessions" / ("%d.json" % kid.pid)).write_text(json.dumps(
             {"pid": kid.pid, "sessionId": sid, "name": name, "status": status,
              "startedAt": started, "tmux": "boss:@1.%s" % pane, "entrypoint": "sdk-cli",
-             "cwd": str(self.tmp), "procStart": stat[stat.rindex(")") + 2:].split()[19]}))
+             "cwd": str(self.tmp), "procStart": stat[stat.rindex(")") + 2:].split()[19],
+             **({"waitingFor": waiting_for} if waiting_for else {})}))
 
     def call(self, *args, script="boss-lifecycle.sh"):
         cmd = ["bash", str(HERE / script)] if script.endswith(".sh") else [sys.executable, str(HERE / script)]
@@ -732,6 +733,15 @@ class ListAndFields(unittest.TestCase):
         self.assertEqual(r.stdout, "busy\tWanda\t%1\ts-wanda\n")
         r = self.call("get", "%6", "name", "owner", script="boss-panes.py")
         self.assertEqual(r.stdout, "-\t-\n")
+
+    def test_spawn_finds_a_concierge_stuck_on_a_permission_prompt(self):
+        # The guard skips it (it holds no question); spawn must still see it,
+        # or a second concierge starts beside the first.
+        with open(self.tmp / "panes", "a") as f:
+            f.write("%7\tboss:0.2\t%1\tclaude\t/w/boss\tOdile\tconcierge\n")
+        self.session("s-odile", "%7", "Odile", 1500, status="waiting", waiting_for="permission prompt")
+        r = self.call("concierge", "--boss", "%1", script="boss-panes.py")
+        self.assertEqual(r.stdout, "%7\tOdile\n", r.stderr)
 
     def test_an_unknown_field_is_an_error_not_a_dash(self):
         r = self.call("get", "%5", "nmae", script="boss-panes.py")
