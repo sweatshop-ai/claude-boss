@@ -1,0 +1,12 @@
+[Unit]
+Description=Measure the boss tracks once a week
+
+[Timer]
+# Monday morning, before the owner is at the laptop, off the round hour.
+OnCalendar=Mon *-*-* 06:17
+# A laptop that slept through Monday runs once on wake.
+Persistent=true
+AccuracySec=5min
+
+[Install]
+WantedBy=timers.target

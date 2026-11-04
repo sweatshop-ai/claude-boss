@@ -47,13 +47,14 @@ if [[ -z ${NO_TIMERS:-} ]]; then
   else
     mkdir -p "$UNITS"
     for u in boss-ladder.service boss-ladder.timer \
-             boss-workers-watch.service boss-workers-watch.timer; do
+             boss-workers-watch.service boss-workers-watch.timer \
+             boss-efficiency.service boss-efficiency.timer; do
       sed -e "s|@ROOT@|$LINK|g" -e "s|@CFG@|$CFG|g" \
           "$ROOT/systemd/$u.in" > "$UNITS/$u"
     done
     systemctl --user daemon-reload
-    systemctl --user enable --now boss-ladder.timer boss-workers-watch.timer
-    echo "timers enabled: boss-ladder (every 5 min), boss-workers-watch (every min)"
+    systemctl --user enable --now boss-ladder.timer boss-workers-watch.timer boss-efficiency.timer
+    echo "timers enabled: boss-ladder (every 5 min), boss-workers-watch (every min), boss-efficiency (weekly)"
     echo "  they run $LINK/routines/, and the link follows a plugin upgrade by itself"
   fi
 fi
