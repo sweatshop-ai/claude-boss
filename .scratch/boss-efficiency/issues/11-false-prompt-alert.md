@@ -4,7 +4,9 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready
+**Claimed by:** Wren 2026-11-04 20:49
+
+**Status:** in-progress
 
 - [ ] A test with a concierge's question on screen raises no alert
 - [ ] A worker's real permission prompt still does
