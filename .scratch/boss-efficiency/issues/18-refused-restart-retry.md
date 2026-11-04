@@ -13,7 +13,7 @@
 **Status:** in-progress
 
 - [x] How often a restart was refused as busy and not retried within 10 minutes, counted over the boss transcripts of the last five weeks under the transcript lock, with the count of cases where no idle notice followed
-- [ ] The cause of the busy reading and of the missing notice, shown from a reproduction or from the code
+- [x] The cause of the busy reading and of the missing notice, shown from a reproduction or from the code
 - [x] The restart step retries on a timer, with a test that a refused restart is retried once the worker's last turn has ended
 
 ## Result (Otilia, 2026-11-04; PR 50)
@@ -25,3 +25,22 @@
 - Follow-ups: tell "turn over, background shell left" from "turn in flight" for `shell`; `self_register` stamps the calling pane as a boss on every invocation (a worker that runs the script becomes a boss pane).
 
 PR 50 merged fa2062c; box 2 goes to the next worker: reproduce a worker that ends its turn with a background shell, with an idle subscription, and read whether the notice fires.
+
+
+## Box 2: reproduction (Otilia, Anton's request, 2026-11-04 22:25-22:38)
+
+Claude Code 2.1.311, sonnet probe in a throwaway tmux server, real config dir (the peer files are read from there), subscribed with `notify_when_idle`, status read from the probe's `~/.claude/sessions/<pid>.json` every 0.5 s. Probe and server killed; all 7 one-shot subscriptions consumed.
+
+| State when the turn ended | Status read afterwards | Notice | After |
+|---|---|---|---|
+| (a) nothing running | `idle` 9 s after the request | yes | at the end of the subscriber's own turn, not before |
+| (b) background shell (`sleep 170`) | `shell` for 2m48s, then `busy` 9 s (the shell's completion woke a turn), then `idle` | yes, at the turn end (the final text), with the shell still running | same |
+| (c) Monitor armed | `shell` | yes, at the turn end | same |
+| (d) background subagent (about 2m10s) | `busy` the whole time (the screen says "Waiting for 1 background agent to finish"); `idle` only when the agent finished and its report was handled, 2m24s after the final text | only then, 2m24s late | at the end of the subscriber's turn |
+| (e) already idle at subscribe (pure subscription, no message) | `idle` | yes, at once, reporting the last finished turn | at the end of the subscriber's turn |
+
+Not tested: a scheduled wake (ScheduleWakeup/Cron); a `waiting` pane.
+
+**Cause, shown.** (1) The pane reads `busy` after the worker's last words while a background subagent runs: the turn does not end until the agent reports, so the idle notice is not sent until then (here 2m24s, as long as the agent runs). The final text is not the end of the turn. (2) A background shell or Monitor reads `shell` and does not delay the notice. (3) A notice is not lost: it was delivered in every state, but only at a turn boundary of the subscriber. A boss that is inside a long turn sees it late, and it reports the time the worker's turn ended, so it can describe a turn that ended long before the notice is read (the 22:16 datum). (4) Subscribing to an idle session fires at once: state (e) does not lose a notice.
+
+**What this does not show.** Which state the sampled worker was in during its 92 minutes. A background subagent (or any long task the worker waited on) fits both readings, busy pane and late notice; no transcript was read to confirm it, and a scheduled wake was not tried. The notice code is in Claude Code, not in this repo. The retry on a timer (`--wait-idle`, PR 50) does not depend on any of it: it reads the status itself.
