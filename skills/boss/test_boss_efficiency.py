@@ -53,9 +53,10 @@ class Cfg:
         self.session(sid, at, sock_msgs, cost, bash=bash, **kw)
         return sid
 
-    def session(self, sid, at, sock_msgs, cost, asks=0, bash=None, name=None, until=None, sends=(), cmds=()):
+    def session(self, sid, at, sock_msgs, cost, asks=0, bash=None, name=None, until=None, sends=(), cmds=(), listing=()):
         """`name`: the start name the hook records. `until`: a last record at that time.
-        `sends`: [(T, to)] SendMessage calls. `cmds`: [(T, command)] Bash calls."""
+        `sends`: [(T, to)] SendMessage calls. `cmds`: [(T, command)] or [(T, command, False)] Bash calls and
+        their result (success unless False). `listing`: [(T, text)] a ListAgents result the session got."""
         recs = []
         if name:
             recs.append(dict(type="attachment", timestamp=iso(at), attachment=dict(
@@ -64,9 +65,17 @@ class Cfg:
         for i, (T, to) in enumerate(sends):
             recs.append(dict(type="assistant", timestamp=iso(T), message=dict(id="s%d%s" % (i, sid), usage={}, content=[
                 dict(type="tool_use", id="send%d%s" % (i, sid), name="SendMessage", input=dict(to=to, message="go"))])))
-        for i, (T, cmd) in enumerate(cmds):
+        for i, (T, cmd, *ok) in enumerate(cmds):
             recs.append(dict(type="assistant", timestamp=iso(T), message=dict(id="c%d%s" % (i, sid), usage={}, content=[
                 dict(type="tool_use", id="cmd%d%s" % (i, sid), name="Bash", input=dict(command=cmd))])))
+            recs.append(dict(type="user", timestamp=iso(T + 1), message=dict(content=[
+                dict(type="tool_result", tool_use_id="cmd%d%s" % (i, sid), content="ok" if not ok or ok[0] else "Exit code 1",
+                     is_error=bool(ok and not ok[0]))])))
+        for i, (T, text) in enumerate(listing):
+            recs.append(dict(type="assistant", timestamp=iso(T), message=dict(id="l%d%s" % (i, sid), usage={}, content=[
+                dict(type="tool_use", id="ls%d%s" % (i, sid), name="ListAgents", input={})])))
+            recs.append(dict(type="user", timestamp=iso(T + 1), message=dict(content=[
+                dict(type="tool_result", tool_use_id="ls%d%s" % (i, sid), content=text)])))
         if until:
             recs.append(dict(type="assistant", timestamp=iso(until), message=dict(id="end" + sid, usage={}, content=[])))
         for T, sock, text in sock_msgs:
@@ -248,6 +257,46 @@ class AttributionByName(unittest.TestCase):
         _, wk, _ = week(c.dir)
         self.assertEqual(wk["tracks"]["alpha-x"]["tokens"]["build"], 7000)
 
+    def twins(self, to, listing=None):
+        """Two live workers named Mira; the older one (cost 900) knows its ref when `listing` is given."""
+        c = Cfg()
+        c.goal("alpha-x")
+        c.worker(NOW - DAY, [], cost=900, name="Mira", until=NOW - DAY + 3600,
+                 listing=[(NOW - DAY + 5, listing)] if listing else ())
+        c.worker(NOW - DAY + 30, [], cost=7000, name="Mira", until=NOW - DAY + 3600)
+        c.boss("alpha-x", [], NOW - DAY, sends=[(NOW - DAY + 60, to)], until=NOW - DAY + 3600)
+        _, wk, _ = week(c.dir)
+        return wk["tracks"].get("alpha-x", {"tokens": {"build": 0}})["tokens"]["build"]
+
+    def test_a_ref_picks_the_session_that_holds_it_among_two_live_ones(self):
+        mine = "This session is Mira [ab12cd] \u2014 the name other sessions use to message it.\n\nPeer sessions (1):"
+        self.assertEqual(self.twins("Mira [ab12cd]", mine), 900)
+
+    def test_a_ref_that_cannot_decide_between_two_live_ones_attributes_none(self):
+        self.assertEqual(self.twins("Mira [ab12cd]"), 0)
+
+    def test_a_ref_held_by_the_other_session_is_not_attributed_to_this_one(self):
+        mine = "This session is Mira [ab12cd] \u2014 the name other sessions use to message it.\n\nPeer sessions (1):"
+        self.assertEqual(self.twins("Mira [ffffff]", mine), 0)
+
+    def test_a_ref_send_keeps_the_session_alive_when_the_other_is_only_inside_the_slack(self):
+        c = Cfg()
+        c.goal("alpha-x")
+        c.worker(NOW - DAY - 3600, [], cost=900, name="Mira", until=NOW - DAY + 30)
+        c.worker(NOW - DAY + 60, [], cost=7000, name="Mira", until=NOW - DAY + 3600)
+        c.boss("alpha-x", [], NOW - DAY - 3600, sends=[(NOW - DAY + 100, "Mira [ab12cd]")], until=NOW - DAY + 3600)
+        _, wk, _ = week(c.dir)
+        self.assertEqual(wk["tracks"]["alpha-x"]["tokens"]["build"], 7000)
+
+    def test_a_lone_session_that_holds_another_ref_is_not_attributed(self):
+        c = Cfg()
+        c.goal("alpha-x")
+        c.worker(NOW - DAY, [], cost=7000, name="Mira", until=NOW - DAY + 3600,
+                 listing=[(NOW - DAY + 5, "This session is Mira [ab12cd] \u2014 x")])
+        c.boss("alpha-x", [], NOW - DAY, sends=[(NOW - DAY + 60, "Mira [ffffff]")])
+        _, wk, _ = week(c.dir)
+        self.assertEqual(wk["tracks"]["alpha-x"]["tokens"]["build"], 0)
+
     def test_a_session_dispatched_by_socket_is_not_counted_twice(self):
         c = Cfg()
         sock = "uds:/run/cc-socks/1.sock"
@@ -301,6 +350,25 @@ class FinishedTrack(unittest.TestCase):
                cmds=[(NOW - 2 * DAY + 7200, "boss-goal status alpha-x met 'x'")])
         idx, _, _ = week(c.dir)
         self.assertAlmostEqual(idx.cut["alpha-x"], NOW - 2 * DAY + 9000 + core.CUT_GRACE_S, delta=1)
+
+    def test_a_failed_met_command_does_not_cut_the_track(self):
+        c = Cfg()
+        c.goal("alpha-x")
+        c.worker(NOW - 2 * DAY, [], name="Mira", until=NOW - 2 * DAY + 20000)
+        c.boss("alpha-x", [], NOW - 2 * DAY, sends=[(NOW - 2 * DAY + 60, "Mira")], until=NOW - DAY,
+               cmds=[(NOW - 2 * DAY + 7200, "boss-goal status alpha-x met", False)])
+        idx, _, _ = week(c.dir)
+        self.assertNotIn("alpha-x", idx.cut)
+
+    def test_a_succeeding_met_command_cuts_the_track(self):
+        c = Cfg()
+        c.goal("alpha-x")
+        c.worker(NOW - 2 * DAY, [], name="Mira", until=NOW - 2 * DAY + 20000)
+        c.boss("alpha-x", [], NOW - 2 * DAY, sends=[(NOW - 2 * DAY + 60, "Mira")], until=NOW - DAY,
+               cmds=[(NOW - 2 * DAY + 7000, "boss-goal status alpha-x met", False),
+                     (NOW - 2 * DAY + 7200, "boss-goal status alpha-x met 'all ticked'")])
+        idx, _, _ = week(c.dir)
+        self.assertAlmostEqual(idx.cut["alpha-x"], NOW - 2 * DAY + 7200 + core.CUT_GRACE_S, delta=1)
 
     def test_a_track_not_marked_met_runs_to_the_end_of_its_boss(self):
         idx, wk, _ = self.finished(status="open")
