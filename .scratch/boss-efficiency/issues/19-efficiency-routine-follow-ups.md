@@ -17,4 +17,8 @@
 
 **Claimed by:** Rune 2026-11-04 23:30
 
-**Status:** in-progress
+**Accepted residual:** a dry run with an existing `pm/` directory still opens (creates or truncates) the empty transcripts lock file, while `routines/boss-efficiency.md` says "writes nothing". Harmless; reword to "writes no report, state or log" at the next touch of that file.
+
+**Done:** PR 53 merged as de0e2ca (head 7f4aaf9, CI green); Codex follow-up owed on it.
+
+**Status:** done
