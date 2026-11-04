@@ -267,7 +267,16 @@ has written a handoff and pushed (Phase B asks for both in every dispatch); you
 task starts at ~30k instead of where the last one ended. Re-reading the repo is
 cheaper than carrying the last task's dead ends. Restart with
 `restart --require-idle`: it refuses a worker that is not idle, so a turn that
-started after the report is never cut off.
+started after the report is never cut off. A refusal as busy is not a reason to
+wait for an idle notice, which can be lost (one sampled gap: 92 minutes): add
+`--wait-idle 600` and run it in the background. It reads the status every 20 s,
+types nothing while the worker is busy or waiting, and restarts once a read says
+idle; say on the tracker that you are retrying. A worker still busy when the
+time is up stays refused. A status of `shell` (a background shell running) is
+read mid-turn as well as after it, so it counts as busy: it is retried, never
+typed at. A worker whose turn ended but whose background shell keeps running
+stays refused after the wait; stop its shell, or `retire --kill` it if its
+handoff is on disk.
 
 **A task bigger than one smart zone gets split.** Keep `CTX` in view on every
 `list` — `ListAgents` does not carry it. At **150k** a worker shows `CTX-SPLIT`:

@@ -9,8 +9,8 @@
 # Usage:
 #   boss-lifecycle.sh spawn <project-dir> [name-hint] [--model <name>] [--concierge]
 #   boss-lifecycle.sh claim <pane-id> [name]
-#   boss-lifecycle.sh retire <pane-id> [--kill] [--require-idle [--expect-session S] [--expect-last U]]
-#   boss-lifecycle.sh restart <pane-id> [--require-idle [--expect-session S] [--expect-last U]]
+#   boss-lifecycle.sh retire <pane-id> [--kill] [--require-idle [--expect-session S] [--expect-last U] [--wait-idle SECONDS]]
+#   boss-lifecycle.sh restart <pane-id> [--require-idle [--expect-session S] [--expect-last U] [--wait-idle SECONDS]]
 #   boss-lifecycle.sh move <pane-id> <new-project-dir>
 #   boss-lifecycle.sh list [--mine]
 #
@@ -41,12 +41,14 @@ SHELL_CMDS='^(bash|zsh|fish|sh|dash)$'
 # see "Choosing a worker's model" in SKILL.md — the criterion is NOT task size.
 # --require-idle, --expect-session <id> and --expect-last <uuid> are the
 # require-idle restart path (see retire_require_idle); --force does not relax them.
+# --wait-idle <seconds> turns the busy refusal into a timer: see retire_require_idle.
 FORCE=""
 MODEL=""
 ROLE=""
 REQUIRE_IDLE=""
 EXPECT_SESSION=""
 EXPECT_LAST=""
+WAIT_IDLE=""
 _args=()
 _want=""
 for _a in "$@"; do
@@ -58,11 +60,15 @@ for _a in "$@"; do
   elif [[ "$_a" == --model=* ]]; then MODEL="${_a#--model=}"
   elif [[ "$_a" == "--expect-session" ]]; then _want=EXPECT_SESSION
   elif [[ "$_a" == "--expect-last" ]]; then _want=EXPECT_LAST
+  elif [[ "$_a" == "--wait-idle" ]]; then _want=WAIT_IDLE
   else _args+=("$_a"); fi
 done
 if [[ -n "$_want" ]]; then printf '%s\n' "an option needs a value" >&2; exit 1; fi
-if [[ -z "$REQUIRE_IDLE" && ( -n "$EXPECT_SESSION" || -n "$EXPECT_LAST" ) ]]; then
-  printf '%s\n' "--expect-session / --expect-last only apply with --require-idle" >&2; exit 1
+if [[ -z "$REQUIRE_IDLE" && ( -n "$EXPECT_SESSION" || -n "$EXPECT_LAST" || -n "$WAIT_IDLE" ) ]]; then
+  printf '%s\n' "--expect-session / --expect-last / --wait-idle only apply with --require-idle" >&2; exit 1
+fi
+if [[ -n "$WAIT_IDLE" && ! "$WAIT_IDLE" =~ ^[0-9]+$ ]]; then
+  printf '%s\n' "--wait-idle takes a number of seconds" >&2; exit 1
 fi
 set -- ${_args[@]+"${_args[@]}"}
 if [[ -n "$ROLE" && "${1:-}" != spawn ]]; then
@@ -326,23 +332,44 @@ retire_require_idle() {
   local pane=$1 row sid st pin past
   row=$(python3 "$PANES_PY" --state "$pane" 2>/dev/null) || true
   IFS=$'\t' read -r sid st pin past <<<"$row"
+  # --wait-idle: a busy worker is read again on a timer instead of being
+  # refused, and the boss is not left waiting on an idle notice that may never
+  # come (a sampled gap: 92 minutes). Only the status read repeats; nothing is
+  # typed until a read says idle, and the session and pin checks below still
+  # run on that last read, so a busy worker is never typed at.
+  if [[ -n "$WAIT_IDLE" && "$st" =~ ^(busy|waiting|shell)$ ]]; then
+    local every=${BOSS_RETRY_EVERY:-20} t0=$SECONDS
+    printf '%s is %s: retrying every %s s for up to %s s, nothing is typed meanwhile\n' \
+      "$pane" "$st" "$every" "$WAIT_IDLE" >&2
+    while [[ "$st" =~ ^(busy|waiting|shell)$ ]] && (( SECONDS - t0 < WAIT_IDLE )); do
+      sleep "$every"
+      row=$(python3 "$PANES_PY" --state "$pane" 2>/dev/null) || true
+      IFS=$'\t' read -r sid st pin past <<<"$row"
+    done
+    [[ "$st" =~ ^(busy|waiting|shell)$ ]] && die "$pane is still $st after $WAIT_IDLE s: not retiring (--require-idle)"
+  fi
   [[ -z "$EXPECT_SESSION" || "$sid" == "$EXPECT_SESSION" ]] ||
     die "$pane runs session ${sid:--}, not $EXPECT_SESSION: not retiring (--require-idle)"
   [[ "$EXPECT_LAST" != "-" && "$pin" != "-" || -z "$EXPECT_LAST" ]] ||
     die "$pane: no pin to compare (expected ${EXPECT_LAST}, found ${pin:--}): not retiring"
   [[ -z "$EXPECT_LAST" || "$pin" == "$EXPECT_LAST" ]] ||
     die "$pane has new input since the check (last record ${pin:--}, expected $EXPECT_LAST): not retiring"
+  # `shell` is no idle: it is read mid-turn too, with a background shell running
+  # (measured 2.1.311, a turn waiting on a Monitor), so /exit would hit a busy worker.
   [[ "$st" == "idle" ]] ||
     die "$pane status is '${st:-unknown}', not idle: not retiring (--require-idle)"
   tmux send-keys -t "$pane" '/exit' Enter
   wait_for_cmd "$pane" "$SHELL_CMDS" "${BOSS_EXIT_WAIT:-15}" && return 0
   if tmux capture-pane -t "$pane" -p | grep -q 'Background work is running'; then
-    # Still idle on the same input as before /exit (the 4th field leaves out
+    # Same session on the same input as before /exit (the 4th field leaves out
     # the records /exit writes itself): no turn started, so the dialog lists
-    # leftovers. Anything else is a turn in the gap.
+    # leftovers. Anything else is a turn in the gap. The status cannot be
+    # asked to read idle here: with this dialog up the session reports
+    # `waiting` (measured 2026-11-04, Claude Code 2.1.311), which refused every
+    # idle worker that had background work left.
     local sid2 st2 pin2 past2 rc=1
     IFS=$'\t' read -r sid2 st2 pin2 past2 <<<"$(python3 "$PANES_PY" --state "$pane" 2>/dev/null)"
-    if [[ "$sid2" == "$sid" && "$st2" == "idle" && "$past2" == "$past" ]]; then
+    if [[ "$sid2" == "$sid" && "$st2" =~ ^(idle|waiting|shell)$ && "$past2" == "$past" ]]; then
       rc=0; stop_leftover_background "$pane" || rc=$?
     fi
     [[ $rc == 0 ]] && return 0
@@ -467,5 +494,5 @@ case "${1:-}" in
   move)    shift; cmd_move "$@" ;;
   list)    shift; cmd_list "$@" ;;
   ctx)     shift; python3 "$PANES_PY" "$@" ;;
-  *) die "usage: $(basename "$0") {spawn <dir> [name] [--model M] [--concierge] | claim <pane> [name] | retire <pane> [--kill] | restart <pane> | move <pane> <dir> | list [--mine] | ctx [pane]} [--force] [--require-idle [--expect-session S] [--expect-last U]]" ;;
+  *) die "usage: $(basename "$0") {spawn <dir> [name] [--model M] [--concierge] | claim <pane> [name] | retire <pane> [--kill] | restart <pane> | move <pane> <dir> | list [--mine] | ctx [pane]} [--force] [--require-idle [--expect-session S] [--expect-last U] [--wait-idle SECONDS]]" ;;
 esac
