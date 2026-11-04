@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.21.2 — 2026-11-04
+
+- **A weekly routine measures where the time and tokens go** (`boss-efficiency`): per
+  track, wall time by state, tokens by phase, questions per day, CI waits and the
+  share of the token budget, with workers found through the boss's socket. It speaks on
+  Slack only when a track's own spending changes against the week before, or when the
+  measuring failed; the fleet share and the coverage are in the report and never
+  trigger. Reports and state stay under the config dir. See `routines/boss-efficiency.md`.
+
 ## 0.21.1 — 2026-11-04
 
 - **A boss says when the plugin on this machine is behind.** On 2026-11-04 the
