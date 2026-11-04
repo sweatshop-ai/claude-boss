@@ -416,6 +416,10 @@ class Index:
                     for s, a, b in src for c in s.get("done_commits", []) if a <= c < b]
             self.cut[tr] = max([T] + done) + CUT_GRACE_S
 
+    def clip_end(self, track, end):
+        """A window's end, or where the track finished if that is sooner."""
+        return min(end, self.cut.get(track, end))
+
     def tracks(self):
         return sorted(set(self.workers) | set(self.bosses))
 
@@ -447,8 +451,8 @@ def _boundary(s):
 
 def measure_track(index, track, start, end):
     """One track in one window: seconds by state, tokens by phase, asks, CI waits."""
-    days = (end - start) / 86400
-    end = min(end, index.cut.get(track, end))
+    days = (end - start) / 86400          # a rate stays per day of the window, not of the shortened track
+    end = index.clip_end(track, end)
     ev, wh, tok = [], collections.Counter(), collections.Counter()
     spans = []
     ci_waits = 0
@@ -511,7 +515,7 @@ def coverage(index, track, start, end):
     something within COVER_GRACE_S of it. Uncovered ones come from workers this
     routine did not attribute.
     """
-    end = min(end, index.cut.get(track, end))
+    end = index.clip_end(track, end)
     live = []
     for s, a, b in index.workers.get(track, []):
         live += [(x - COVER_GRACE_S, y + COVER_GRACE_S) for x, y, c in _clip(s["segs"], a, b) if c != "idle"]
