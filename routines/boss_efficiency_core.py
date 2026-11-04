@@ -82,6 +82,7 @@ FROM = re.compile(r'<cross-session-message from="([^"]+)"')
 DISP = re.compile(r"Boss dispatch from ([^,\n]+), track [`'\"]?([A-Za-z0-9._-]+)")
 NOTIF = re.compile(r"<tool-use-id>(toolu_\w+)</tool-use-id>")
 FROM_NAME = re.compile(r'<cross-session-message[^>]*? from-name="([^"]*)"')
+OWN_REF = re.compile(r"This session is ([A-Za-z0-9_][A-Za-z0-9._-]*) \[([0-9a-f]+)\]")
 SESSION_NAME = re.compile(r"Your name in this session is ([A-Za-z0-9_][A-Za-z0-9._-]*?)\.(?:\s|$)")
 GOAL_STATUS = re.compile(r"boss-goal\s+status\s+([a-z0-9._-]+)\s+(open|paused|met)\b")
 _HEREDOC = re.compile(r"<<-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
@@ -116,6 +117,12 @@ def _command_starts(cmd):
             if h: pending.append(h.group(2)); i = h.end(); continue
         i += 1
     return starts
+
+
+def _recipient(to):
+    """A SendMessage target -> (name, ref or None); the ref is the `[ref]` that tells two sessions of a name apart."""
+    m = re.fullmatch(r"(.*?)\s*\[([^\]]*)\]", to)
+    return (m.group(1), m.group(2)) if m else (to, None)
 
 
 def _runs(cmd, m):
@@ -209,7 +216,8 @@ def scan_session(path, tracks=()):
     path = str(path)
     recs, tools, notif, msgs = [], {}, {}, {}
     out = dict(sid=os.path.basename(path)[:-6], boss_regs=[], asks=[], xmsgs=[], dispatches=[], subs=[],
-               name=None, sends=[], heard=[], done_commits=[], goal_status=[])
+               name=None, refs=[], sends=[], heard=[], done_commits=[], goal_status=[])
+    pending_marks = {}                            # tool_use id -> goal marks, kept once the command succeeds
     tracks = set(tracks)
     alt = "|".join(re.escape(t) for t in sorted(tracks, key=len, reverse=True))
     disp3 = re.compile(r"pm/(" + alt + r")\.(?:dispatch|md|goal)") if alt else None
@@ -220,6 +228,9 @@ def scan_session(path, tracks=()):
         if out["name"] is None and d.get("type") == "attachment" and "Your name in this session" in line:
             m = SESSION_NAME.search(json.dumps(d.get("attachment")))
             if m: out["name"] = m.group(1)
+        if "This session is " in line:            # a ListAgents result names the session and its ref
+            for nm, ref in OWN_REF.findall(line):
+                if nm == out["name"]: out["refs"].append(ref)
         if "<task-notification>" in line and t:
             for m in NOTIF.findall(line): notif.setdefault(m, ts(t))
         if d.get("type") not in ("user", "assistant") or not t or d.get("isSidechain"): return
@@ -235,15 +246,15 @@ def scan_session(path, tracks=()):
                                           bg=bool(inp.get("run_in_background")) or b["name"] == "Monitor",
                                           cmd=(inp.get("command") or "")[:260])
                     if b["name"] == "AskUserQuestion": out["asks"].append(T)
-                    if b["name"] == "SendMessage" and isinstance(inp.get("to"), str): out["sends"].append((T, re.sub(r"\s*\[[^\]]*\]$", "", inp["to"])))
+                    if b["name"] == "SendMessage" and isinstance(inp.get("to"), str): out["sends"].append((T, *_recipient(inp["to"])))
                     if b["name"] == "Bash":
                         c = inp.get("command", "") or ""
                         r = BOSSREG.search(c)
                         plain = not c.lstrip().startswith(("grep", "rg", "cat", "sed"))
                         if r and plain:
                             out["boss_regs"].append((T, r.group(1)))
-                        for g in GOAL_STATUS.finditer(c):
-                            if _runs(c, g): out["goal_status"].append((T, g.group(1), g.group(2)))
+                        found = [(T, g.group(1), g.group(2)) for g in GOAL_STATUS.finditer(c) if _runs(c, g)]
+                        if found: pending_marks[b["id"]] = found
                         if DONE_WORD.search(c) and any(_runs(c, gc) for gc in GIT_COMMIT.finditer(c)):
                             out["done_commits"].append(T)
             recs.append((T, "a"))
@@ -253,6 +264,8 @@ def scan_session(path, tracks=()):
             for b in content:
                 if isinstance(b, dict) and b.get("type") == "tool_result":
                     is_result = True
+                    if b.get("tool_use_id") in pending_marks and not b.get("is_error"):
+                        out["goal_status"].extend(pending_marks.pop(b["tool_use_id"]))     # a failed command marks nothing
                     x = tools.get(b.get("tool_use_id"))
                     if x and x["e"] is None:
                         x["e"] = T
@@ -270,7 +283,7 @@ def scan_session(path, tracks=()):
                 if trk and g and trk not in tracks: trk, g = None, None
                 out["xmsgs"].append((T, f.group(1), trk, bool(g)))
                 n = FROM_NAME.search(tx[:400])
-                if n: out["heard"].append((T, n.group(1)))
+                if n: out["heard"].append((T, n.group(1), None))
         recs.append((T, "r" if is_result else "u"))
 
     with open(path, errors="replace") as fh:
@@ -435,13 +448,19 @@ class Index:
             if s["sid"] not in boss_sids and s.get("name"): by_name[s["name"]].append(s)
         for b in sessions:
             if b["sid"] not in boss_sids: continue
-            for T, name in b.get("sends", []) + b.get("heard", []):
+            for T, name, ref in b.get("sends", []) + b.get("heard", []):
                 for tr, a, z in windows[b["sid"]]:
                     if not a <= T <= z: continue
                     near = [s for s in by_name.get(name, ())
                             if s["start"] - NAME_SLACK_S <= T <= session_end(s) + NAME_SLACK_S]
                     # a reused name inside the slack: only the session alive at T, else the nearest
                     near.sort(key=lambda s: (max(s["start"] - T, T - session_end(s), 0), -s["start"]))
+                    if ref:
+                        # a session that knows another ref is not the one addressed; among sessions sharing the name, only a holder is
+                        live = [s for s in near if s["start"] <= T <= session_end(s)]
+                        near, shared = live or near, len(live or near) > 1
+                        near = [s for s in near if not s["refs"] or ref in s["refs"]]
+                        if shared: near = [s for s in near if ref in s["refs"]]
                     for s in near[:1]:
                         lo, hi = max(a, s["start"]), min(z, session_end(s))
                         if hi <= lo: continue
