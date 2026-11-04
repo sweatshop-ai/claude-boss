@@ -6,7 +6,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Claimed by:** Bilal 2026-11-04 20:49
+**Claimed by:** Amara 2026-11-04 20:49
 
 **Status:** in-progress
 
