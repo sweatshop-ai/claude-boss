@@ -279,6 +279,24 @@ class AttributionByName(unittest.TestCase):
         mine = "This session is Mira [ab12cd] \u2014 the name other sessions use to message it.\n\nPeer sessions (1):"
         self.assertEqual(self.twins("Mira [ffffff]", mine), 0)
 
+    def test_a_ref_send_keeps_the_session_alive_when_the_other_is_only_inside_the_slack(self):
+        c = Cfg()
+        c.goal("alpha-x")
+        c.worker(NOW - DAY - 3600, [], cost=900, name="Mira", until=NOW - DAY + 30)
+        c.worker(NOW - DAY + 60, [], cost=7000, name="Mira", until=NOW - DAY + 3600)
+        c.boss("alpha-x", [], NOW - DAY - 3600, sends=[(NOW - DAY + 100, "Mira [ab12cd]")], until=NOW - DAY + 3600)
+        _, wk, _ = week(c.dir)
+        self.assertEqual(wk["tracks"]["alpha-x"]["tokens"]["build"], 7000)
+
+    def test_a_lone_session_that_holds_another_ref_is_not_attributed(self):
+        c = Cfg()
+        c.goal("alpha-x")
+        c.worker(NOW - DAY, [], cost=7000, name="Mira", until=NOW - DAY + 3600,
+                 listing=[(NOW - DAY + 5, "This session is Mira [ab12cd] \u2014 x")])
+        c.boss("alpha-x", [], NOW - DAY, sends=[(NOW - DAY + 60, "Mira [ffffff]")])
+        _, wk, _ = week(c.dir)
+        self.assertEqual(wk["tracks"]["alpha-x"]["tokens"]["build"], 0)
+
     def test_a_session_dispatched_by_socket_is_not_counted_twice(self):
         c = Cfg()
         sock = "uds:/run/cc-socks/1.sock"

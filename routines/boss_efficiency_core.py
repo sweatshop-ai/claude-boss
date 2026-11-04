@@ -217,7 +217,7 @@ def scan_session(path, tracks=()):
     recs, tools, notif, msgs = [], {}, {}, {}
     out = dict(sid=os.path.basename(path)[:-6], boss_regs=[], asks=[], xmsgs=[], dispatches=[], subs=[],
                name=None, refs=[], sends=[], heard=[], done_commits=[], goal_status=[])
-    marks = {}                                    # tool_use id -> goal marks, kept once the command succeeds
+    pending_marks = {}                            # tool_use id -> goal marks, kept once the command succeeds
     tracks = set(tracks)
     alt = "|".join(re.escape(t) for t in sorted(tracks, key=len, reverse=True))
     disp3 = re.compile(r"pm/(" + alt + r")\.(?:dispatch|md|goal)") if alt else None
@@ -254,7 +254,7 @@ def scan_session(path, tracks=()):
                         if r and plain:
                             out["boss_regs"].append((T, r.group(1)))
                         found = [(T, g.group(1), g.group(2)) for g in GOAL_STATUS.finditer(c) if _runs(c, g)]
-                        if found: marks[b["id"]] = found
+                        if found: pending_marks[b["id"]] = found
                         if DONE_WORD.search(c) and any(_runs(c, gc) for gc in GIT_COMMIT.finditer(c)):
                             out["done_commits"].append(T)
             recs.append((T, "a"))
@@ -264,8 +264,8 @@ def scan_session(path, tracks=()):
             for b in content:
                 if isinstance(b, dict) and b.get("type") == "tool_result":
                     is_result = True
-                    if b.get("tool_use_id") in marks and not b.get("is_error"):
-                        out["goal_status"].extend(marks.pop(b["tool_use_id"]))     # a failed command marks nothing
+                    if b.get("tool_use_id") in pending_marks and not b.get("is_error"):
+                        out["goal_status"].extend(pending_marks.pop(b["tool_use_id"]))     # a failed command marks nothing
                     x = tools.get(b.get("tool_use_id"))
                     if x and x["e"] is None:
                         x["e"] = T
@@ -455,9 +455,12 @@ class Index:
                             if s["start"] - NAME_SLACK_S <= T <= session_end(s) + NAME_SLACK_S]
                     # a reused name inside the slack: only the session alive at T, else the nearest
                     near.sort(key=lambda s: (max(s["start"] - T, T - session_end(s), 0), -s["start"]))
-                    if ref and len(near) > 1:
-                        # two sessions share the name: only one that holds the ref is the one addressed
-                        near = [s for s in near if ref in s.get("refs", ())][:1]
+                    if ref:
+                        # a session that knows another ref is not the one addressed; among sessions sharing the name, only a holder is
+                        live = [s for s in near if s["start"] <= T <= session_end(s)]
+                        near, shared = live or near, len(live or near) > 1
+                        near = [s for s in near if not s["refs"] or ref in s["refs"]]
+                        if shared: near = [s for s in near if ref in s["refs"]]
                     for s in near[:1]:
                         lo, hi = max(a, s["start"]), min(z, session_end(s))
                         if hi <= lo: continue
