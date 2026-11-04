@@ -10,7 +10,8 @@
 
 **Why:** review and the work after it were about 40% of tokens and 8% of project duration. In a sample of 738 findings on 40 PRs, 48% were tests, docs or style, and from round 4 half were in code an earlier fix wrote. But 15 of the 33 grave defects came after round 1, 7 of them in the original code, so one round for everybody is not the answer.
 
-**Blocked by:** None (can start immediately)
+**Blocked by:**
+- External: Thierry settles a grilling round on what counts as sensitive; not yet asked
 
 **Status:** needs-grilling
 

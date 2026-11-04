@@ -4,7 +4,8 @@
 
 **Why:** 77% of workers pass 150k and 38% pass 250k. A turn costs 19k units at 100-150k of context, 39k at 250-400k, 53k above 400k. A restart costs about 425k units of orientation, so it pays after about 35 turns. Upper bound on the saving: 14% of tokens.
 
-**Blocked by:** None (can start immediately)
+**Blocked by:**
+- External: Thierry settles a grilling round on when not to restart; not yet asked
 
 **Status:** needs-grilling
 
