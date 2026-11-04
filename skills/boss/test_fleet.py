@@ -72,6 +72,12 @@ class WhoIsTheConcierge(unittest.TestCase):
         seats = fleet.view(fleet.MemoryTmux([pane]), [row])
         self.assertIsNone(fleet.concierge_of(seats, "%1"))
 
+    def test_a_prompt_blocked_concierge_still_exists_for_spawn(self):
+        pane = fleet.Pane("%6", owner="%1", command="claude", role="concierge")
+        row = dict(rec("c", "%6", "Odile"), status="waiting", waitingFor="permission prompt")
+        seats = fleet.view(fleet.MemoryTmux([pane]), [row])
+        self.assertEqual(fleet.concierge_of(seats, "%1", blocked=True).pane.id, "%6")
+
     def test_a_concierge_holding_a_question_counts(self):
         pane = fleet.Pane("%6", owner="%1", command="claude", role="concierge")
         row = dict(rec("c", "%6", "Odile"), status="waiting", waitingFor="input needed")
