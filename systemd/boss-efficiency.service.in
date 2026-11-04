@@ -1,0 +1,13 @@
+[Unit]
+Description=Weekly measure of where the boss tracks spend time and tokens
+Documentation=file://@ROOT@/routines/boss-efficiency.md
+
+[Service]
+# @ROOT@ is the stable link routines/claude-boss, not a version directory;
+# bin/boss-link moves it on every session start, so an upgrade needs no re-render.
+Type=oneshot
+ExecStart=@ROOT@/routines/boss-efficiency.sh
+# A scan of the transcripts takes minutes at nice 19; it can also wait up to 2 h
+# for the transcripts lock. The backstop is for a wedged interpreter.
+TimeoutStartSec=3h
+Nice=19
