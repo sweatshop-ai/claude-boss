@@ -4,7 +4,9 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** open
+**Claimed by:** Anouk 2026-11-05 00:07
+
+**Status:** in-progress
 
 PR 45 (concierge)
 - [ ] P2 `skills/boss/fleet.py:173-175` and `skills/boss/boss-lifecycle.sh:284`: `concierge_of` skips a concierge waiting on a permission or trust prompt, and `spawn --concierge` reuses the same lookup, so it starts a second concierge. Spawn needs an existence check that counts a prompt-blocked live concierge; the guard and pulse keep the current "holds the question" rule.
