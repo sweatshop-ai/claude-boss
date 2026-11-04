@@ -14,8 +14,10 @@
 
 **Claimed by:** Layla 2026-11-04 22:16
 
-**Status:** in-progress
+**Status:** done
 
 - [x] Finding 3: read `request_stop` and say whether a replayed stop can reach a hub that had no stop coming, with the code line, and a test if it can
 - [x] Findings 1 and 2 decided and written into the PR or the SPEC; 4 and 5 applied
-- [ ] One PR, one review round, CI green; no tag
+- [x] One PR, one review round, CI green; no tag
+
+**Done 2026-11-04:** sheaf PR 196 merged as ca80ef57b98a62f83e170d7ca84b45f03ae4de3c, no tag. The py3.14 proof for this code path is tonight's 01:00 nightly on sheaf (read by Anton).
