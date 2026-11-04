@@ -67,6 +67,8 @@ def read_goal(track):
 def team(sid):
     """This boss's live workers: (the idle ones as (name, coordinate), how many in all).
 
+    The concierge is not one: it sits idle by design, and no ticket is for it.
+
     The coordinate is the session:window.pane INDEX form, because that is the
     only shape the boss may quote to the owner — it is what they see on the pane
     and what `boss-lifecycle.sh list` prints. A raw `%4` is banned by safety
@@ -80,7 +82,7 @@ def team(sid):
     if not me:
         return [], 0
     idle, size = [], 0
-    for seat in fleet.owned(seats, me.pane.id):
+    for seat in fleet.workers(seats, me.pane.id):
         if not seat.session:
             continue
         size += 1

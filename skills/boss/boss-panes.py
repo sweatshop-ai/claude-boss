@@ -90,7 +90,7 @@ def flags_of(seat, ctx, cost):
     rec = seat.session
     role = policy.BOSS if boss_store.is_boss(rec.get("sessionId") or "") else policy.WORKER
     pol = policy.flag_for(ctx, cost, role) if transcript_for(rec) else []
-    return pol + seat.flags()
+    return ([fleet.CONCIERGE] if seat.pane.role == fleet.CONCIERGE else []) + pol + seat.flags()
 
 
 # Every field `get` knows, and how to read it off a seat.

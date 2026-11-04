@@ -126,6 +126,7 @@ case "$1" in
       '#{pane_id}') echo '%5' ;;
       '#{@boss_pane}') echo '' ;;
       '#{pane_current_command}') cat "$STUB_DIR/cmd" ;;
+      '#{@worker_role}') cat "$STUB_DIR/role" 2>/dev/null ;;
       *) echo '' ;;
     esac ;;
   send-keys)
@@ -136,6 +137,7 @@ case "$1" in
       echo bash > "$STUB_DIR/cmd"; fi ;;
   set-option)
     if [[ -f "$STUB_DIR/set-fails" ]]; then exit 1; fi ;;
+  split-window) echo %5 ;;
   capture-pane)
     if [[ -s "$STUB_DIR/dialog" ]]; then cat "$STUB_DIR/dialog"
     elif [[ -f "$STUB_DIR/dialog" ]]; then
@@ -352,6 +354,33 @@ class RestartKeepsName(unittest.TestCase):
         self.assertEqual(len(launch), 1, calls)
         self.assertIn("--disallowedTools AskUserQuestion", launch[0])
 
+    def launches(self):
+        return [c for c in (self.tmp / "calls").read_text().splitlines()
+                if c.startswith("send-keys") and " --model " in c]
+
+    def test_a_concierge_keeps_ask_user_question_and_runs_on_sonnet(self):
+        # It holds the owner's questions; everyone else sends theirs to it.
+        (self.tmp / "cmd").write_text("bash\n")
+        env = dict(os.environ, PATH="%s:%s" % (self.tmp / "bin", os.environ["PATH"]), TMUX="stub",
+                   TMUX_PANE="%1", STUB_DIR=str(self.tmp), STUB_ROW="w-sid\tidle\tpin1")
+        r = subprocess.run(["bash", str(self.tmp / "boss-lifecycle.sh"), "spawn", str(self.tmp), "--concierge"],
+                           env=env, capture_output=True, text=True, timeout=60)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        launch = self.launches()
+        self.assertEqual(len(launch), 1)
+        self.assertNotIn("--disallowedTools", launch[0])
+        self.assertIn("--model 'sonnet'", launch[0])
+        self.assertIn("set-option -p -t %5 @worker_role concierge",
+                      (self.tmp / "calls").read_text())
+
+    def test_a_restarted_concierge_is_still_a_concierge(self):
+        (self.tmp / "role").write_text("concierge\n")
+        r, _ = self.run_restart()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        launch = self.launches()
+        self.assertNotIn("--disallowedTools", launch[0])
+        self.assertIn("--model 'sonnet'", launch[0])
+
     def test_a_name_held_elsewhere_is_reported_not_claimed(self):
         # Another live session holds Wanda, so the hook names the new one Greta.
         (self.tmp / "name-after").write_text("Greta\n")
@@ -392,9 +421,9 @@ class ListAndFields(unittest.TestCase):
         self.env = dict(os.environ, PATH="%s:%s" % (bindir, os.environ["PATH"]), TMUX="stub",
                         TMUX_PANE="%1", STUB_DIR=str(self.tmp), CLAUDE_CONFIG_DIR=str(self.tmp))
         (self.tmp / "panes").write_text(
-            "%1\tboss:0.0\t%1\tclaude\t/w/boss\t-\n"
-            "%5\tboss:0.1\t%1\tclaude\t/w/api\tWanda\n"
-            "%6\tmail:1.0\t-\tbash\t/w/mail\tGone\n")
+            "%1\tboss:0.0\t%1\tclaude\t/w/boss\t-\t-\n"
+            "%5\tboss:0.1\t%1\tclaude\t/w/api\tWanda\t-\n"
+            "%6\tmail:1.0\t-\tbash\t/w/mail\tGone\t-\n")
 
     def tearDown(self):
         for k in self.kids:
@@ -465,7 +494,7 @@ class ListAndFields(unittest.TestCase):
 
     def test_a_stamp_that_fails_fails_the_claim(self):
         self.session("s-x", "%6", "Xavi", 1000)
-        (self.tmp / "panes").write_text("%6\tmail:1.0\t-\tclaude\t/w/mail\t-\n")
+        (self.tmp / "panes").write_text("%6\tmail:1.0\t-\tclaude\t/w/mail\t-\t-\n")
         r = self.call("stamp", "%6", "%1", script="boss-panes.py")
         self.assertEqual(r.returncode, 0)
         (self.tmp / "tmux-fails").touch()

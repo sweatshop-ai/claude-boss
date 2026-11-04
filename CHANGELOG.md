@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.21.0 — 2026-11-04
+
+- **A question to the owner no longer stops the boss.** A new session, the
+  concierge (`boss-lifecycle.sh spawn <dir> --concierge`), holds the
+  `AskUserQuestion`, and the boss goes on dispatching. While one lives, the guard
+  refuses the boss's own question; with none, a dead one, or no answer from tmux,
+  the question goes through as before. Measured on 36 boss sessions: in 420 of 421
+  questions over two minutes the boss did nothing until the answer, with 762 worker
+  messages queued. See `references/concierge.md`.
+- **It does not filter questions.** A filter was built into its brief and measured
+  first: on 87 labelled past questions it sent back 14 of 50 that were the owner's and
+  let through 23 of 37 that were not. It was taken out. Whether a question is the
+  owner's stays the boss's judgement, and the concierge asks whatever it gets.
+
 ## 0.20.0 — 2026-11-02
 
 - **A worker proves its run hits its own copy.** A worktree separates files, not
