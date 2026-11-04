@@ -6,7 +6,7 @@
 
 **Claimed by:** Ruben 2026-11-04 20:52
 
-**Status:** in-progress
+**Status:** done
 
-- [ ] The cause is named, with evidence
-- [ ] A gap between installed and released version is reported where the owner sees it
+- [x] The cause is named, with evidence (PR 47 body: install record timestamps, unpinned third-party marketplace, no tag after v0.5.0, .in_use pids)
+- [x] A gap between installed and released version is reported where the owner sees it (boss-version-gap at boss session start, said once in the first reply; PR 47, CI green on 06cc852, gate-ready pending Codex follow-up)
