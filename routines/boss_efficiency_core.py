@@ -90,7 +90,7 @@ _SEARCH_WORD = re.compile(r"\b(?:grep|rg|cat|sed|echo|printf)\b")
 def _runs(cmd, m):
     """True when the match is a command that runs, not text inside a search, echo or quote."""
     seg = re.split(r"[;&|\n]", cmd[:m.start()])[-1]
-    return not _SEARCH_WORD.search(seg) and seg.count("'") % 2 == 0 and seg.count('"') % 2 == 0
+    return not seg.lstrip().startswith("#") and not _SEARCH_WORD.search(seg) and seg.count("'") % 2 == 0 and seg.count('"') % 2 == 0
 
 
 GIT_COMMIT = re.compile(r"\bgit\s+(?:-C\s+\S+\s+)?commit\b")
@@ -203,17 +203,17 @@ def scan_session(path, tracks=()):
                                           bg=bool(inp.get("run_in_background")) or b["name"] == "Monitor",
                                           cmd=(inp.get("command") or "")[:260])
                     if b["name"] == "AskUserQuestion": out["asks"].append(T)
-                    if b["name"] == "SendMessage" and isinstance(inp.get("to"), str): out["sends"].append((T, inp["to"]))
+                    if b["name"] == "SendMessage" and isinstance(inp.get("to"), str): out["sends"].append((T, re.sub(r"\s*\[[^\]]*\]$", "", inp["to"])))
                     if b["name"] == "Bash":
                         c = inp.get("command", "") or ""
                         r = BOSSREG.search(c)
                         plain = not c.lstrip().startswith(("grep", "rg", "cat", "sed"))
                         if r and plain:
                             out["boss_regs"].append((T, r.group(1)))
-                        g = GOAL_STATUS.search(c)
-                        if g and plain and _runs(c, g): out["goal_status"].append((T, g.group(1), g.group(2)))
-                        gc = GIT_COMMIT.search(c)
-                        if plain and gc and _runs(c, gc) and DONE_WORD.search(c): out["done_commits"].append(T)
+                        for g in GOAL_STATUS.finditer(c):
+                            if _runs(c, g): out["goal_status"].append((T, g.group(1), g.group(2)))
+                        if DONE_WORD.search(c) and any(_runs(c, gc) for gc in GIT_COMMIT.finditer(c)):
+                            out["done_commits"].append(T)
             recs.append((T, "a"))
             return
         is_result = False
@@ -389,7 +389,7 @@ class Index:
                 self.workers[tr].append((s, T, end))
                 taken[s["sid"]].append((T, end))
         self._attribute_by_name(sessions, boss_sids, windows, taken)
-        self._cut_finished(sessions)
+        self._cut_finished(sessions, boss_sids)
 
     def _attribute_by_name(self, sessions, boss_sids, windows, taken):
         """A worker the boss sent to or heard from by name counts in the boss's window.
@@ -417,10 +417,11 @@ class Index:
                             self.workers[tr].append((s, x, y))
                             taken[s["sid"]].append((x, y))
 
-    def _cut_finished(self, sessions):
+    def _cut_finished(self, sessions, boss_sids):
         """A track whose goal was last marked met ends at that mark or its last done commit."""
         last = {}
         for s in sessions:
+            if s["sid"] not in boss_sids: continue
             for T, tr, value in s.get("goal_status", []):
                 if tr not in last or T >= last[tr][0]: last[tr] = (T, value)
         for tr, (T, value) in last.items():
@@ -531,6 +532,8 @@ def coverage(index, track, start, end):
     end = index.clip_end(track, end)
     live = []
     for s, a, b in index.workers.get(track, []):
+        b = min(b, end)
+        if b <= a: continue
         live += [(x - COVER_GRACE_S, y + COVER_GRACE_S) for x, y, c in _clip(s["segs"], a, b) if c != "idle"]
     live.sort()
     merged = []                       # disjoint union, so one bisect finds the cover
