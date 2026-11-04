@@ -36,7 +36,7 @@ if ! flock -w "${BOSS_EFFICIENCY_LOCK_WAIT:-7200}" 9; then
 fi
 
 # nice and ionice: the laptop is shared and the scan is the heaviest thing on it.
-timeout 3600 nice -n 19 ionice -c3 python3 "$CORE" "$@"
+timeout -k 30 3600 nice -n 19 ionice -c3 python3 -B "$CORE" "$@"
 rc=$?
 [ "$rc" -eq 124 ] && echo "TIMED OUT after 3600s"
 echo "core exit=$rc"

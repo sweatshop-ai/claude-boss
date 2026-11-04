@@ -54,6 +54,7 @@ FLOOR_TOKENS = 100e6        # a track below this in either week is too small to 
 SPEND_PP = 0.20             # a phase's share of the track's tokens, or of its worker time in CI, moved by this much
 ASKS_RATIO = 3.0            # questions per 100 M tokens rose to this many times last week's...
 ASKS_RISE = 1.0             # ...and by at least this many per 100 M
+FAIL_UNCOVERED = 0.90       # above this the socket lookup found no ties: the week is not a measurement
 MAX_UNCOVERED = 0.40        # not a trigger: shown beside the numbers of a track above 20% and in the header
 COVER_NOTE = 0.20           # a track with this share of its worker messages outside tracked activity is marked
 HISTORY_WEEKS = 8           # weeks kept in state for the trailing mean
@@ -115,8 +116,11 @@ PR = {c: i for i, c in enumerate(PRIO)}
 
 
 def usage(u):
-    return dict(i=u.get("input_tokens", 0) or 0, cw=u.get("cache_creation_input_tokens", 0) or 0,
-                cr=u.get("cache_read_input_tokens", 0) or 0, o=u.get("output_tokens", 0) or 0)
+    def n(k):
+        v = u.get(k, 0)
+        return v if isinstance(v, (int, float)) and not isinstance(v, bool) else 0
+    return dict(i=n("input_tokens"), cw=n("cache_creation_input_tokens"),
+                cr=n("cache_read_input_tokens"), o=n("output_tokens"))
 
 
 def cost(u):
@@ -235,14 +239,17 @@ def scan_session(path, tracks=()):
                 except Exception: pass
             seen, s0 = {}, None
             for line in open(j, errors="replace"):
-                try: d = json.loads(line)
-                except Exception: continue
-                if d.get("type") == "assistant":
-                    mm = d.get("message") or {}
-                    if mm.get("id"): seen[mm["id"]] = usage(mm.get("usage") or {})
-                    if d.get("timestamp") and s0 is None: s0 = ts(d["timestamp"])
+                try:
+                    d = json.loads(line)
+                    if d.get("type") == "assistant":
+                        mm = d.get("message") or {}
+                        if mm.get("id"): seen[mm["id"]] = usage(mm.get("usage") or {})
+                        if d.get("timestamp") and s0 is None: s0 = ts(d["timestamp"])
+                except (ValueError, TypeError, AttributeError, KeyError):
+                    skipped += 1
             out["subs"].append(dict(s=s0, cost=round(sum(cost(u) for u in seen.values())),
                                     review=bool(REV_AGENT.search(meta.get("description", "") or ""))))
+    out["skipped"] = skipped
     return out
 
 
@@ -476,6 +483,9 @@ def judge(week, previous):
         fails.append("no tracked sessions found in the window")
     if week["coverage"]["messages"] == 0:
         fails.append("coverage check ran on 0 worker messages")
+    elif week["coverage"]["share"] > FAIL_UNCOVERED:
+        fails.append("%.0f%% of worker messages are outside tracked activity: the socket lookup found no workers"
+                     % (100 * week["coverage"]["share"]))
     if not previous or abs(previous["end"] - week["start"]) > ADJACENT_S:
         return fails, flags                # no adjacent week to compare with
     for tr, m in sorted(week["tracks"].items()):
@@ -613,6 +623,8 @@ def run(cfg, end, weeks, dry):
             continue
         if r: sessions.append(r)
     if unreadable: print("boss-efficiency: %d transcript(s) unreadable" % unreadable, file=sys.stderr)
+    odd = sum(r["skipped"] for r in sessions)
+    if odd: print("boss-efficiency: %d malformed transcript line(s) skipped" % odd, file=sys.stderr)
     socks = resolve_sockets(sessions, state.get("socks"))
     idx = Index(sessions, markers(cfg), socks)
     history = state.get("weeks", [])
