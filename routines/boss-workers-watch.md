@@ -20,7 +20,7 @@ plain bash, with no dependency on the Claude API, Claude Code, or any MCP.
 |---|---|---|
 | `api-error` | error banner (API Error, overloaded, rate limit, timeout, connection failure, expired OAuth), not currently retrying | 2 consecutive minutes |
 | `api-retrying` | `Retrying in Ns…` visible — auto-retry usually heals itself | 5 consecutive minutes |
-| `permission-prompt` | a tool-permission dialog sitting unanswered | 2 consecutive minutes |
+| `permission-prompt` | a tool-permission dialog sitting unanswered (`Do you want to proceed/allow/…`, or an `❯ 1. Yes` option). On a pane with `@worker_role=concierge` only the header counts: its own AskUserQuestion options may start with Yes | 2 consecutive minutes |
 | `frozen` | `esc to interrupt` shown but pane content hash identical across runs (a live TUI redraws its spinner constantly) | 3 consecutive minutes |
 | `at-shell` | a pane with `@worker_name` set (spawned by `boss-lifecycle.sh`) back at a bare shell — crashed or retired | 2 consecutive minutes |
 
@@ -42,7 +42,7 @@ timer costs nothing outside boss sessions.
 DRY_RUN=1 FAKE_PANES=<tsv> FAKE_CAP_DIR=<dir> ~/.claude/routines/boss-workers-watch.sh
 ```
 
-`FAKE_PANES` = `tmux list-panes` TSV (`pane_id  index  cmd  path  @worker_name`);
+`FAKE_PANES` = `tmux list-panes` TSV (`pane_id  index  cmd  path  @worker_role-or-"-"  @worker_name`);
 `FAKE_CAP_DIR` contains `<pane-id-without-%>.txt` captures. `DRY_RUN` prints
 would-be notifications and leaves state untouched. Log:
 `~/.claude/routines/logs/boss-workers-watch.log` (self-rotating at 512K).
