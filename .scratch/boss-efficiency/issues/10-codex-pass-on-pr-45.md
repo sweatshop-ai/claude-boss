@@ -6,7 +6,7 @@
 
 **Claimed by:** Elke 2026-11-04 23:41
 
-**Status:** in-progress
+**Status:** in-progress (Codex out of tokens until 4:38; PRs 48-52, sheaf 195/196, library-mcp 227 remain)
 
 - [ ] The output is in a file and the verdict on the PR
 - [ ] Every finding answered: fixed, ticket, or rejected with the reason
