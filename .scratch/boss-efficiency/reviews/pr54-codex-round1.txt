@@ -1,0 +1,20 @@
+Goes to OpenAI through the Codex CLI (read-only sandbox)
+repo:  /home/tiroir/Projects/boss-plugin-wt/Otilia
+scope: base origin/main
+diff:  3 file(s), 253 changed line(s)
+files:
+  routines/boss-efficiency.md
+  routines/boss_efficiency_core.py
+  skills/boss/test_boss_efficiency.py
+Codex reads with your user's rights: it can open any file on this machine, not only under /home/tiroir/Projects/boss-plugin-wt/Otilia.
+The secret check covers the diff listed above, not what Codex opens on its own.
+
+The new attribution can select multiple sessions after rapid name reuse, and the completion-command detection can truncate tracks based on search text rather than an executed status change. Both cases produce materially incorrect weekly measurements.
+
+Full review comments:
+
+- [P2] Disambiguate sessions inside the name-reuse slack — /home/tiroir/Projects/boss-plugin-wt/Otilia/routines/boss_efficiency_core.py:399-400
+  When a name is reused within 120 seconds, a message can satisfy this check for both the exited session and its replacement. Both sessions are then attributed because `taken` is keyed by session ID, inflating the track with work from a session that was not alive at the message; select the single live/nearest candidate when reuse windows overlap.
+
+- [P2] Reject searches before recording completion commands — /home/tiroir/Projects/boss-plugin-wt/Otilia/routines/boss_efficiency_core.py:201-206
+  When a boss runs a command such as `git grep 'boss-goal status alpha-x met'`, `plain` remains true because only commands beginning directly with grep/rg/cat/sed are excluded. This records a nonexistent `met` transition and causes `_cut_finished` to truncate the track at the search timestamp; analogous quoted `git commit ... done` text can also create a false completion marker.

@@ -1,0 +1,29 @@
+Goes to OpenAI through the Codex CLI (read-only sandbox)
+repo:  /home/tiroir/Projects/boss-plugin-wt/Otilia
+scope: base origin/main
+diff:  3 file(s), 286 changed line(s)
+files:
+  routines/boss-efficiency.md
+  routines/boss_efficiency_core.py
+  skills/boss/test_boss_efficiency.py
+Codex reads with your user's rights: it can open any file on this machine, not only under /home/tiroir/Projects/boss-plugin-wt/Otilia.
+The secret check covers the diff listed above, not what Codex opens on its own.
+
+The completion parser can both invent marks from non-executed text and miss real marks, while status events are accepted from non-boss sessions. Name attribution also misses ref-qualified recipients, and coverage can still use activity beyond the new finish cut.
+
+Full review comments:
+
+- [P2] Reject shell comments before recording completion — /home/tiroir/Projects/boss-plugin-wt/Otilia/routines/boss_efficiency_core.py:92-95
+  When a multiline Bash input contains a status string in a comment after another command, such as `git status\n# boss-goal status alpha-x met ...`, `_runs` examines only the text since the newline and returns true. The comment is then treated as a real completion mark, causing `_cut_finished` to discard subsequent track time, tokens, and messages; shell comments and heredoc data need to be excluded.
+
+- [P2] Restrict goal marks to boss sessions — /home/tiroir/Projects/boss-plugin-wt/Otilia/routines/boss_efficiency_core.py:423-425
+  When an ordinary worker invokes `boss-goal status <track> met` or `open`, this loop can select it as the track's latest status because `scan_session` records statuses for every session. A worker's `met` can therefore truncate the track, while a later worker `open` can suppress a valid boss cut, despite the documented rule that the mark comes from the boss's command; filter these events to identified boss sessions.
+
+- [P2] Resolve recipients that include a session ref — /home/tiroir/Projects/boss-plugin-wt/Otilia/routines/boss_efficiency_core.py:409-410
+  When duplicate live sessions share a name, `SendMessage` must address one as `Mira [ref]` (the supported form documented in `skills/team/SKILL.md:35`), while the session attachment records only `Mira`. The exact `by_name.get(name)` lookup consequently finds no session, so outbound contact alone cannot attribute that worker; preserve or normalize the ref-qualified recipient and use the ref to select the intended session.
+
+- [P2] Keep scanning after a rejected status match — /home/tiroir/Projects/boss-plugin-wt/Otilia/routines/boss_efficiency_core.py:213-214
+  When one Bash call first searches for a status command and later executes it—for example, `cd repo; grep 'boss-goal status alpha-x met' notes; boss-goal status alpha-x met 'done'`—`GOAL_STATUS.search` returns only the grep occurrence, `_runs` rejects it, and the real later command is never considered. The track then remains open and includes post-completion boss activity; inspect all matches and record the executable ones.
+
+- [P3] Apply the finish cut to coverage activity — /home/tiroir/Projects/boss-plugin-wt/Otilia/routines/boss_efficiency_core.py:531-531
+  For a worker session that remains active after the track's cut, `end` is shortened here but is only applied when filtering message timestamps; the `live` intervals below still use the worker's full attribution window. Because those intervals are expanded by ten minutes, a pre-cut message can be marked covered solely by post-cut activity that the patch otherwise declares outside the track; clip each worker interval to `end` before constructing coverage intervals.

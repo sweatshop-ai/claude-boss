@@ -1,0 +1,20 @@
+Goes to OpenAI through the Codex CLI (read-only sandbox)
+repo:  /home/tiroir/Projects/boss-plugin-wt/Otilia
+scope: base origin/main
+diff:  3 file(s), 371 changed line(s)
+files:
+  routines/boss-efficiency.md
+  routines/boss_efficiency_core.py
+  skills/boss/test_boss_efficiency.py
+Codex reads with your user's rights: it can open any file on this machine, not only under /home/tiroir/Projects/boss-plugin-wt/Otilia.
+The secret check covers the diff listed above, not what Codex opens on its own.
+
+The new attribution and cutoff logic can exclude valid work after a failed completion command and can select the wrong worker when session references disambiguate duplicate names. Both cases materially corrupt the generated efficiency measurements.
+
+Full review comments:
+
+- [P2] Record completion only after a successful command — /home/tiroir/Projects/boss-plugin-wt/Otilia/routines/boss_efficiency_core.py:245-246
+  When `boss-goal status alpha-x met` omits the required evidence or otherwise fails, this records the `met` status as soon as the Bash tool is invoked and never checks its `tool_result`. The track is then cut even though its goal remains open, excluding all subsequent time and tokens; correlate the candidate command with its result and record only successful executions.
+
+- [P2] Preserve session refs when matching duplicate names — /home/tiroir/Projects/boss-plugin-wt/Otilia/routines/boss_efficiency_core.py:238-238
+  When two live sessions share a name, the documented addressing form is `Mira [ref]`, but this strips the ref before attribution. `_attribute_by_name` then chooses solely by name and most-recent start, so a successful send to the older referenced session can attribute the newer worker's entire window and tokens instead; preserve and use the ref, or skip ambiguous matches.
