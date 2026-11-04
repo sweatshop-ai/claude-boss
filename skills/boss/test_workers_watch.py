@@ -72,6 +72,11 @@ class WatchCase(unittest.TestCase):
         _, second = self.run_watch(PERMISSION_TAIL, role="concierge")
         self.assertIn("permission-prompt", second)
 
+    def test_a_concierge_question_worded_like_a_permission_header_raises_no_alert(self):
+        # The question is on screen and old output above it quotes a dialog.
+        screen = "Do you want to proceed with the release?\nTab to amend\n" + "\n" * 15 + QUESTION
+        self.assertEqual("".join(self.run_watch(screen, role="concierge", runs=3)), "")
+
     def test_a_workers_question_style_dialog_still_alerts(self):
         # Only a concierge's own question is exempt; a worker has no AskUserQuestion.
         _, second = self.run_watch(QUESTION)
