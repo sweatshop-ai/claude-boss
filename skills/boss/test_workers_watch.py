@@ -21,6 +21,18 @@ PERMISSION = "Bash command\n  git push\nDo you want to proceed?\n❯ 1. Yes\n  2
 TRUST = "Quick safety check: Is this a project you trust?\n ❯ No, exit\n   Yes, I trust this folder\n Enter to confirm · Esc to cancel\n"
 # A permission dialog whose header has scrolled out: options and footer remain.
 PERMISSION_TAIL = "❯ 1. Yes\n  2. Yes, and always allow access\n  4. No\n Esc to cancel · Tab to amend\n"
+# A full Bash dialog as the current build draws it, with the status lines below:
+# the header sits 11 lines from the bottom.
+PERMISSION_FULL = (
+    " Bash command\n Tip: auto mode handles these prompts for you\n Create x.txt and confirm it exists\n"
+    + "╌" * 20 + "\n touch /tmp/x.txt && ls -l /tmp/x.txt\n" + "╌" * 20 + "\n"
+    " Do you want to proceed?\n ❯ 1. Yes\n   2. Yes, and always allow access to /tmp from this project\n"
+    "   3. Yes, and switch to auto mode\n   4. No\n Esc to cancel · Tab to amend\n"
+    "  Hilde │ Model: Haiku 5.5 | Ctx: 0\n  ⏸ manual mode on\n")
+# The same dialog on a narrow pane: header and footer out of reach or wrapped.
+PERMISSION_NARROW = "\n".join(["line"] * 6 + ["Do you want to", "proceed?"] + ["x"] * 12) + (
+    "\n ❯ 1. Yes\n   2. Yes, and always\n   allow access to /tmp\n   4. No\n Esc to cancel · Tab to\n amend\n"
+    "  Hilde │ Model\n  ⏸ manual mode on\n")
 # A permission dialog whose option line has scrolled out of the capture.
 PERMISSION_HEADER_ONLY = "Bash command\n  git push\nDo you want to proceed?\n"
 
@@ -76,6 +88,15 @@ class WatchCase(unittest.TestCase):
         # The question is on screen and old output above it quotes a dialog.
         screen = "Do you want to proceed with the release?\nTab to amend\n" + "\n" * 15 + QUESTION
         self.assertEqual("".join(self.run_watch(screen, role="concierge", runs=3)), "")
+
+    def test_a_concierge_stuck_on_a_full_permission_dialog_alerts(self):
+        _, second = self.run_watch(PERMISSION_FULL, role="concierge")
+        self.assertIn("permission-prompt", second)
+
+    def test_a_concierge_stuck_on_a_narrow_pane_dialog_alerts(self):
+        # Header more than 15 lines up and the footer wrapped: only the option line is left.
+        _, second = self.run_watch(PERMISSION_NARROW, role="concierge")
+        self.assertIn("permission-prompt", second)
 
     def test_a_workers_question_style_dialog_still_alerts(self):
         # Only a concierge's own question is exempt; a worker has no AskUserQuestion.
