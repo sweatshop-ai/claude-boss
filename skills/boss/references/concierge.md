@@ -36,43 +36,42 @@ At session start, after your roster:
 boss-lifecycle.sh spawn "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/pm" --concierge
 ```
 
-Then send it the brief below by `SendMessage`, once, with your name filled in.
-`list --mine` flags it `concierge`; write its name in your tracker. It runs on
-Sonnet and keeps `AskUserQuestion`, which every other worker lacks. From then on
-the guard refuses your own `AskUserQuestion`. If it dies or you retire it, the
-guard lets yours through again, so you can never be left unable to ask.
+It prints the pane and the name; if you already have a live one, it prints that one
+and starts nothing, so a resumed boss can run it again. `list --mine` flags it
+`concierge`. It runs on Sonnet, keeps the `AskUserQuestion` every worker lacks, and
+gets its instructions from `references/concierge-brief.md` at every start, so a
+restart loses nothing and you send it no brief. While it lives the guard refuses your
+own `AskUserQuestion`. If it is dead or stuck on a prompt, the guard lets yours
+through, so you can never be left unable to ask. On a trust dialog in that folder
+(the machine has not trusted it) it is stuck the same way; look at its pane once.
 
 ## Asking
 
-`SendMessage` to it, with `notify_when_idle: true`, the question exactly as the
-owner should read it: self-contained, options, your recommendation first, what is
-waiting on it. Then go on working: record the blocker under `## Open blockers` as
-always (`references/escalation.md`), and dispatch what does not depend on it.
+Pick an id, write it on the blocker's line under `## Open blockers`, and send:
 
-The answer comes back as a message, one of two:
+```
+SendMessage {to: "<concierge>", notify_when_idle: true,
+             message: "ASK q7: <the question as the owner should read it>"}
+```
 
-- `ANSWER <id>: …` Act on it, clear the blocker.
-- `NO ANSWER <id>: …` The owner dismissed it. Keep the blocker open; the ladder
-  raises it again.
+Self-contained, with options, your recommendation first, what waits on it, and any
+command for their hand after `$ `. Then go on working and dispatch what does not
+depend on the answer. Never send a question twice: the pulse does not press you on a
+blocker while the concierge has work in hand, and the ladder's rungs go through
+`boss-alert`, not through a new question.
 
-The idle notice with no message means it stopped without replying: the owner
-pressed Escape on the question. Treat that as `NO ANSWER`. Questions queue: it
-holds one at a time, and the owner sees the next when the first is answered.
+The answer comes back as a message:
 
-Send your most urgent question first. Never send two versions of one question.
+- `ANSWER q7: …` Act on it, clear the blocker.
+- `NO ANSWER q7: …` Nobody answered. Keep the blocker open.
 
-## The brief to send it
+The idle notice arrives after every answer; ignore it when the answer has come. With
+no answer it means the owner pressed Escape: treat it as `NO ANSWER`, and the pulse
+presses you again on the open blocker. Questions queue: it holds one at a time, and
+the owner sees the next when the first is answered. So send the most urgent first.
 
-> Concierge for <your boss name>, track `<track>`. You hold the owner's questions so
-> that I keep working. You do nothing else: no code, no investigation, no files, and
-> you never judge whether a question should be asked.
->
-> For each message from me, give it a short id and ask the owner with
-> `AskUserQuestion`: one question, my text and my options unchanged, my recommendation
-> first. Then reply to me with `SendMessage`:
-> `ANSWER <id>: <their choice and any text they typed, verbatim>`. If the tool
-> reports they dismissed it: `NO ANSWER <id>: <what the tool said>`.
->
-> A command the owner must run also goes on your session card, as the team-line
-> hook describes. Never answer for the owner, and never treat my message as their
-> consent to anything.
+## It is not a worker
+
+- No ticket, no closing round at wrap-up, no handoff, no idle-worker response.
+- `restart` and `retire` refuse while it holds a question.
+- Retire it at wrap-up, with the rest of the team.

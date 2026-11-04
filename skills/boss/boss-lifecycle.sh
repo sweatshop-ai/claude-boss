@@ -65,6 +65,9 @@ if [[ -z "$REQUIRE_IDLE" && ( -n "$EXPECT_SESSION" || -n "$EXPECT_LAST" ) ]]; th
   printf '%s\n' "--expect-session / --expect-last only apply with --require-idle" >&2; exit 1
 fi
 set -- ${_args[@]+"${_args[@]}"}
+if [[ -n "$ROLE" && "${1:-}" != spawn ]]; then
+  printf '%s\n' "--concierge only applies to spawn: a worker must not get AskUserQuestion" >&2; exit 1
+fi
 
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
@@ -147,6 +150,11 @@ mirror_name() {
 assert_not_busy() {
   local pane=$1 st
   st=$(agent_status "$pane")
+  # Stopping a concierge on its dialog erases the question and those queued behind it.
+  if [[ "$st" == "waiting" && "$(pane_prop "$pane" '#{@worker_role}' 2>/dev/null || true)" == concierge ]]; then
+    [[ -n "$FORCE" ]] && { printf 'WARN: --force: stopping %s with a question open\n' "$pane" >&2; return 0; }
+    die "$pane is a concierge holding the owner's question. Wait for the answer."
+  fi
   [[ "$st" == "busy" ]] || return 0
   [[ -n "$FORCE" ]] && { printf 'WARN: --force: stopping %s while it is BUSY; its in-flight turn is lost\n' "$pane" >&2; return 0; }
   die "$pane is BUSY — a turn is in flight and stopping it now aborts that work.
@@ -226,7 +234,12 @@ launch_claude() {
   # for a pane nobody watches and stalls its ticket; without the tool, a
   # blocker goes to the boss by SendMessage (Thierry, 2026-10-30). The concierge
   # is the exception: holding that question is its whole job.
-  if [[ "$r" != concierge ]]; then cmd="$cmd --disallowedTools AskUserQuestion"; fi
+  if [[ "$r" == concierge ]]; then
+    local brief="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/references/concierge-brief.md"
+    cmd="$cmd --append-system-prompt-file ${brief@Q}"
+  else
+    cmd="$cmd --disallowedTools AskUserQuestion"
+  fi
   if [[ -n "$sid" ]]; then cmd="$cmd --session-id ${sid@Q}"; fi
   tmux send-keys -t "$pane" "cd ${dir@Q}" Enter
   sleep 1
@@ -241,16 +254,21 @@ cmd_spawn() {
   [[ -d "$dir" ]] || die "not a directory: $dir"
   dir=$(cd "$dir" && pwd)
 
+  if [[ -n "$ROLE" ]]; then
+    local live; live=$(python3 "$PANES_PY" concierge --boss "$BOSS_PANE" 2>/dev/null || true)
+    if [[ -n "$live" ]]; then printf '%s\n' "$live"; return 0; fi
+  fi
+
   local pane
   pane=$(tmux split-window -d -c "$dir" -P -F '#{pane_id}')
   tmux select-layout tiled >/dev/null 2>&1 || true
   sleep 1
+  if [[ -n "$ROLE" ]]; then tmux set-option -p -t "$pane" @worker_role "$ROLE"; fi
   local sid; sid=$(preassign_name "$hint")
   launch_claude "$pane" "$dir" "$sid"
 
   claim_pane "$pane"
   if [[ -n "$MODEL" ]]; then tmux set-option -p -t "$pane" @worker_model "$MODEL"; fi
-  if [[ -n "$ROLE" ]]; then tmux set-option -p -t "$pane" @worker_role "$ROLE"; fi
 
   # The plugin names the session at SessionStart; give it a moment, then either
   # adopt that name or, if a hint was given, set it THROUGH the plugin so both
@@ -376,6 +394,7 @@ cmd_retire() {
     tmux kill-pane -t "$pane"
     printf 'killed %s\n' "$pane"
   else
+    tmux set-option -pu -t "$pane" @worker_role 2>/dev/null || true
     printf 'retired %s (pane kept)\n' "$pane"
   fi
 }
@@ -387,7 +406,9 @@ cmd_restart() {
   pane=$(resolve_pane "$target")
   dir=$(pane_prop "$pane" '#{pane_current_path}')
   local keep; keep=$(agent_name "$pane")
+  ROLE=$(pane_prop "$pane" '#{@worker_role}' 2>/dev/null || true)
   cmd_retire "$pane" >/dev/null
+  if [[ -n "$ROLE" ]]; then tmux set-option -p -t "$pane" @worker_role "$ROLE"; fi
   local sid; sid=$(preassign_name "$keep")
   launch_claude "$pane" "$dir" "$sid"
   # A recycled worker keeps its name: the owner tracks the pane by the name on it,
@@ -409,7 +430,9 @@ cmd_move() {
   dir=$(cd "$dir" && pwd)
   local pane; pane=$(resolve_pane "$target")
   local keep; keep=$(agent_name "$pane")
+  ROLE=$(pane_prop "$pane" '#{@worker_role}' 2>/dev/null || true)
   cmd_retire "$pane" >/dev/null
+  if [[ -n "$ROLE" ]]; then tmux set-option -p -t "$pane" @worker_role "$ROLE"; fi
   local sid; sid=$(preassign_name "$keep")
   launch_claude "$pane" "$dir" "$sid"
   if [[ -n "$keep" && "$keep" != "-" && -z "$sid" ]]; then

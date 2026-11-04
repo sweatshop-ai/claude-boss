@@ -176,7 +176,7 @@ class Frontier(PulseCase):
         return self.tmp / "pm/.pulse" / ("%s.%s.frontier.json" % (
             TRACK, hashlib.sha1(source.encode()).hexdigest()[:10]))
 
-    def pulse_with_team(self, idle, size):
+    def pulse_with_team(self, idle, size, holding=False):
         """Run main() in-process with a stand-in for the tmux roster."""
         import contextlib
         import importlib.util
@@ -188,6 +188,7 @@ class Frontier(PulseCase):
             mod = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(mod)
             mod.team = lambda sid: (idle, size)
+            mod.concierge_holding = lambda sid: holding
             payload = {"session_id": self.sid, "hook_event_name": "Stop", "stop_hook_active": False}
             out, stdin = io.StringIO(), sys.stdin
             sys.stdin = io.StringIO(json.dumps(payload))
@@ -310,6 +311,16 @@ class Frontier(PulseCase):
             os.environ["PATH"] = path
         self.assertNotIn("11 API", out)
         self.assertIn("acme/other#5 has no sub-issues", out)
+
+    def test_a_blocker_the_concierge_holds_is_not_asked_again(self):
+        self.tracker(blockers="- waiting on the owner to pick the org")
+        self.assertEqual(self.pulse_with_team([], 2, holding=True), "")
+
+    def test_idle_workers_still_get_work_while_the_concierge_holds_a_question(self):
+        self.tracker(blockers="- waiting on the owner to pick the org")
+        out = self.pulse_with_team([("Wanda", "w:1.1")], 2, holding=True)
+        self.assertIn("Wanda", out)
+        self.assertNotIn("without asking", out)
 
     def test_an_idle_concierge_is_not_an_idle_worker(self):
         # It sits idle by design; a pulse naming it would ask the boss to give it a ticket.

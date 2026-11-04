@@ -166,6 +166,16 @@ def main():
     if args and args[0] == "list":
         boss = args[args.index("--boss") + 1] if "--boss" in args[:-1] else ""
         return cmd_list(boss, "--mine" in args)
+    if args and args[0] == "concierge":
+        # boss-lifecycle spawn --concierge: pane and name of the live one, if any.
+        boss = args[args.index("--boss") + 1] if "--boss" in args[:-1] else ""
+        try:
+            seat = fleet.concierge_of(seats(), boss)
+        except fleet.TmuxUnavailable:
+            return 1
+        if seat:
+            print("%s\t%s" % (seat.pane.id, seat.session.get("name") or "unnamed"))
+        return 0
     if args and args[0] == "stamp":
         if len(args) != 3:
             print("usage: boss-panes.py stamp <pane> <boss-pane>", file=sys.stderr)

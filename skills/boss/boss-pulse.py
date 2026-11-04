@@ -192,6 +192,19 @@ def question_pending(sid):
     return bool(rec.get("waitingFor")) or (rec.get("status") or "") == "waiting"
 
 
+def concierge_holding(sid):
+    """Has this boss's concierge got work in hand? Then the open blockers have been
+    asked, or wait behind the one on screen. Idle means nothing is with it, so a
+    blocker still open is the boss's to ask again."""
+    try:
+        seats = fleet.view(fleet.Tmux(timeout=3), registry.live(boss_store.config_dir()))
+    except fleet.TmuxUnavailable:
+        return False
+    me = fleet.seat_of(seats, sid=sid)
+    seat = fleet.concierge_of(seats, me.pane.id) if me else None
+    return bool(seat) and (seat.session.get("status") or "") != "idle"
+
+
 # ------------------------------------------------------- escalation rungs
 
 TPLUS = re.compile(r"T\+0[^0-9]{0,12}(\d{4}-\d{2}-\d{2})?[T ]?(\d{2}):(\d{2})")
@@ -316,7 +329,7 @@ def main():
     fired = dict(st.get("rungs") or {})
     tracker_text = boss_store.read_tracker(track)  # once per Stop, both consumers share it
     rungs = due_rungs(track, fired, tracker_text)
-    blockers = open_blockers(tracker_text)
+    blockers = [] if concierge_holding(sid) else open_blockers(tracker_text)
     source = objective.tickets_source(body)
     ready, broken = read_frontier(source, track) if source else ([], None)
     facts = pulse.Facts(

@@ -71,6 +71,7 @@ FORMAT = "\t".join(["#{pane_id}", "#{session_name}:#{window_index}.#{pane_index}
 
 STAMP = "@boss_pane"
 CONCIERGE = "concierge"
+QUESTION = "input needed"    # what the registry's waitingFor says for a question
 
 
 class TmuxUnavailable(Exception):
@@ -167,7 +168,10 @@ def workers(seats, boss_pane):
 def concierge_of(seats, boss_pane):
     """The seat of the live session holding this boss's questions, or None."""
     for s in owned(seats, boss_pane):
-        if s.pane.role == CONCIERGE and s.session:
+        if s.pane.role != CONCIERGE or not s.session:
+            continue
+        # On a permission prompt or the like it holds nothing and hears nothing.
+        if (s.session.get("waitingFor") or QUESTION) == QUESTION:
             return s
     return None
 
