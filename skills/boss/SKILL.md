@@ -881,9 +881,10 @@ Parse `$ARGUMENTS`: empty or `status` → **A** · `dispatch <task> [worker]` �
    change touches; the CI runs the full suite (P15)."* When that CI runs on a
    small shared runner pool, add P16's three push rules word for word. For a task
    that runs tests, a script or the app, add (P17): *"Before you trust a run, prove it hits
-   your own copy: the path of the import, and where the run uses them the database
-   (host, port and name, never the URL as a whole and never a password or token)
-   and the pid on the port. Put that proof in your report. A local run without
+   your own copy: the resolved path of what runs (the import, the script, the compiled
+   CLI or the executable `command -v` finds on PATH), and where the run uses them the
+   database (host, port and name, never the URL as a whole and never a password or
+   token) and the pid on the port. Put that proof in your report. A local run without
    it does not count."* For a resource with no own copy, from the brief or the repo, add: *"Write
    the code now. Run nothing on <resource> until I give you the turn, and tell me
    when you release it."*
