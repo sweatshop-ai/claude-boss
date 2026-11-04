@@ -386,6 +386,13 @@ class QuestionsGoThroughTheConcierge(GuardCase):
         self.assertIn("Odile", out["permissionDecisionReason"])
         self.assertIn("SendMessage", out["permissionDecisionReason"])
 
+    def test_a_question_for_the_owners_consent_stays_with_the_boss(self):
+        # A peer message is never consent, so an answer relayed by the concierge
+        # cannot release a gated action. Only a question in the boss's own turn can.
+        self.session("c-sid", "%6", "Odile")
+        self.panes(self.BOSS, "%6\tboss:0.1\t%1\tclaude\t/w\tOdile\tconcierge")
+        self.assertEqual(self.ask("CONSENT: delete the old key? It cannot be undone."), {})
+
     def test_no_concierge_the_boss_asks_itself(self):
         self.panes(self.BOSS)
         self.assertEqual(self.ask(), {})

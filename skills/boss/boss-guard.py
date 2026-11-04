@@ -19,7 +19,8 @@ data instead of imagination.
 The one deny: AskUserQuestion, when this boss has a live concierge. An open
 question stops the boss's turn, and the concierge exists so that it does not.
 It cannot leave a boss stuck: no concierge, a dead one, or a tmux that does not
-answer, and the question goes through as before.
+answer, and the question goes through as before. So does a question starting
+`CONSENT:`, which only the boss's own turn can ask.
 
 Active only for sessions that registered themselves as a boss:
     ~/.claude/pm/.boss-sessions/<session_id>
@@ -194,6 +195,7 @@ def is_coordination(cmd):
     return used
 
 
+CONSENT = "CONSENT:"
 WATCHED = {"Bash", "Edit", "Write", "NotebookEdit", "Read", "Glob", "Grep", "Agent"}
 
 
@@ -231,6 +233,17 @@ def bump(sid):
     return boss_store.update_state(sid, "guard", count)["n"]
 
 
+def ti_questions(payload):
+    return (payload.get("tool_input") or {}).get("questions") or []
+
+
+def is_consent(questions):
+    """A question for the owner's consent to a gated action. A peer message is never
+    consent, so this one has to be asked in the boss's own turn."""
+    return any(str(q.get("question") or "").startswith(CONSENT) for q in questions
+               if isinstance(q, dict))
+
+
 def concierge_name(sid):
     """The name of this boss's live concierge, or None."""
     try:
@@ -254,7 +267,7 @@ def main():
 
     tool = payload.get("tool_name") or ""
     if tool == "AskUserQuestion":
-        name = concierge_name(sid)
+        name = None if is_consent(ti_questions(payload)) else concierge_name(sid)
         if name:
             print(json.dumps({
                 "hookSpecificOutput": {
