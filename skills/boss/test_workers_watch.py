@@ -12,9 +12,10 @@ import unittest
 from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parents[2] / "routines" / "boss-workers-watch.sh"
+FIXTURES = Path(__file__).resolve().parent / "fixtures" / "watch"
 
 # A concierge's AskUserQuestion dialog: the options belong to the sender.
-QUESTION = "Merge PR 46 now?\n❯ 1. Yes, merge\n  2. No, wait\n  3. Type something.\nEnter to select · Esc to cancel\n"
+QUESTION = "Merge PR 46 now?\n❯ 1. Yes, merge\n  2. No, wait\n  3. Type something.\nEnter to select · ↑/↓ to navigate · Esc to cancel\n"
 # A tool-permission dialog.
 PERMISSION = "Bash command\n  git push\nDo you want to proceed?\n❯ 1. Yes\n  2. No\n"
 # The trust prompt, as the current build renders it.
@@ -50,6 +51,7 @@ class WatchCase(unittest.TestCase):
 
     def run_watch(self, screen, role="-", runs=2):
         # Same TSV as the script's tmux format: id, index, command, path, role, name.
+        shutil.rmtree(self.state, True)  # a subTest starts from no history
         (self.tmp / "panes").write_text("%%7\t1\tclaude\t/w/api\t%s\tWren\n" % role)
         (self.caps / "7.txt").write_text(screen)
         return [self.run_once() for _ in range(runs)]
@@ -86,7 +88,7 @@ class WatchCase(unittest.TestCase):
 
     def test_a_concierge_question_worded_like_a_permission_header_raises_no_alert(self):
         # The question is on screen and old output above it quotes a dialog.
-        screen = "Do you want to proceed with the release?\nTab to amend\n" + "\n" * 15 + QUESTION
+        screen = "Do you want to proceed with the release?\nTab to amend\n" + "old output\n" * 15 + QUESTION
         self.assertEqual("".join(self.run_watch(screen, role="concierge", runs=3)), "")
 
     def test_a_concierge_stuck_on_a_full_permission_dialog_alerts(self):
@@ -101,6 +103,44 @@ class WatchCase(unittest.TestCase):
     def test_a_workers_question_style_dialog_still_alerts(self):
         # Only a concierge's own question is exempt; a worker has no AskUserQuestion.
         _, second = self.run_watch(QUESTION)
+        self.assertIn("permission-prompt", second)
+
+    # Renders captured from a real build (Claude Code 2.1.311) on a 40-row pane at
+    # 74, 31 and 25 columns, with the prompt and paths invented. `ask` is an
+    # AskUserQuestion worded like a permission dialog, with a "Yes, and always" option.
+    def fixture(self, kind, width):
+        return (FIXTURES / ("%s-%d.txt" % (kind, width))).read_text()
+
+    def test_a_concierge_stuck_on_a_real_permission_dialog_alerts_at_every_width(self):
+        for kind in ("bash", "edit"):
+            for width in (74, 31, 25):
+                with self.subTest(kind=kind, width=width):
+                    _, second = self.run_watch(self.fixture(kind, width), role="concierge")
+                    self.assertIn("permission-prompt", second)
+
+    def test_a_concierge_stuck_on_a_real_permission_dialog_with_a_status_line_alerts(self):
+        status = "  Hilde \u2502 Model: Haiku 5.5 | Ctx: 0\n  \u23f8 manual mode on\n"
+        for kind in ("bash", "edit"):
+            for width in (74, 31, 25):
+                with self.subTest(kind=kind, width=width):
+                    _, second = self.run_watch(self.fixture(kind, width) + status, role="concierge")
+                    self.assertIn("permission-prompt", second)
+
+    def test_a_real_question_worded_like_a_dialog_raises_no_alert_at_any_width(self):
+        for width in (74, 31, 25):
+            with self.subTest(width=width):
+                self.assertEqual("".join(self.run_watch(self.fixture("ask", width), role="concierge", runs=3)), "")
+
+    def test_a_real_questions_footer_carries_no_tab_to_amend(self):
+        for width in (74, 31, 25):
+            with self.subTest(width=width):
+                text = " ".join(self.fixture("ask", width).split())
+                self.assertIn("Enter to select \u00b7 \u2191/\u2193 to navigate \u00b7 Esc to cancel", text)
+                self.assertNotIn("Tab to amend", text)
+
+    def test_a_real_permission_dialog_after_blank_rows_alerts(self):
+        # A fresh pane leaves blank rows under the dialog; they are not part of the window.
+        _, second = self.run_watch(self.fixture("edit", 25) + "\n" * 20, role="concierge")
         self.assertIn("permission-prompt", second)
 
 
