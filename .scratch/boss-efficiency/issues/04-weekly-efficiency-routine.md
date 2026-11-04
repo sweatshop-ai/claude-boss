@@ -6,7 +6,9 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready
+**Claimed by:** Bilal 2026-11-04 20:49
+
+**Status:** in-progress
 
 - [ ] The coverage check is in the report: share of worker messages outside tracked activity (19% on 2026-11-04)
 - [ ] It runs weekly, silent when nothing moved
