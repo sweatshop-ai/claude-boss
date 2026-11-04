@@ -48,6 +48,42 @@ class WhichSessionRunsInAPane(unittest.TestCase):
         self.assertEqual((seat.flags(), seat.explain()), ([], ""))
 
 
+class WhoIsTheConcierge(unittest.TestCase):
+    def seats(self, *panes):
+        recs = [rec("s" + p.id, p.id, "N" + p.id) for p in panes if p.command]
+        return fleet.view(fleet.MemoryTmux(list(panes)), recs)
+
+    def test_a_live_concierge_stamped_to_the_boss_is_found(self):
+        seats = self.seats(fleet.Pane("%5", owner="%1", command="claude"),
+                           fleet.Pane("%6", owner="%1", command="claude", role="concierge"))
+        self.assertEqual(fleet.concierge_of(seats, "%1").pane.id, "%6")
+
+    def test_another_bosses_concierge_is_not_mine(self):
+        seats = self.seats(fleet.Pane("%6", owner="%2", command="claude", role="concierge"))
+        self.assertIsNone(fleet.concierge_of(seats, "%1"))
+
+    def test_a_concierge_pane_with_no_session_does_not_count(self):
+        seats = self.seats(fleet.Pane("%6", owner="%1", command="", role="concierge"))
+        self.assertIsNone(fleet.concierge_of(seats, "%1"))
+
+    def test_a_concierge_stuck_on_a_permission_prompt_does_not_count(self):
+        pane = fleet.Pane("%6", owner="%1", command="claude", role="concierge")
+        row = dict(rec("c", "%6", "Odile"), status="waiting", waitingFor="permission prompt")
+        seats = fleet.view(fleet.MemoryTmux([pane]), [row])
+        self.assertIsNone(fleet.concierge_of(seats, "%1"))
+
+    def test_a_concierge_holding_a_question_counts(self):
+        pane = fleet.Pane("%6", owner="%1", command="claude", role="concierge")
+        row = dict(rec("c", "%6", "Odile"), status="waiting", waitingFor="input needed")
+        seats = fleet.view(fleet.MemoryTmux([pane]), [row])
+        self.assertEqual(fleet.concierge_of(seats, "%1").pane.id, "%6")
+
+    def test_workers_leave_the_concierge_out(self):
+        seats = self.seats(fleet.Pane("%5", owner="%1", command="claude"),
+                           fleet.Pane("%6", owner="%1", command="claude", role="concierge"))
+        self.assertEqual([s.pane.id for s in fleet.workers(seats, "%1")], ["%5"])
+
+
 class WhoOwnsAPane(unittest.TestCase):
     def test_a_boss_owns_the_panes_it_stamped_but_not_its_own(self):
         tmux = fleet.MemoryTmux([fleet.Pane("%1"), fleet.Pane("%5"), fleet.Pane("%6"),
@@ -106,9 +142,9 @@ class TheTmuxAdapter(unittest.TestCase):
 
     def test_unset_options_read_as_empty_and_never_shift_a_field(self):
         (self.dir / "panes").write_text(
-            "%1\tboss:0.0\t%1\tclaude\t/home/x\t-\n"
-            "%5\tboss:0.1\t%1\tbash\t/home/y\tWanda\n"
-            "%6\tmail:1.0\t-\tclaude\t/home/z\t-\n")
+            "%1\tboss:0.0\t%1\tclaude\t/home/x\t-\t-\n"
+            "%5\tboss:0.1\t%1\tbash\t/home/y\tWanda\t-\n"
+            "%6\tmail:1.0\t-\tclaude\t/home/z\t-\t-\n")
         panes = fleet.Tmux().panes()
         self.assertEqual(panes[1], fleet.Pane("%5", "boss:0.1", "%1", "bash", "/home/y", "Wanda"))
         self.assertEqual((panes[2].owner, panes[2].mirror, panes[2].coord), ("", "", "mail:1.0"))

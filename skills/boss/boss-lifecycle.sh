@@ -7,7 +7,7 @@
 # reports — goes through SendMessage/ListAgents, never through this script.
 #
 # Usage:
-#   boss-lifecycle.sh spawn <project-dir> [name-hint] [--model <name>]
+#   boss-lifecycle.sh spawn <project-dir> [name-hint] [--model <name>] [--concierge]
 #   boss-lifecycle.sh claim <pane-id> [name]
 #   boss-lifecycle.sh retire <pane-id> [--kill] [--require-idle [--expect-session S] [--expect-last U]]
 #   boss-lifecycle.sh restart <pane-id> [--require-idle [--expect-session S] [--expect-last U]]
@@ -43,6 +43,7 @@ SHELL_CMDS='^(bash|zsh|fish|sh|dash)$'
 # require-idle restart path (see retire_require_idle); --force does not relax them.
 FORCE=""
 MODEL=""
+ROLE=""
 REQUIRE_IDLE=""
 EXPECT_SESSION=""
 EXPECT_LAST=""
@@ -52,6 +53,7 @@ for _a in "$@"; do
   if [[ -n "$_want" ]]; then printf -v "$_want" '%s' "$_a"; _want=""
   elif [[ "$_a" == "--force" ]]; then FORCE=1
   elif [[ "$_a" == "--require-idle" ]]; then REQUIRE_IDLE=1
+  elif [[ "$_a" == "--concierge" ]]; then ROLE=concierge
   elif [[ "$_a" == "--model" ]]; then _want=MODEL
   elif [[ "$_a" == --model=* ]]; then MODEL="${_a#--model=}"
   elif [[ "$_a" == "--expect-session" ]]; then _want=EXPECT_SESSION
@@ -63,6 +65,9 @@ if [[ -z "$REQUIRE_IDLE" && ( -n "$EXPECT_SESSION" || -n "$EXPECT_LAST" ) ]]; th
   printf '%s\n' "--expect-session / --expect-last only apply with --require-idle" >&2; exit 1
 fi
 set -- ${_args[@]+"${_args[@]}"}
+if [[ -n "$ROLE" && "${1:-}" != spawn ]]; then
+  printf '%s\n' "--concierge only applies to spawn: a worker must not get AskUserQuestion" >&2; exit 1
+fi
 
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
@@ -145,6 +150,13 @@ mirror_name() {
 assert_not_busy() {
   local pane=$1 st
   st=$(agent_status "$pane")
+  # Stopping a concierge on its dialog erases the question and those queued behind it.
+  local wf; wf=$(pane_field "$pane" waiting_for)
+  if [[ "$st" == "waiting" && ( "$wf" == "input needed" || "$wf" == "-" ) \
+        && "$(pane_prop "$pane" '#{@worker_role}' 2>/dev/null || true)" == concierge ]]; then
+    [[ -n "$FORCE" ]] && { printf 'WARN: --force: stopping %s with a question open\n' "$pane" >&2; return 0; }
+    die "$pane is a concierge holding the owner's question. Wait for the answer."
+  fi
   [[ "$st" == "busy" ]] || return 0
   [[ -n "$FORCE" ]] && { printf 'WARN: --force: stopping %s while it is BUSY; its in-flight turn is lost\n' "$pane" >&2; return 0; }
   die "$pane is BUSY — a turn is in flight and stopping it now aborts that work.
@@ -214,12 +226,22 @@ launch_claude() {
   # session, so a boss moved to Fable would otherwise drag every worker along
   # at twice the output price (2026-09-08). Override per spawn with --model,
   # or for the machine with BOSS_WORKER_MODEL.
+  # The role is on the pane for the same reason. A concierge reads a question
+  # and passes it on, so it needs no Opus.
+  local r="${ROLE:-$(pane_prop "$pane" '#{@worker_role}' 2>/dev/null || true)}"
+  if [[ "$r" == concierge ]]; then m="${m:-sonnet}"; fi
   m="${m:-$WORKER_MODEL_DEFAULT}"
   cmd="$cmd --model ${m@Q} --effort ${WORKER_EFFORT_DEFAULT@Q}"
   # Only the boss asks the owner. A worker's AskUserQuestion rings the chime
   # for a pane nobody watches and stalls its ticket; without the tool, a
-  # blocker goes to the boss by SendMessage (Thierry, 2026-10-30).
-  cmd="$cmd --disallowedTools AskUserQuestion"
+  # blocker goes to the boss by SendMessage (Thierry, 2026-10-30). The concierge
+  # is the exception: holding that question is its whole job.
+  if [[ "$r" == concierge ]]; then
+    local brief="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/references/concierge-brief.md"
+    cmd="$cmd --append-system-prompt-file ${brief@Q}"
+  else
+    cmd="$cmd --disallowedTools AskUserQuestion"
+  fi
   if [[ -n "$sid" ]]; then cmd="$cmd --session-id ${sid@Q}"; fi
   tmux send-keys -t "$pane" "cd ${dir@Q}" Enter
   sleep 1
@@ -234,10 +256,16 @@ cmd_spawn() {
   [[ -d "$dir" ]] || die "not a directory: $dir"
   dir=$(cd "$dir" && pwd)
 
+  if [[ -n "$ROLE" ]]; then
+    local live; live=$(python3 "$PANES_PY" concierge --boss "$BOSS_PANE" 2>/dev/null || true)
+    if [[ -n "$live" ]]; then printf '%s\n' "$live"; return 0; fi
+  fi
+
   local pane
   pane=$(tmux split-window -d -c "$dir" -P -F '#{pane_id}')
   tmux select-layout tiled >/dev/null 2>&1 || true
   sleep 1
+  if [[ -n "$ROLE" ]]; then tmux set-option -p -t "$pane" @worker_role "$ROLE"; fi
   local sid; sid=$(preassign_name "$hint")
   launch_claude "$pane" "$dir" "$sid"
 
@@ -368,6 +396,7 @@ cmd_retire() {
     tmux kill-pane -t "$pane"
     printf 'killed %s\n' "$pane"
   else
+    tmux set-option -pu -t "$pane" @worker_role 2>/dev/null || true
     printf 'retired %s (pane kept)\n' "$pane"
   fi
 }
@@ -379,7 +408,9 @@ cmd_restart() {
   pane=$(resolve_pane "$target")
   dir=$(pane_prop "$pane" '#{pane_current_path}')
   local keep; keep=$(agent_name "$pane")
+  ROLE=$(pane_prop "$pane" '#{@worker_role}' 2>/dev/null || true)
   cmd_retire "$pane" >/dev/null
+  if [[ -n "$ROLE" ]]; then tmux set-option -p -t "$pane" @worker_role "$ROLE"; fi
   local sid; sid=$(preassign_name "$keep")
   launch_claude "$pane" "$dir" "$sid"
   # A recycled worker keeps its name: the owner tracks the pane by the name on it,
@@ -401,7 +432,9 @@ cmd_move() {
   dir=$(cd "$dir" && pwd)
   local pane; pane=$(resolve_pane "$target")
   local keep; keep=$(agent_name "$pane")
+  ROLE=$(pane_prop "$pane" '#{@worker_role}' 2>/dev/null || true)
   cmd_retire "$pane" >/dev/null
+  if [[ -n "$ROLE" ]]; then tmux set-option -p -t "$pane" @worker_role "$ROLE"; fi
   local sid; sid=$(preassign_name "$keep")
   launch_claude "$pane" "$dir" "$sid"
   if [[ -n "$keep" && "$keep" != "-" && -z "$sid" ]]; then
@@ -434,5 +467,5 @@ case "${1:-}" in
   move)    shift; cmd_move "$@" ;;
   list)    shift; cmd_list "$@" ;;
   ctx)     shift; python3 "$PANES_PY" "$@" ;;
-  *) die "usage: $(basename "$0") {spawn <dir> [name] [--model M] | claim <pane> [name] | retire <pane> [--kill] | restart <pane> | move <pane> <dir> | list [--mine] | ctx [pane]} [--force] [--require-idle [--expect-session S] [--expect-last U]]" ;;
+  *) die "usage: $(basename "$0") {spawn <dir> [name] [--model M] [--concierge] | claim <pane> [name] | retire <pane> [--kill] | restart <pane> | move <pane> <dir> | list [--mine] | ctx [pane]} [--force] [--require-idle [--expect-session S] [--expect-last U]]" ;;
 esac

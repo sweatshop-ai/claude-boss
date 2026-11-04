@@ -67,6 +67,8 @@ def read_goal(track):
 def team(sid):
     """This boss's live workers: (the idle ones as (name, coordinate), how many in all).
 
+    The concierge is not one: it sits idle by design, and no ticket is for it.
+
     The coordinate is the session:window.pane INDEX form, because that is the
     only shape the boss may quote to the owner — it is what they see on the pane
     and what `boss-lifecycle.sh list` prints. A raw `%4` is banned by safety
@@ -80,7 +82,7 @@ def team(sid):
     if not me:
         return [], 0
     idle, size = [], 0
-    for seat in fleet.owned(seats, me.pane.id):
+    for seat in fleet.workers(seats, me.pane.id):
         if not seat.session:
             continue
         size += 1
@@ -188,6 +190,19 @@ def question_pending(sid):
     if rec is None:
         return False
     return bool(rec.get("waitingFor")) or (rec.get("status") or "") == "waiting"
+
+
+def concierge_holding(sid):
+    """Has this boss's concierge got work in hand? Then the open blockers have been
+    asked, or wait behind the one on screen. Idle means nothing is with it, so a
+    blocker still open is the boss's to ask again."""
+    try:
+        seats = fleet.view(fleet.Tmux(timeout=3), registry.live(boss_store.config_dir()))
+    except fleet.TmuxUnavailable:
+        return False
+    me = fleet.seat_of(seats, sid=sid)
+    seat = fleet.concierge_of(seats, me.pane.id) if me else None
+    return bool(seat) and (seat.session.get("status") or "") != "idle"
 
 
 # ------------------------------------------------------- escalation rungs
@@ -314,7 +329,7 @@ def main():
     fired = dict(st.get("rungs") or {})
     tracker_text = boss_store.read_tracker(track)  # once per Stop, both consumers share it
     rungs = due_rungs(track, fired, tracker_text)
-    blockers = open_blockers(tracker_text)
+    blockers = [] if concierge_holding(sid) else open_blockers(tracker_text)
     source = objective.tickets_source(body)
     ready, broken = read_frontier(source, track) if source else ([], None)
     facts = pulse.Facts(

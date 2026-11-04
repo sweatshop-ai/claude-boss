@@ -24,6 +24,7 @@ class Pane:
     command: str = ""
     path: str = ""
     mirror: str = ""
+    role: str = ""
 
 
 @dataclass
@@ -66,9 +67,11 @@ def _opt(name):
 # The one tmux format. Field order matches Pane.
 FORMAT = "\t".join(["#{pane_id}", "#{session_name}:#{window_index}.#{pane_index}",
                      _opt("@boss_pane"), "#{pane_current_command}", "#{pane_current_path}",
-                     _opt("@worker_name")])
+                     _opt("@worker_name"), _opt("@worker_role")])
 
 STAMP = "@boss_pane"
+CONCIERGE = "concierge"
+QUESTION = "input needed"    # what the registry's waitingFor says for a question
 
 
 class TmuxUnavailable(Exception):
@@ -95,7 +98,7 @@ class Tmux:
         out = []
         for line in raw.splitlines():
             f = line.split("\t")
-            if len(f) != 6 or not f[0].startswith("%"):
+            if len(f) != 7 or not f[0].startswith("%"):
                 continue
             out.append(Pane(*["" if v == "-" else v for v in f]))
         return out
@@ -155,6 +158,22 @@ def owned(seats, boss_pane):
     if not boss_pane:
         return []
     return [s for s in seats if s.pane.owner == boss_pane and s.pane.id != boss_pane]
+
+
+def workers(seats, boss_pane):
+    """The seats a boss dispatches tickets to: all it owns but its concierge."""
+    return [s for s in owned(seats, boss_pane) if s.pane.role != CONCIERGE]
+
+
+def concierge_of(seats, boss_pane):
+    """The seat of the live session holding this boss's questions, or None."""
+    for s in owned(seats, boss_pane):
+        if s.pane.role != CONCIERGE or not s.session:
+            continue
+        # On a permission prompt or the like it holds nothing and hears nothing.
+        if (s.session.get("waitingFor") or QUESTION) == QUESTION:
+            return s
+    return None
 
 
 def seat_of(seats, pane=None, sid=None):

@@ -185,3 +185,25 @@ the longest streak that day was 4 pulses in 22 minutes, because any `SendMessage
 resets it. Counting only messages that name a dispatch gives 39 streaks over 30
 minutes in 10 sessions, not read by hand. So this clears workers, and leaves bosses
 open if the parked pattern comes back after 0.18.1.
+
+## 2026-11-04 — an open question held the whole team
+
+An audit of 30 tracks (`2026-11-04-audit-efficienza-boss.md` in the owner's notes)
+looked for why projects run long, expecting reviews. Reviews and their fixes were
+8% of project duration. For 21% no worker was active and a question to the owner was
+open. `AskUserQuestion` stops the turn of the session that opens it: in 420 of 421
+questions held over two minutes the boss produced nothing until the answer, and 762
+worker messages queued. The skill told it to dispatch what did not depend on the
+answer, which it could not do. The upper bound is not the time lost: how many of
+those workers had a ticket ready is not known.
+
+**What it bought:** the concierge, and the one deny in the guard. It fails open, so a
+concierge that dies never leaves a boss unable to ask. What to check next: the same
+measure on tracks run with a concierge.
+
+**What it did not buy:** a filter on the questions. 226 of 601 past questions were not
+the owner's, by a model's reading of their first lines, so the concierge was to send
+those back. Measured before shipping on 87 of them, a second Sonnet sent back 14 of 50
+of the owner's and let through 23 of 37 of the rest. One of the wrongly returned ones
+asked to delete a key irreversibly. Either both readings are unreliable or the classes
+are; either way it does not decide for the owner.

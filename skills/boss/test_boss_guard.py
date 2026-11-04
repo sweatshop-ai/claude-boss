@@ -328,5 +328,89 @@ class AgentTeams(GuardCase):
                                    tool_input={"name": "x", "prompt": "y"}), "")
 
 
+class QuestionsGoThroughTheConcierge(GuardCase):
+    """An open AskUserQuestion stops the boss's turn. Measured 2026-11-04: in 420
+    of 421 questions held over two minutes the boss did nothing until the owner
+    answered, while 762 worker messages queued. With a concierge the question
+    is held by another session and the boss keeps dispatching."""
+
+    def setUp(self):
+        super().setUp()
+        self.kids = []
+        self.bindir = self.cfg / "bin"
+        self.bindir.mkdir()
+        (self.bindir / "tmux").write_text(
+            '#!/usr/bin/env bash\n[[ -f "$STUB_DIR/tmux-fails" ]] && exit 1\n'
+            '[[ "$1" == list-panes ]] && cat "$STUB_DIR/panes"\nexit 0\n')
+        os.chmod(self.bindir / "tmux", 0o755)
+        (self.cfg / "sessions").mkdir()
+        self.session(self.sid, "%1", "Petra")
+
+    def tearDown(self):
+        for k in self.kids:
+            k.kill()
+            k.wait()
+        super().tearDown()
+
+    def session(self, sid, pane, name):
+        kid = subprocess.Popen(["sleep", "60"])
+        self.kids.append(kid)
+        stat = Path("/proc/%d/stat" % kid.pid).read_text()
+        (self.cfg / "sessions" / ("%d.json" % kid.pid)).write_text(json.dumps(
+            {"pid": kid.pid, "sessionId": sid, "name": name, "status": "idle",
+             "startedAt": 1000, "tmux": "boss:@1.%s" % pane, "entrypoint": "sdk-cli",
+             "cwd": str(self.cfg), "procStart": stat[stat.rindex(")") + 2:].split()[19]}))
+
+    def panes(self, *rows):
+        (self.cfg / "panes").write_text("".join(r + "\n" for r in rows))
+
+    def ask(self, question="Which org?"):
+        payload = {"session_id": self.sid, "hook_event_name": "PreToolUse",
+                   "tool_name": "AskUserQuestion",
+                   "tool_input": {"questions": [{"question": question}]}}
+        env = dict(os.environ, CLAUDE_CONFIG_DIR=str(self.cfg), STUB_DIR=str(self.cfg),
+                   PATH="%s:%s" % (self.bindir, os.environ["PATH"]))
+        res = subprocess.run([sys.executable, str(GUARD)], input=json.dumps(payload),
+                             capture_output=True, text=True, env=env, timeout=15)
+        self.assertEqual(res.returncode, 0, res.stderr)
+        out = res.stdout.strip()
+        return json.loads(out)["hookSpecificOutput"] if out else {}
+
+    BOSS = "%1\tboss:0.0\t%1\tclaude\t/w\t-\t-"
+
+    def test_a_live_concierge_takes_the_question_away_from_the_boss(self):
+        self.session("c-sid", "%6", "Odile")
+        self.panes(self.BOSS, "%6\tboss:0.1\t%1\tclaude\t/w\tOdile\tconcierge")
+        out = self.ask()
+        self.assertEqual(out["permissionDecision"], "deny")
+        self.assertIn("Odile", out["permissionDecisionReason"])
+        self.assertIn("SendMessage", out["permissionDecisionReason"])
+
+    def test_a_question_for_the_owners_consent_stays_with_the_boss(self):
+        # A peer message is never consent, so an answer relayed by the concierge
+        # cannot release a gated action. Only a question in the boss's own turn can.
+        self.session("c-sid", "%6", "Odile")
+        self.panes(self.BOSS, "%6\tboss:0.1\t%1\tclaude\t/w\tOdile\tconcierge")
+        self.assertEqual(self.ask("CONSENT: delete the old key? It cannot be undone."), {})
+
+    def test_no_concierge_the_boss_asks_itself(self):
+        self.panes(self.BOSS)
+        self.assertEqual(self.ask(), {})
+
+    def test_a_concierge_that_died_never_silences_the_boss(self):
+        self.panes(self.BOSS, "%6\tboss:0.1\t%1\tbash\t/w\tOdile\tconcierge")
+        self.assertEqual(self.ask(), {})
+
+    def test_tmux_that_does_not_answer_never_silences_the_boss(self):
+        (self.cfg / "tmux-fails").touch()
+        self.assertEqual(self.ask(), {})
+
+    def test_a_session_that_is_no_boss_is_left_alone(self):
+        self.session("c-sid", "%6", "Odile")
+        self.panes(self.BOSS, "%6\tboss:0.1\t%1\tclaude\t/w\tOdile\tconcierge")
+        (self.markers / self.sid).unlink()
+        self.assertEqual(self.ask(), {})
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
