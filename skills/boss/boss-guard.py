@@ -101,7 +101,8 @@ HEREDOC = re.compile(r"""(?<!<)<<-?\s*(['"]?)(\w+)\1(?=\s|$|[;&|<>])""")
 # `s/a/b/g`: one delimiter, no escapes, flags that neither write (`w`) nor run (`e`).
 # Any other sed program is not read; it counts as work.
 SED_SUBSTITUTE = re.compile(r"s([/|#,:@])[^\\]*?\1[^\\]*?\1[gpI0-9]*")
-FLAG_ARGUMENT = {"-n", "-c", "-d", "-f", "-b"}
+# the flags that take a value, per filter: `-c` is one for head and cut, none for wc
+VALUE_FLAGS = {"head": {"-n", "-c"}, "tail": {"-n", "-c"}, "cut": {"-d", "-f", "-c", "-b"}, "wc": set()}
 DATE = re.compile(r"\$\(date(?:[ \t]+[^()`;&|<>\n]*)?\)")
 SEPARATORS = {";", "&&", "|"}
 REDIRECTS = {">", ">>", "<"}
@@ -171,7 +172,7 @@ def filter_is_plain(words):
     for w in words[1:]:
         if takes_value:
             takes_value = False
-        elif w in FLAG_ARGUMENT:
+        elif w in VALUE_FLAGS.get(words[0], ()):
             takes_value = True
         elif not (w.startswith("-") and w not in REDIRECTS):
             return False
