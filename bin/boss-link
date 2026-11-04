@@ -18,6 +18,12 @@
 # A missing or dangling link, or either side without a version, is always set,
 # and so is a root passed as the argument: install.sh means it, rollback included. A real file or directory at the link
 # path is left alone, with a line on stderr, because that is somebody's data.
+#
+# It also keeps the installed systemd units in step with the templates of the
+# version the link points at (MemoryMax reached fresh installs only, because
+# install.sh copies the units once). A unit is rewritten only where its file
+# already exists, so a machine that never ran install.sh gets nothing, and it
+# is never enabled or started; one `daemon-reload` follows a rewrite.
 set -euo pipefail
 
 explicit="${1:-}"
@@ -32,19 +38,38 @@ cfg="${CLAUDE_CONFIG_DIR:-}"           # an empty value means unset (see boss_st
 [[ -n $cfg ]] || cfg="$HOME/.claude"
 link="$cfg/routines/claude-boss"
 
+refresh_units() {
+  local units="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user" tdir u want changed=
+  tdir="$(readlink -f -- "$link")/systemd"
+  [[ -d $units && -d $tdir ]] || return 0
+  for u in boss-ladder.service boss-ladder.timer boss-workers-watch.service \
+           boss-workers-watch.timer boss-efficiency.service boss-efficiency.timer; do
+    [[ -f $units/$u && -f $tdir/$u.in ]] || continue
+    want="$(sed -e "s|@ROOT@|$link|g" -e "s|@CFG@|$cfg|g" "$tdir/$u.in"; echo x)"
+    [[ "$(cat -- "$units/$u"; echo x)" == "$want" ]] && continue
+    printf '%s' "${want%x}" > "$units/$u"
+    echo "boss-link: refreshed $units/$u"
+    changed=1
+  done
+  if [[ -n $changed ]] && command -v systemctl >/dev/null 2>&1; then
+    systemctl --user daemon-reload || true
+  fi
+}
+
 version_of() {   # the plugin's own version, empty when it has none
   sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$1/.claude-plugin/plugin.json" 2>/dev/null | head -n1 || true
 }
 
 if [[ -L $link ]]; then
   current="$(readlink -- "$link")"
-  [[ $current == "$root" ]] && exit 0
+  if [[ $current == "$root" ]]; then refresh_units; exit 0; fi
   if [[ -z $explicit && -e $link ]]; then
     have="$(version_of "$(readlink -f -- "$link")")"
     want="$(version_of "$root")"
     if [[ -n $have && -n $want && $have != "$want" \
           && $(printf '%s\n%s\n' "$have" "$want" | sort -V | tail -n1) == "$have" ]]; then
       echo "boss-link: kept $link -> $current ($have is newer than $want)"
+      refresh_units
       exit 0
     fi
   fi
@@ -56,3 +81,4 @@ fi
 mkdir -p "$cfg/routines"
 ln -sfn -- "$root" "$link"
 echo "boss-link: $link -> $root"
+refresh_units

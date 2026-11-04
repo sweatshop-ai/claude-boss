@@ -18,6 +18,18 @@
   "sensitive" and records it on the PR; the worker may raise it, never lower it. The dispatch
   carries a short text of the rules.
 
+- **Codex findings on PRs 43, 44, 45, 47 and 53 (ticket 25).** Guard classifier: a `sed` program
+  other than a plain `s/…/…/` substitution, a heredoc marker in a comment or in quotes, `cat` reading a
+  file beside a tracker write, a pipe filter with a file operand or `<`, and a `cd` that fails after
+  `;` now count as work; `cat <<EOF >> pm/x` is read as a heredoc. Where the text cannot be read with
+  certainty the call counts as work: the guard warns and logs, it is no boundary. `spawn --concierge`
+  finds a concierge waiting on a permission prompt and starts no second one. The update-gap check
+  counts a session live by `registry.is_live`'s rules and treats a cache dated far ahead as stale.
+  The P17 proof asks for the resolved path of what runs, not only an import. `bin/boss-link` rewrites
+  the installed systemd units from the current templates (so `MemoryMax=1G` reaches installs that
+  predate it), only where the unit file already exists, never enabling or starting anything; it
+  runs `systemctl --user daemon-reload` after a rewrite. A hand-edited unit is overwritten.
+
 - **The P17 dispatch text no longer asks for the database URL.** A URL can carry `user:pass@`, and the
   worker's report is copied into the boss's messages and transcripts. The worker now reports the
   database's host, port and name, never the URL as a whole and never a password or token. Found by

@@ -355,6 +355,10 @@ class StableLink(unittest.TestCase):
         (r / "routines" / "boss-ladder.sh").write_text("#!/bin/sh\n")
         (r / ".claude-plugin").mkdir()
         (r / ".claude-plugin" / "plugin.json").write_text(f'{{"name": "claude-boss", "version": "{version}"}}\n')
+        (r / "systemd").mkdir()
+        for name in ("boss-efficiency.service", "boss-efficiency.timer"):
+            (r / "systemd" / (name + ".in")).write_text(
+                f"[X]\nExec=@ROOT@/routines/{name}.sh\nCfg=@CFG@\n" + ("MemoryMax=1G\n" if version >= "0.2.0" else ""))
         return r
 
     def run_link(self, *args, plugin_root=None, cfg=None):
@@ -427,6 +431,74 @@ class StableLink(unittest.TestCase):
         self.assertEqual(r.returncode, 1)
         self.assertIn("not a claude-boss checkout", r.stderr)
         self.assertFalse(self.link.exists())
+
+    # --- the units: rewritten where the routine is installed, never installed
+
+    def units(self):
+        return self.home / ".config" / "systemd" / "user"
+
+    def fake_systemctl(self):
+        """A systemctl that only writes down what it was asked; the real one is never reached."""
+        bindir = self.tmp / "fakebin"
+        bindir.mkdir(exist_ok=True)
+        (bindir / "systemctl").write_text('#!/bin/sh\necho "$*" >> "%s/systemctl.log"\n' % self.tmp)
+        (bindir / "systemctl").chmod(0o755)
+        return bindir
+
+    def systemctl_calls(self):
+        log = self.tmp / "systemctl.log"
+        return log.read_text().splitlines() if log.exists() else []
+
+    def run_link_with_fake_systemctl(self, root):
+        env = {"PATH": "%s:%s" % (self.fake_systemctl(), os.environ["PATH"]), "HOME": str(self.home),
+               "CLAUDE_CONFIG_DIR": str(self.cfg)}
+        return subprocess.run([str(self.LINK_BIN), str(root)], env=env, capture_output=True, text=True,
+                              stdin=subprocess.DEVNULL, timeout=10)
+
+    def test_a_machine_without_the_routine_gets_no_unit_and_no_systemctl_call(self):
+        r = self.run_link_with_fake_systemctl(self.roots[1])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertFalse(self.units().exists())
+        self.assertEqual(self.systemctl_calls(), [])
+
+    def test_an_installed_unit_is_rewritten_and_nothing_else_is_installed_or_enabled(self):
+        self.run_link_with_fake_systemctl(self.roots[0])
+        self.units().mkdir(parents=True)
+        (self.units() / "boss-efficiency.service").write_text("[X]\nExec=old\n")   # no timer installed
+        r = self.run_link_with_fake_systemctl(self.roots[1])        # a new version, link moves
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual((self.units() / "boss-efficiency.service").read_text(),
+                         f"[X]\nExec={self.link}/routines/boss-efficiency.service.sh\nCfg={self.cfg}\nMemoryMax=1G\n")
+        self.assertEqual(sorted(p.name for p in self.units().iterdir()), ["boss-efficiency.service"])
+        self.assertEqual(self.systemctl_calls(), ["--user daemon-reload"])
+
+    def test_a_unit_is_refreshed_also_when_the_link_is_already_right(self):
+        self.run_link_with_fake_systemctl(self.roots[1])
+        self.units().mkdir(parents=True)
+        (self.units() / "boss-efficiency.timer").write_text("[X]\nstale\n")
+        r = self.run_link_with_fake_systemctl(self.roots[1])
+        self.assertIn("boss-efficiency.timer", r.stdout)
+        self.assertIn(f"Exec={self.link}/", (self.units() / "boss-efficiency.timer").read_text())
+
+    def test_a_current_unit_is_left_alone_in_silence(self):
+        self.run_link_with_fake_systemctl(self.roots[1])
+        self.units().mkdir(parents=True)
+        (self.units() / "boss-efficiency.service").write_text("[X]\nstale\n")
+        self.run_link_with_fake_systemctl(self.roots[1])
+        (self.tmp / "systemctl.log").unlink()
+        r = self.run_link_with_fake_systemctl(self.roots[1])
+        self.assertEqual((r.returncode, r.stdout, r.stderr), (0, "", ""))
+        self.assertEqual(self.systemctl_calls(), [])
+
+    def test_an_older_session_does_not_rewrite_the_unit_back(self):
+        self.run_link_with_fake_systemctl(self.roots[1])
+        self.units().mkdir(parents=True)
+        (self.units() / "boss-efficiency.service").write_text("[X]\nstale\n")
+        self.run_link_with_fake_systemctl(self.roots[1])
+        env = {"PATH": os.environ["PATH"], "HOME": str(self.home), "CLAUDE_CONFIG_DIR": str(self.cfg),
+               "CLAUDE_PLUGIN_ROOT": str(self.roots[0])}
+        subprocess.run([str(self.LINK_BIN)], env=env, capture_output=True, text=True, timeout=10)
+        self.assertIn("MemoryMax=1G", (self.units() / "boss-efficiency.service").read_text())
 
     def test_an_empty_config_dir_means_home(self):
         r = self.run_link(str(self.roots[0]), cfg="")
