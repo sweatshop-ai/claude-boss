@@ -8,6 +8,6 @@ Documentation=file://@ROOT@/routines/boss-efficiency.md
 Type=oneshot
 ExecStart=@ROOT@/routines/boss-efficiency.sh
 # A scan of the transcripts takes minutes at nice 19; it can also wait up to 2 h
-# for the transcripts lock. The backstop is for a wedged interpreter.
-TimeoutStartSec=3h
+# for the transcripts lock, and the body caps the scan at 1 h; 4 h leaves the body room to log. The backstop is for a wedged interpreter.
+TimeoutStartSec=4h
 Nice=19

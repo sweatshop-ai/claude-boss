@@ -13,8 +13,8 @@ LINK="$CFG/routines/claude-boss"
 UNITS="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 
 if [[ -z ${KEEP_TIMERS:-} ]] && command -v systemctl >/dev/null 2>&1; then
-  systemctl --user disable --now boss-ladder.timer boss-workers-watch.timer 2>/dev/null || true
-  rm -f "$UNITS"/boss-ladder.{service,timer} "$UNITS"/boss-workers-watch.{service,timer}
+  systemctl --user disable --now boss-ladder.timer boss-workers-watch.timer boss-efficiency.timer 2>/dev/null || true
+  rm -f "$UNITS"/boss-ladder.{service,timer} "$UNITS"/boss-workers-watch.{service,timer} "$UNITS"/boss-efficiency.{service,timer}
   systemctl --user daemon-reload
   echo "timers removed"
 fi

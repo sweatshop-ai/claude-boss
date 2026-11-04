@@ -47,6 +47,8 @@ import boss_store  # noqa: E402
 # What a "move" is. Chosen from four weekly windows of real data (see
 # boss-efficiency.md, "Where the thresholds come from"); changing them changes
 # what the routine says, so they live here and not in the shell.
+END_SLACK_S = 1             # windows are half-open; this keeps a session's last record inside its own
+ADJACENT_S = 3 * 86400      # a late or manual run still finds the week before it
 COVER_GRACE_S = 600         # a worker message counts as covered within this of tracked activity
 FLOOR_TOKENS = 100e6        # a track below this in either week is too small to compare (about 10% of a week)
 SPEND_PP = 0.20             # a phase's share of the track's tokens, or of its worker time in CI, moved by this much
@@ -144,55 +146,62 @@ def scan_session(path, tracks=()):
     tracks = set(tracks)
     alt = "|".join(re.escape(t) for t in sorted(tracks, key=len, reverse=True))
     disp3 = re.compile(r"pm/(" + alt + r")\.(?:dispatch|md|goal)") if alt else None
-    with open(path, errors="replace") as fh:
-        for line in fh:
-            try: d = json.loads(line)
-            except Exception: continue
-            t = d.get("timestamp")
-            if "<task-notification>" in line and t:
-                for m in NOTIF.findall(line): notif.setdefault(m, ts(t))
-            if d.get("type") not in ("user", "assistant") or not t or d.get("isSidechain"): continue
-            T, m = ts(t), d.get("message") or {}
-            content = m.get("content")
-            if d["type"] == "assistant":
-                if m.get("id"): msgs[m["id"]] = (T, usage(m.get("usage") or {}), m.get("model"))
-                if isinstance(content, list):
-                    for b in content:
-                        if b.get("type") != "tool_use": continue
-                        inp = b.get("input") or {}
-                        tools[b["id"]] = dict(s=T, e=None, cat=cat_tool(b["name"], inp), name=b["name"],
-                                              bg=bool(inp.get("run_in_background")) or b["name"] == "Monitor",
-                                              cmd=(inp.get("command") or "")[:260])
-                        if b["name"] == "AskUserQuestion": out["asks"].append(T)
-                        if b["name"] == "Bash":
-                            c = inp.get("command", "") or ""
-                            r = BOSSREG.search(c)
-                            if r and not c.lstrip().startswith(("grep", "rg", "cat", "sed")):
-                                out["boss_regs"].append((T, r.group(1)))
-                recs.append((T, "a"))
-                continue
-            is_result = False
+    skipped = 0
+
+    def take(d, line):
+        t = d.get("timestamp")
+        if "<task-notification>" in line and t:
+            for m in NOTIF.findall(line): notif.setdefault(m, ts(t))
+        if d.get("type") not in ("user", "assistant") or not t or d.get("isSidechain"): return
+        T, m = ts(t), d.get("message") or {}
+        content = m.get("content")
+        if d["type"] == "assistant":
+            if m.get("id"): msgs[m["id"]] = (T, usage(m.get("usage") or {}), m.get("model"))
             if isinstance(content, list):
                 for b in content:
-                    if isinstance(b, dict) and b.get("type") == "tool_result":
-                        is_result = True
-                        x = tools.get(b.get("tool_use_id"))
-                        if x and x["e"] is None:
-                            x["e"] = T
-                            tx = json.dumps(b.get("content"))[:300]
-                            if "Async agent launched" in tx or "running in background" in tx or "Monitor started" in tx:
-                                x["bg"] = True
-            if not is_result:
-                tx = text_of(m)
-                f = FROM.search(tx[:400])
-                if f:
-                    body = tx[tx.find(">") + 1:tx.find(">") + 900]
-                    g = DISP.search(body)
-                    g3 = None if g else (disp3.search(body) if disp3 else None)
-                    trk = (g.group(2).rstrip(".`") if g else g3.group(1) if g3 else None)
-                    if trk and g and trk not in tracks: trk, g = None, None
-                    out["xmsgs"].append((T, f.group(1), trk, bool(g)))
-            recs.append((T, "r" if is_result else "u"))
+                    if b.get("type") != "tool_use": continue
+                    inp = b.get("input") or {}
+                    tools[b["id"]] = dict(s=T, e=None, cat=cat_tool(b["name"], inp), name=b["name"],
+                                          bg=bool(inp.get("run_in_background")) or b["name"] == "Monitor",
+                                          cmd=(inp.get("command") or "")[:260])
+                    if b["name"] == "AskUserQuestion": out["asks"].append(T)
+                    if b["name"] == "Bash":
+                        c = inp.get("command", "") or ""
+                        r = BOSSREG.search(c)
+                        if r and not c.lstrip().startswith(("grep", "rg", "cat", "sed")):
+                            out["boss_regs"].append((T, r.group(1)))
+            recs.append((T, "a"))
+            return
+        is_result = False
+        if isinstance(content, list):
+            for b in content:
+                if isinstance(b, dict) and b.get("type") == "tool_result":
+                    is_result = True
+                    x = tools.get(b.get("tool_use_id"))
+                    if x and x["e"] is None:
+                        x["e"] = T
+                        tx = json.dumps(b.get("content"))[:300]
+                        if "Async agent launched" in tx or "running in background" in tx or "Monitor started" in tx:
+                            x["bg"] = True
+        if not is_result:
+            tx = text_of(m)
+            f = FROM.search(tx[:400])
+            if f:
+                body = tx[tx.find(">") + 1:tx.find(">") + 900]
+                g = DISP.search(body)
+                g3 = None if g else (disp3.search(body) if disp3 else None)
+                trk = (g.group(2).rstrip(".`") if g else g3.group(1) if g3 else None)
+                if trk and g and trk not in tracks: trk, g = None, None
+                out["xmsgs"].append((T, f.group(1), trk, bool(g)))
+        recs.append((T, "r" if is_result else "u"))
+
+    with open(path, errors="replace") as fh:
+        for line in fh:
+            try:
+                take(json.loads(line), line)
+            except (ValueError, TypeError, AttributeError, KeyError):
+                skipped += 1              # one odd line in 5 GB must not stop the week
+    out["skipped"] = skipped
     if not recs: return None
     recs.sort()
     out["start"], out["end"] = recs[0][0], recs[-1][0]
@@ -259,11 +268,16 @@ def _segments(recs, fg, bg):
 
 
 # ------------------------------------------------------------ attribution
+def session_end(s):
+    """The end of a session as a window bound: the last record falls inside it."""
+    return s["end"] + END_SLACK_S
+
+
 def boss_windows(s, marker_track=None):
     """[(track, start, end)] a boss session spent on each track."""
     regs = [r for r in s["boss_regs"] if r[1]]
-    if not regs and marker_track: return [(marker_track, s["start"], s["end"])]
-    return [(tr, s["start"] if i == 0 else t, regs[i + 1][0] if i + 1 < len(regs) else s["end"])
+    if not regs and marker_track: return [(marker_track, s["start"], session_end(s))]
+    return [(tr, s["start"] if i == 0 else t, regs[i + 1][0] if i + 1 < len(regs) else session_end(s))
             for i, (t, tr) in enumerate(regs)]
 
 
@@ -307,7 +321,7 @@ class Index:
                 continue
             ev = [(T, socks.get(sock) or trk) for T, sock, trk, _ in s["xmsgs"] if socks.get(sock) or trk]
             for i, (T, tr) in enumerate(ev):
-                self.workers[tr].append((s, T, ev[i + 1][0] if i + 1 < len(ev) else s["end"]))
+                self.workers[tr].append((s, T, ev[i + 1][0] if i + 1 < len(ev) else session_end(s)))
 
     def tracks(self):
         return sorted(set(self.workers) | set(self.bosses))
@@ -462,7 +476,7 @@ def judge(week, previous):
         fails.append("no tracked sessions found in the window")
     if week["coverage"]["messages"] == 0:
         fails.append("coverage check ran on 0 worker messages")
-    if not previous or abs(previous["end"] - week["start"]) > 86400:
+    if not previous or abs(previous["end"] - week["start"]) > ADJACENT_S:
         return fails, flags                # no adjacent week to compare with
     for tr, m in sorted(week["tracks"].items()):
         p = previous["tracks"].get(tr)
@@ -475,6 +489,12 @@ def judge(week, previous):
         if found:
             flags.append("%s: %s%s" % (tr, "; ".join(found), coverage_note(m)))
     return fails, flags
+
+
+def pick_previous(history, week):
+    """The earlier week whose end is nearest this week's start, or None."""
+    near = [h for h in history if h["end"] <= week["end"] - 86400]
+    return min(near, key=lambda h: abs(h["end"] - week["start"]), default=None)
 
 
 def coverage_note(m):
@@ -534,7 +554,12 @@ def alert(text, dry):
         return True
     envf = Path(os.environ.get("BOSS_SLACK_ENV") or Path.home() / ".config" / "tiroir" / "slack.env")
     try:
-        creds = dict(l.strip().split("=", 1) for l in envf.read_text().splitlines() if "=" in l and not l.startswith("#"))
+        creds = {}
+        for l in envf.read_text().splitlines():
+            l = l.strip().removeprefix("export ").strip()
+            if "=" in l and not l.startswith("#"):
+                k, v = l.split("=", 1)
+                creds[k.strip()] = v.strip().strip("\"'")
         api = os.environ.get("BOSS_SLACK_API", "https://slack.com/api/chat.postMessage")
         body = urllib.parse.urlencode({"channel": creds["SLACK_CHANNEL_ID"], "text": ":bar_chart: " + text}).encode()
         req = urllib.request.Request(api, body, {"Authorization": "Bearer " + creds["SLACK_BOT_TOKEN"]})
@@ -549,7 +574,13 @@ def alert(text, dry):
 # -------------------------------------------------------------------- main
 def discover(cfg, since):
     root = Path(cfg) / "projects"
-    return [p for p in root.glob("*/*.jsonl") if p.stat().st_mtime >= since]
+    found = []
+    for p in root.glob("*/*.jsonl"):
+        try:
+            if p.stat().st_mtime >= since: found.append(p)
+        except OSError:
+            pass                          # gone between the glob and the stat
+    return found
 
 
 def known_tracks(cfg, state):
@@ -573,7 +604,15 @@ def run(cfg, end, weeks, dry):
     state = json.loads(st_path.read_text()) if st_path.exists() else {}
     first = end - weeks * 7 * 86400
     known = sorted(set(known_tracks(cfg, state)) | set(markers(cfg).values()))
-    sessions = [r for p in discover(cfg, first) if (r := scan_session(p, known))]
+    sessions, unreadable = [], 0
+    for p in discover(cfg, first):
+        try:
+            r = scan_session(p, known)
+        except OSError:
+            unreadable += 1
+            continue
+        if r: sessions.append(r)
+    if unreadable: print("boss-efficiency: %d transcript(s) unreadable" % unreadable, file=sys.stderr)
     socks = resolve_sockets(sessions, state.get("socks"))
     idx = Index(sessions, markers(cfg), socks)
     history = state.get("weeks", [])
@@ -582,8 +621,7 @@ def run(cfg, end, weeks, dry):
         wend = end - (weeks - 1 - w) * 7 * 86400
         week = measure_window(idx, wend - 7 * 86400, wend)
         label = dt.datetime.fromtimestamp(wend).strftime("%Y-%m-%d")
-        prior = [h for h in history if h["end"] < wend]
-        fails, flags = judge(week, prior[-1] if prior else None)
+        fails, flags = judge(week, pick_previous(history, week))
         text = render(week, label, fails, flags)
         if not fails:                       # a week that could not be measured is no baseline
             history = [h for h in history if h["end"] != wend] + [week]
