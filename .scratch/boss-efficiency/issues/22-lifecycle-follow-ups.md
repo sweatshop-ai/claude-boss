@@ -15,8 +15,13 @@
 
 **Claimed by:** Renzo 2026-11-04 23:30 (Osman before, who handed off)
 
-**Status:** in-progress
+**Status:** done (PR 52 merged as 063b2d8, 2026-11-04; CI on the PR head d60b853 green)
 
-- [ ] Items 1 to 4, each with a test that is red before and green after
-- [ ] Item 5: a reproduction of a worker with a finished turn and a background shell, the signal chosen, and a restart that goes through on it; a turn in flight with a shell stays refused
-- [ ] Item 6: a test that a worker pane running the script is not stamped, and a boss pane still is
+- [x] Items 1 to 4, each with a test that is red before and green after (PR 52, `test_boss_lifecycle.py`)
+- [x] Item 5: reproduced on 2.1.311 in a throwaway tmux server; the signal is `turn_duration` as the last transcript record (fifth `--state` field). Met by the flag: by Anton's decision a finished turn is not a finished task, so `shell` stays refused by default and the restart goes through on it only with `--stop-shells`; a turn in flight with a shell stays refused even with the flag. Without typing, the pane shows only kinds and counts (footer `2 shells`), so the refusal says that and jobs are listed only under the flag
+- [x] Item 6: a test that a worker pane running the script is not stamped, and a boss pane still is
+
+**Accepted residuals** (round 2 Opus GO, `.scratch/boss-efficiency/reviews/pr-52-round2-opus.md`; not built):
+- The `retire` usage line (`boss-lifecycle.sh` l.12) nests `--stop-shells` inside `--wait-idle`; the code does not need it.
+- After `/exit`, the exit dialog is confirmed without checking `--stop-shells` (older than this PR): the default refusal relies on Claude Code reporting `shell` whenever background work runs, and no fixture pins that.
+- Codex verdict on d60b853 owed (ticket 10's list).
