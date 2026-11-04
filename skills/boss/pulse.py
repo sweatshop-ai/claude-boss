@@ -75,7 +75,8 @@ def decide(facts):
 
 
 def _ask(facts, action):
-    return ("**Ask the owner, with `AskUserQuestion`.** One question, the "
+    return ("**Ask the owner: send it to your concierge by `SendMessage`, or with "
+            "`AskUserQuestion` if you have none.** One question, the "
             "one that unblocks the most work; hold the rest with their timers "
             "running but silent. Self-contained - they remember nothing of this "
             "context. Options they can click, your recommendation first and "
