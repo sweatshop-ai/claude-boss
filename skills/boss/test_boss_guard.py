@@ -251,6 +251,8 @@ class ClassifierGaps(GuardCase):
         self.assertLogged("echo x | head < /repo/src/app.ts")
         self.assertQuiet("cd ~/.claude/pm && printf '%s\\n' x | /x/bin/boss-tracker append demo | head -n 5")
         self.assertQuiet("echo x | cut -d , -f 2 | wc -l")
+        self.assertLogged("echo x | wc -c /repo/src/app.ts")      # -c takes a value for head, tail and cut, not wc
+        self.assertQuiet("echo x | head -c 5 | wc -c")
 
     def test_a_cd_that_fails_does_not_own_the_cwd(self):
         self.assertLogged("cd ~/.claude/pm/missing; echo x > src/app.ts")
