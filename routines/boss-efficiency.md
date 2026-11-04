@@ -41,8 +41,8 @@ So the report prints the count per track in an **Outside** column, and a line wh
 the fleet is above 40%, because a busy track's numbers can rest on a third of its
 messages being unattributed. An anomaly on a track with 20% or more outside says so
 in its own line. Coverage never triggers an alert by itself: it moved with the number
-of workers, not with a change in the routine. Zero sessions found, or a check run on
-zero messages, is a **failure** (exit 2, Slack), never a pass; a failed week is not
+of workers, not with a change in the routine. Zero sessions found, a check run on
+zero messages, or more than 90% of at least ten worker messages outside (the socket lookup found no workers; fewer than ten messages cannot show it) is a **failure** (exit 2, Slack), never a pass; a failed week is not
 kept as a baseline.
 
 ## When it speaks
@@ -88,7 +88,7 @@ kept outside the repository, because the transcripts name clients.
 `~/.claude/routines/state/boss-efficiency.json` (socket ties, eight weeks of
 history, last eight weeks), `~/.claude/routines/logs/boss-efficiency.log`. The core refuses to
 write inside the plugin. The scan takes `~/.claude/pm/.boss-efficiency-transcripts.lock`
-(`flock`), shared with the gap scan of ticket 07, and runs at nice 19. A boss whose dispatches no longer read "Boss dispatch from X, track Y" gets no socket tie (two such messages are the vote); its workers then show up as coverage lost, not as a wrong track.
+(`flock`), shared with the gap scan of ticket 07, and runs at nice 19 and best-effort I/O class 2, priority 7 (not idle: an idle scan can starve on a busy disk and hit the 1 h cap, which loses the week). A boss whose dispatches no longer read "Boss dispatch from X, track Y" gets no socket tie (two such messages are the vote); its workers then show up as coverage lost, not as a wrong track.
 
 ## Test hooks
 
@@ -96,7 +96,7 @@ write inside the plugin. The scan takes `~/.claude/pm/.boss-efficiency-transcrip
 DRY_RUN=1 ~/.claude/routines/claude-boss/routines/boss-efficiency.sh --end 2026-11-04 --weeks 5
 ```
 
-Prints the reports and what would be alerted, writes nothing. A five-week scan of
+Prints the reports and what would be alerted, writes nothing (no directory, no log). A five-week scan of
 about 10,000 sessions took 33 minutes at nice 19 on a loaded machine.
 
 ## Limits

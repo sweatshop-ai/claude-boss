@@ -11,3 +11,6 @@ ExecStart=@ROOT@/routines/boss-efficiency.sh
 # for the transcripts lock, and the body caps the scan at 1 h; 4 h leaves the body room to log. The backstop is for a wedged interpreter.
 TimeoutStartSec=4h
 Nice=19
+# Measured on one real week: the scan holds well under a tenth of this. The cap leaves room for a backfill
+# of several weeks and stops a runaway before it swaps the shared laptop.
+MemoryMax=1G

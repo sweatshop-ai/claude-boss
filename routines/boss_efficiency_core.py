@@ -54,7 +54,12 @@ FLOOR_TOKENS = 100e6        # a track below this in either week is too small to 
 SPEND_PP = 0.20             # a phase's share of the track's tokens, or of its worker time in CI, moved by this much
 ASKS_RATIO = 3.0            # questions per 100 M tokens rose to this many times last week's...
 ASKS_RISE = 1.0             # ...and by at least this many per 100 M
+# A total socket-lookup failure gives a high share, not 0 messages: Index counts every message of a boss
+# session whose socket is not tied, and no worker is there to cover it. 0 messages means the boss sessions
+# sent none at all, which judge() fails on its own.
 FAIL_UNCOVERED = 0.90       # above this the socket lookup found no ties: the week is not a measurement
+MAX_TOKENS = 1e18           # a token count above this is corrupt: too big to cost without an OverflowError
+MIN_MESSAGES = 10           # fewer worker messages than this cannot show a failed lookup: a quiet week is not a failure
 MAX_UNCOVERED = 0.40        # not a trigger: shown beside the numbers of a track above 20% and in the header
 COVER_NOTE = 0.20           # a track with this share of its worker messages outside tracked activity is marked
 HISTORY_WEEKS = 8           # weeks kept in state for the trailing mean
@@ -118,7 +123,8 @@ PR = {c: i for i, c in enumerate(PRIO)}
 def usage(u):
     def n(k):
         v = u.get(k, 0)
-        return v if isinstance(v, (int, float)) and not isinstance(v, bool) else 0
+        ok = isinstance(v, (int, float)) and not isinstance(v, bool) and 0 <= v < MAX_TOKENS   # NaN and inf fail the compare
+        return v if ok else 0
     return dict(i=n("input_tokens"), cw=n("cache_creation_input_tokens"),
                 cr=n("cache_read_input_tokens"), o=n("output_tokens"))
 
@@ -483,7 +489,7 @@ def judge(week, previous):
         fails.append("no tracked sessions found in the window")
     if week["coverage"]["messages"] == 0:
         fails.append("coverage check ran on 0 worker messages")
-    elif week["coverage"]["share"] > FAIL_UNCOVERED:
+    elif week["coverage"]["messages"] >= MIN_MESSAGES and week["coverage"]["share"] > FAIL_UNCOVERED:
         fails.append("%.0f%% of worker messages are outside tracked activity: the socket lookup found no workers"
                      % (100 * week["coverage"]["share"]))
     if not previous or abs(previous["end"] - week["start"]) > ADJACENT_S:
@@ -624,7 +630,7 @@ def run(cfg, end, weeks, dry):
         if r: sessions.append(r)
     if unreadable: print("boss-efficiency: %d transcript(s) unreadable" % unreadable, file=sys.stderr)
     odd = sum(r["skipped"] for r in sessions)
-    if odd: print("boss-efficiency: %d malformed transcript line(s) skipped" % odd, file=sys.stderr)
+    if odd: print("boss-efficiency: %d malformed transcript line(s) skipped (in sessions with records)" % odd, file=sys.stderr)
     socks = resolve_sockets(sessions, state.get("socks"))
     idx = Index(sessions, markers(cfg), socks)
     history = state.get("weeks", [])
@@ -636,7 +642,8 @@ def run(cfg, end, weeks, dry):
         fails, flags = judge(week, pick_previous(history, week))
         text = render(week, label, fails, flags)
         if not fails:                       # a week that could not be measured is no baseline
-            history = [h for h in history if h["end"] != wend] + [week]
+            # a rerun of the same week replaces it, whatever second it ran at (a day's slack covers DST)
+            history = [h for h in history if abs(h["end"] - wend) >= 86400] + [week]
             history = sorted(history, key=lambda h: h["end"])[-HISTORY_WEEKS:]
         if not dry:
             state = dict(socks=socks, tracks=sorted(set(idx.tracks()) | set(state.get("tracks", []))), weeks=history)
