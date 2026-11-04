@@ -46,7 +46,8 @@ counted, because the transcript records no ref otherwise.
 ## Where a track ends
 
 A track whose goal was last marked met (`boss-goal status <track> met`, read from the
-boss's command, and only when the command succeeded) ends at that mark or at its last commit whose command says "done",
+boss's command, and only when the command succeeded) ends at that mark or at its
+last commit whose command says "done",
 whichever is later, plus a minute. The boss session left open after that is not the
 track: its time, its tokens and the worker messages it gets are left out. A track not
 marked met, or reopened after, runs to the end of its sessions as before. The commit
