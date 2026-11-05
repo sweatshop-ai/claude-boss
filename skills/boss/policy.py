@@ -25,7 +25,7 @@ WORKER, BOSS = "worker", "boss"
 
 # A worker gets one task per session (2026-10-01). Past SPLIT the task is
 # bigger than the smart zone and is cut at its next natural boundary; past
-# OVER that cut is overdue.
+# OVER the "Session age" rule for a long worker applies.
 WORKER_SPLIT, WORKER_OVER = 150_000, 250_000
 
 # A boss compacts at 450k (bin/boss-start) and its state is the tracker. EVAL:
