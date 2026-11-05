@@ -4,9 +4,9 @@
 
 **Blocked by:** None (can start immediately)
 
-**Claimed by:** Anouk 2026-11-05 00:07
+**Claimed by:** Astrid 2026-11-05 01:40
 
-**Status:** in-progress
+**Status:** done (PR 56, e9e765d; the round-4 and round-5 leftovers moved to ticket 33)
 
 PR 45 (concierge)
 - [x] P2 `skills/boss/fleet.py:173-175` and `skills/boss/boss-lifecycle.sh:284`: `concierge_of` skips a concierge waiting on a permission or trust prompt, and `spawn --concierge` reuses the same lookup, so it starts a second concierge. Spawn needs an existence check that counts a prompt-blocked live concierge; the guard and pulse keep the current "holds the question" rule.
@@ -32,3 +32,17 @@ PR 53 (efficiency routine follow-ups)
 - [x] P2 `systemd/boss-efficiency.service.in:16` the `MemoryMax=1G` cap reaches only fresh installs: `install.sh` copies the unit once and README.md:85-90 says it need not be re-run after an upgrade, so installed units stay uncapped. Add an upgrade path that rewrites and reloads the unit (e.g. `boss-link` on SessionStart).
 
 PR 56, head aba4258: CI green, code-review and Opus verdict GO (reviews/pr-claude-boss-56-*). Open lows from the verdict, for a follow-up ticket: backslash in a sed program counts as work; unwritable unit makes boss-link exit 1; concierge with no session record skipped by spawn. Codex follow-up owed. Status stays in-progress until merge.
+
+PR 56 (unit backup): the first design rewrote units at session start; round 3 (`reviews/pr-claude-boss-56-opus-round3.md`) found a race that lost a hand edit, and the owner changed the design (`bin/boss-link` only reports, `install.sh` is the one writer, keeping a dated copy). The new design removes round-3 F1, F2, F3, F4 and F6. Round 4 (`reviews/pr-claude-boss-56-opus-round4.md`, GO on ef223b3) leaves, none blocking:
+- [x] R4-4 (b), moved to ticket 33: two config dirs share one units dir but run different plugin versions; every session under the second prints "run install.sh" and following it moves the units to that config dir. Compare only when the installed `ExecStart` root resolves to this config's link (`bin/boss-link`, `check_units`).
+- [x] R4-5 (b), moved to ticket 33: a unit whose `ExecStart` and `Documentation` both point at an old version directory compares equal, so `boss-link` stays silent (the 2026-10-23 failure mode); low today because the new header makes every older service unit differ once.
+- [x] (moved to ticket 33, not fixed) R4-1 (c): in `install_unit`, the `&&` after the render assignment checks nothing (the status is that of `echo x`); only the length test guards.
+- [x] (moved to ticket 33, not fixed) R4-2 (c): when one unit's copy fails, earlier units are already rewritten and `daemon-reload` does not run (nothing is lost).
+- [x] (moved to ticket 33, not fixed) R4-3 (c): the unit is overwritten in place, not by rename; an interrupted write can leave a short unit (the copy exists).
+- [x] (moved to ticket 33, not fixed) R4-6 (c): a config path with `&` or `\` renders a broken unit and `boss-link` stays silent (the renderer on main has it too); a `|` prints a sed error at every session start.
+- [x] (moved to ticket 33, not fixed) R4-7 (c): an unreadable unit prints "Permission denied" lines at every session start.
+- [x] (moved to ticket 33, not fixed) R4-8 (c): `install.sh` runs `boss-link` before writing the units, so an upgrade prints "run install.sh" from inside `install.sh`.
+- [x] (moved to ticket 33, not fixed) R4-9 (c): the `.service.in` headers still say "so an upgrade needs no re-render", `install.sh:12-13` says "the units never go stale", and `bin/boss-link:6` says "two units" for three.
+- [x] R3-F5 (c, fixed in the new design): a failed render wrote an empty unit; now it refuses.
+- [x] R3-F7 (c): moot, `boss-link` no longer reads a unit as a stream into bash.
+- [x] R3-F8 (c): `BIN=1` no longer links a library (the library is gone).
