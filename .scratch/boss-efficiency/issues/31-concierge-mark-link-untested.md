@@ -6,7 +6,7 @@
 
 **Claimed by:** Ronja 2026-11-05
 
-**Status:** PR 63
+**Status:** done (PR 63, 4b57f95)
 
 - [x] The test: a pane marked by `boss-lifecycle.sh`'s own code, read by the watchdog's own format string, a question on its screen raises no alert; skipped with a stated reason when tmux is absent
 - [x] Shown to fail: a mutant with the option renamed on one side fails it, for each side (`@worker_kind` for `@worker_role` at `boss-lifecycle.sh` line 292: FAIL; at `boss-workers-watch.sh` line 59: FAIL; unmutated: OK, whole file 16 tests OK)
