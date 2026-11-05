@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **A worker's report to the boss's name that fails is retried, not left in the pane (ticket 29).** Cause
+  found by reproduction: the `from-name` on a boss's message (a session title) is not the name in the
+  session registry, so a send to the `from-name` fails with "No agent named ... is reachable" while the
+  registry name and the `from` socket address are delivered. The registry belongs to Claude Code, not
+  this repo; why the two names differ (a `/remote-control` rename is one candidate) is not shown. The
+  reporting contract now tells the worker to retry on the `from` address and to wait without a `pgrep`
+  loop; Phase A says what `shell` means.
+
 - **Reviews graded by risk and size (ticket 02, owner's decision of 2026-11-05).** P6 no longer
   says "every PR, up to three rounds". Under 100 added lines and not sensitive: one Codex round,
   another only for a defect of class a or b. 100 to 500 and not sensitive, or sensitive: up to
