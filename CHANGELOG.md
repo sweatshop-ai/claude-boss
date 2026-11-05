@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **A worker's report to the boss's name that fails is retried, not left in the pane (ticket 29).** A
+  send to the name in an incoming message's `from-name` can fail with "No agent named ... is reachable"
+  while the `from` socket address works. The reporting contract now says: retry on the `from` address,
+  never end a turn on a report only printed in the pane; wait with `Monitor` or `run_in_background`,
+  not a `pgrep` loop, and check no background task is running before reporting. Phase A says `shell`
+  means a background job, and a quiet `shell` worker is read by its pane's last turn line.
+
 - **Reviews graded by risk and size (ticket 02, owner's decision of 2026-11-05).** P6 no longer
   says "every PR, up to three rounds". Under 100 added lines and not sensitive: one Codex round,
   another only for a defect of class a or b. 100 to 500 and not sensitive, or sensitive: up to
