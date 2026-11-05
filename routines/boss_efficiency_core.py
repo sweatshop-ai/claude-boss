@@ -50,6 +50,7 @@ HERE = Path(__file__).resolve().parent            # <plugin>/routines
 PLUGIN = HERE.parent
 sys.path.insert(0, str(PLUGIN / "skills" / "boss"))
 import boss_store  # noqa: E402
+import unask  # noqa: E402
 
 # ------------------------------------------------------------- thresholds
 # What a "move" is. Chosen from four weekly windows of real data (see
@@ -70,6 +71,7 @@ MAX_TOKENS = 1e18           # a token count above this is corrupt: too big to co
 MIN_MESSAGES = 10           # fewer worker messages than this cannot show a failed lookup: a quiet week is not a failure
 MAX_UNCOVERED = 0.40        # not a trigger: shown beside the numbers of a track above 20% and in the header
 COVER_NOTE = 0.20           # a track with this share of its worker messages outside tracked activity is marked
+REPORT_RECUR = 2            # owner reports of one kind on one track that make a rule worth proposing
 HISTORY_WEEKS = 8           # weeks kept in state for the trailing mean
 PARK_S = 4 * 3600           # a background task older than this is parked, not working
 NAME_SLACK_S = 120          # a message to or from a name reaches a session starting or ending this close to it
@@ -683,6 +685,30 @@ def judge(week, previous):
     return fails, flags
 
 
+def owner_reports(cfg, start, end):
+    """(counts in the window by track and kind, proposals) from the owner's "not this kind" reports.
+
+    A proposal is (track, kind, total) for a kind reported at least REPORT_RECUR times on a
+    track up to `end`, at least once in the window, so a rule nobody has adopted yet is raised
+    again only when the owner reports the kind again. Only kinds and counts leave this
+    function: the file holds the owner's words, and the report goes to Slack.
+    """
+    inside, total = {}, collections.Counter()
+    for r in unask.read(cfg):
+        try:
+            t = dt.datetime.fromisoformat(r["date"]).timestamp()
+        except ValueError:
+            continue
+        if t >= end: continue
+        total[(r["track"], r["kind"])] += 1
+        if t >= start:
+            k = inside.setdefault(r["track"], {})
+            k[r["kind"]] = k.get(r["kind"], 0) + 1
+    props = sorted((tr, kind, total[(tr, kind)]) for tr, kinds in inside.items() for kind in kinds
+                   if total[(tr, kind)] >= REPORT_RECUR)
+    return inside, props
+
+
 def pick_previous(history, week):
     """The earlier week whose end is nearest this week's start, or None."""
     near = [h for h in history if h["end"] <= week["end"] - 86400]
@@ -697,10 +723,15 @@ def coverage_note(m):
 
 
 # ------------------------------------------------------------------ report
+def proposal(track, kind, n):
+    return ("**Proposal:** %s: %s, reported %d times by the owner as not theirs to answer. "
+            "Draft a rule for the skill and put it through the normal review; nothing is filtered by this routine." % (track, kind, n))
+
+
 def hours(s): return "%.1f" % (s / 3600)
 
 
-def render(week, label, fails, flags):
+def render(week, label, fails, flags, reports=None, props=()):
     out = ["# Boss efficiency, week ending %s" % label, ""]
     c = week["coverage"]
     out.append("Token budget %.0f M cost units. Coverage: %s of %d worker messages outside tracked activity."
@@ -709,6 +740,10 @@ def render(week, label, fails, flags):
         out.append("Numbers of tracks with many messages outside tracked activity rest on less than they show: see the Outside column.")
     for f in fails: out.append("**FAILED:** " + f)
     for f in flags: out.append("**Moved:** " + f)
+    if reports:
+        out.append("**Owner reports** (questions that should not have reached them): "
+                   + "; ".join("%s: %s" % (tr, ", ".join("%s %d" % kv for kv in sorted(k.items()))) for tr, k in sorted(reports.items())))
+    for tr, kind, n in props: out.append(proposal(tr, kind, n))
     out += ["", "| Track | Budget | Wall h | " + " | ".join(STATES) + " | " + " | ".join("tok " + p for p in PHASES)
             + " | Asks/day | CI waits | CI h | Outside |", "|" + "---|" * (len(STATES) + len(PHASES) + 7)]
     for tr, m in sorted(week["tracks"].items(), key=lambda kv: -kv[1]["total_tokens"]):
@@ -821,15 +856,17 @@ def run(cfg, end, weeks, dry):
         week = measure_window(idx, wend - 7 * 86400, wend)
         label = dt.datetime.fromtimestamp(wend).strftime("%Y-%m-%d")
         fails, flags = judge(week, pick_previous(history, week))
-        text = render(week, label, fails, flags)
+        reports, props = owner_reports(cfg, wend - 7 * 86400, wend)
+        text = render(week, label, fails, flags, reports, props)
         if not fails:                       # a week that could not be measured is no baseline
             # a rerun of the same week replaces it, whatever second it ran at (a day's slack covers DST)
             history = [h for h in history if abs(h["end"] - wend) >= 86400] + [week]
             history = sorted(history, key=lambda h: h["end"])[-HISTORY_WEEKS:]
-        if fails or flags:
+        if fails or flags or props:
             problems += 1
             failed += bool(fails)
-            said = "boss-efficiency week ending %s: %s" % (label, "; ".join(["FAILED " + f for f in fails] + flags))
+            said = "boss-efficiency week ending %s: %s" % (
+                label, "; ".join(["FAILED " + f for f in fails] + flags + [proposal(*p).replace("**", "") for p in props]))
             if not alert(said, dry) and not dry:
                 failed += 1
                 unsent = [u for u in unsent if u["label"] != label] + [dict(label=label, text=said)]

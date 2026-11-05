@@ -54,6 +54,7 @@ ALLOWED_CMD = re.compile(
     r"(?:\S*/)?boss-alert|"
     r"(?:\S*/)?boss-goal|"
     r"(?:\S*/)?boss-start|"
+    r"(?:\S*/)?boss-unask|"
     r"(?:\S*/)?boss-panes\.py|"
     r"(?:\S*/)?boss-run\b|"
     r"(?:\S*/)?team-line\b|"

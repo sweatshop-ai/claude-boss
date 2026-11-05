@@ -128,6 +128,8 @@ class Precision(GuardCase):
         for cmd in ("boss-goal next demo",
                     "${CLAUDE_PLUGIN_ROOT}/skills/boss/bin/boss-goal status demo",
                     "boss-start demo",
+                    "boss-unask list demo",
+                    "printf '%s\\n' x | ${CLAUDE_PLUGIN_ROOT}/skills/boss/bin/boss-unask record demo k",
                     "/opt/whatever/claude-team/hooks/team-line abc --did x --n 0"):
             self.assertEqual(self.fire(cmd), "", "scolded for `%s`" % cmd)
 
