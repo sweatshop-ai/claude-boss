@@ -8,9 +8,13 @@
 
 **Blocked by:** None (can start immediately)
 
-**Claimed by:**
+**Claimed by:** Andres (2026-11-05)
 
-**Status:** ready-for-agent
+**Status:** done (merge d027e05, PR 78; Codex owed until 2026-11-11)
 
-- [ ] Test or check first: a run of `test_bin` with a private `TMPDIR` leaves no `boss-bin-*` directory
-- [ ] The count after the fix is 0, stated here
+- [x] Test or check first: a run of `test_bin` with a private `TMPDIR` leaves no `boss-bin-*` directory
+- [x] The count after the fix is 0, stated here: 0 `boss-bin-*` directories (and 0 entries of any kind) left in an empty private `TMPDIR` after `python3 -m unittest test_bin` (53 tests OK).
+
+**Same leak elsewhere (measured 2026-11-05, empty private `TMPDIR`, one run of each file; left alone, per the brief):**
+- `skills/boss/test_boss_store.py`: 42 entries left
+- `skills/boss/test_fleet.py`: 5 entries left
