@@ -134,7 +134,7 @@ class Precision(GuardCase):
             self.assertEqual(self.fire(cmd), "", "scolded for `%s`" % cmd)
 
     def test_the_heredoc_form_the_skill_teaches_is_not_scolded(self):
-        cmd = "boss-unask record demo merge-go-ahead <<'EOF'\nMerge PR 5, shall I?\n--- owner ---\nnot this kind\nEOF"
+        cmd = "boss-unask record demo merge-go-ahead <<'END_OF_OWNER_REPORT_8c41f7'\nMerge PR 5, shall I?\n--- owner ---\nnot this kind\nEND_OF_OWNER_REPORT_8c41f7"
         self.assertEqual(self.fire(cmd), "")
 
     def test_a_cd_prefix_does_not_hide_an_allowed_command(self):

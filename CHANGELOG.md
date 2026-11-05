@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **`boss-unask` survives a torn record, and its example cannot end early (ticket 37).** `read` decodes per
+  line, so an interrupted multi-byte append skips that line instead of failing `list` and the weekly
+  routine; the `record` example in SKILL.md ends on `END_OF_OWNER_REPORT_8c41f7`, not `EOF`, so a line
+  of the owner's words reading `EOF` no longer runs the rest as shell.
 - **The owner can say a kind of question should not reach them (ticket 06).** In plain words, any
   language, after an answer or later, also through the concierge. `bin/boss-unask record <track> <kind>`
   (stdin: the question, a `--- owner ---` line, their words) writes one line to the private

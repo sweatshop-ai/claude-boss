@@ -125,6 +125,44 @@ class Unask(unittest.TestCase):
         r = self.run_("list", "alpha-x")
         self.assertEqual((r.returncode, r.stdout), (0, ""))
 
+    def good(self, q="q"):
+        return json.dumps(dict(date="2026-11-05T09:00:00Z", track="alpha-x", kind="k", question=q, words="w"), ensure_ascii=False)
+
+    def test_a_torn_multibyte_record_is_skipped_and_every_whole_line_is_read(self):
+        self.file.parent.mkdir(parents=True)
+        torn = self.good("caf\u00e9 \u20ac").encode()[:-30] + "\u20ac".encode()[:2]
+        self.file.write_bytes(self.good("first").encode() + b"\n" + torn + b"\n" + self.good("last").encode() + b"\n")
+        import unask
+        self.assertEqual([r["question"] for r in unask.read(self.cfg)], ["first", "last"])
+        r = self.run_("list", "alpha-x")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("last", r.stdout)
+
+    def test_a_record_after_a_torn_multibyte_tail_is_whole_and_readable(self):
+        self.file.parent.mkdir(parents=True)
+        self.file.write_bytes(self.good("first").encode() + b"\n" + "\u20ac".encode()[:2])
+        r = self.run_("record", "alpha-x", "k", stdin="n\u00e4chste\n--- owner ---\nw")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        import unask
+        self.assertEqual([x["question"] for x in unask.read(self.cfg)], ["first", "n\u00e4chste"])
+
+    def test_the_skill_example_ends_on_a_delimiter_the_text_cannot_hold(self):
+        import re
+        skill = (HERE / "SKILL.md").read_text()
+        m = re.search(r"boss-unask record <track> <kind> <<'(\w+)'\n(.*?)\n\1\n", skill, re.S)
+        self.assertTrue(m, "the heredoc example is gone")
+        delim = m.group(1)
+        self.assertGreaterEqual(len(delim), 12)
+        self.assertNotIn(delim, skill.replace("<<'%s'" % delim, "").replace("\n%s\n" % delim, ""))
+        script = "boss-unask record alpha-x k <<'%s'\nWhich?\nEOF\ntouch %s/pwned\n--- owner ---\nno\nEOF\n%s\n" % (
+            delim, self.cfg, delim)
+        env = dict(os.environ, CLAUDE_CONFIG_DIR=str(self.cfg), HOME=str(self.cfg / "home"),
+                   PATH=str(HERE / "bin") + os.pathsep + os.environ["PATH"])
+        r = subprocess.run(["bash", "-c", script], env=env, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertFalse((self.cfg / "pwned").exists())
+        self.assertEqual(self.lines()[0]["words"], "no EOF")
+
 
 if __name__ == "__main__":
     unittest.main()
