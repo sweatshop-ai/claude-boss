@@ -8,12 +8,14 @@ Why (the owner, 2026-11-05): a boss's question reached them through its concierg
 
 **Claimed by:** Thea 2026-11-05 18:30
 
-**Status:** in progress
+**Status:** done
+
+**Merged:** PR 73, merge commit fbb5220 (head 68300b4), 2026-11-05. Codex owed until 2026-11-11.
 
 **Decision, several questions in one `ASK`:** the concierge asks them one at a time, in the order sent, each in its own call, and replies after each answer, `ANSWER <id>.1:`, `ANSWER <id>.2:`; one left open, and every one after it, reads `NO ANSWER <id>.<n>:`, and the boss clears the blocker only when all have an `ANSWER`. The sender's address is a socket path, so the line does not show it. Reason: sending the message back costs the boss a turn to rewrite and resend, and a boss that never reads the reply loses the question; the concierge already queues questions one at a time, so asking in turn never drops one and never stops the boss. The `ASK <id>:` line keeps its shape, because the weekly routine counts questions by `ASK_MSG`.
 
-- [ ] The brief says what the concierge does with a question that names no boss, and with several questions.
-- [ ] `concierge.md`, `SKILL.md` and `escalation.md` tell the boss to open with its name and track and to send one question per `ASK`.
-- [ ] A test holds those sentences in the three texts.
+- [x] The brief says what the concierge does with a question that names no boss, and with several questions.
+- [x] `concierge.md`, `SKILL.md` and `escalation.md` tell the boss to open with its name and track and to send one question per `ASK`.
+- [x] A test holds those sentences in the three texts.
 
 Codex owed: out until 2026-11-11 08:36; reviewed by a fresh Opus agent meanwhile.
