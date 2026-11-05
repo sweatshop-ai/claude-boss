@@ -13,9 +13,10 @@
 
 **Blocked by:** None (can start immediately)
 
-**Claimed by:**
 
-**Status:** ready
+**Claimed by:** Birgit 2026-11-05 05:38
+
+**Status:** in-progress
 
 - [ ] Item 1: a test with one boss, two tracks and one concierge, each `ASK` on the track the boss was on at that time
 - [ ] Item 3: a test that a concierge question open time is in `states["ask"]`
