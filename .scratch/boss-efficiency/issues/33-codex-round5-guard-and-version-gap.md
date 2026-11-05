@@ -4,9 +4,9 @@
 
 **Blocked by:** None (can start immediately)
 
-**Claimed by:** none
+**Claimed by:** Adnan 2026-11-05 04:52
 
-**Status:** ready
+**Status:** in-progress
 
 Guard (`skills/boss/boss-guard.py`)
 - [ ] 1 (b) line 103, `SED_SUBSTITUTE = re.compile(r"s([/|#,:@])[^\\]*?\1[^\\]*?\1[gpI0-9]*")`, used at line 166: the lazy groups can take the delimiter, so the regex backtracks across `;` and accepts a whole multi-command program. Reproduce: `is_coordination("sed -i 's/a/b/;e touch /tmp/pwn;s/x/y/' ~/.claude/pm/a.md")` returns True (checked on ef223b3; `~` expands to an owned path). Fix sketch: each group excludes the captured delimiter, `s(.)((?!\1)[^\\])*\1((?!\1)[^\\])*\1[gpI0-9]*`, or split on the delimiter and require exactly three parts; keep the `w` and `e` flags out.
