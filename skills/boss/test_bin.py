@@ -524,6 +524,69 @@ class StableLink(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(os.readlink(self.home / ".claude" / "routines" / "claude-boss"), str(self.roots[0]))
 
+    def test_a_refresh_is_quiet_on_stderr_and_never_overwrites_an_earlier_copy(self):
+        self.run_link_with_fake_systemctl(self.roots[1])
+        self.units().mkdir(parents=True)
+        unit = self.units() / "boss-efficiency.service"
+        unit.write_text("[X]\nfirst edit\n")
+        r = self.run_link_with_fake_systemctl(self.roots[1])
+        self.assertEqual(r.stderr, "")
+        (copy,) = self.units().glob("boss-efficiency.service.bak-*")
+        unit.write_text("[X]\nsecond edit\n")
+        # same second: the copy name is taken, so the earlier copy must survive
+        subprocess.run(["bash", "-c", 'date() { echo 2000-01-01-000000; }; . "$1"; write_unit "$2" "$3"',
+                        "_", str(HERE.parents[1] / "bin" / "boss-unit-lib.sh"), str(unit), "new\nx"],
+                       capture_output=True, text=True, check=True)
+        subprocess.run(["bash", "-c", 'date() { echo 2000-01-01-000000; }; . "$1"; write_unit "$2" "$3"',
+                        "_", str(HERE.parents[1] / "bin" / "boss-unit-lib.sh"), str(unit), "newer\nx"],
+                       capture_output=True, text=True, check=True)
+        fixed = self.units() / "boss-efficiency.service.bak-2000-01-01-000000"
+        self.assertEqual(fixed.read_text(), "[X]\nsecond edit\n")
+        self.assertEqual(copy.read_text(), "[X]\nfirst edit\n")
+
+
+class InstallKeepsUnits(unittest.TestCase):
+    """`install.sh` writes the units too, and a re-run must not lose a hand edit.
+    Everything runs against a temp HOME with a stub systemctl, never the real config."""
+
+    ROOT = HERE.parents[1]
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="boss-install-"))
+        self.addCleanup(lambda: subprocess.run(["rm", "-rf", str(self.tmp)]))
+        self.home = self.tmp / "home"
+        (self.home / ".claude").mkdir(parents=True)
+        self.units = self.home / ".config" / "systemd" / "user"
+        bindir = self.tmp / "fakebin"
+        bindir.mkdir()
+        (bindir / "systemctl").write_text('#!/bin/sh\necho "$*" >> "%s/systemctl.log"\n' % self.tmp)
+        (bindir / "systemctl").chmod(0o755)
+        self.env = {"PATH": "%s:%s" % (bindir, os.environ["PATH"]), "HOME": str(self.home),
+                    "CLAUDE_CONFIG_DIR": str(self.home / ".claude")}
+
+    def install(self):
+        return subprocess.run([str(self.ROOT / "install.sh")], env=self.env, capture_output=True,
+                              text=True, stdin=subprocess.DEVNULL, timeout=30)
+
+    def test_a_rerun_keeps_an_edited_unit_and_says_where(self):
+        r = self.install()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(list(self.units.glob("*.bak-*")), [])
+        unit = self.units / "boss-ladder.service"
+        unit.write_text("[Service]\nMemoryMax=4G   # my edit\n")
+        r = self.install()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        (copy,) = self.units.glob("*.bak-*")
+        self.assertEqual(copy.name[:len("boss-ladder.service.bak-")], "boss-ladder.service.bak-")
+        self.assertEqual(copy.read_text(), "[Service]\nMemoryMax=4G   # my edit\n")
+        self.assertIn(str(copy), r.stdout)
+        self.assertNotIn("my edit", unit.read_text())
+
+    def test_a_rerun_with_nothing_changed_makes_no_copy(self):
+        self.install()
+        self.install()
+        self.assertEqual(list(self.units.glob("*.bak-*")), [])
+
 
 if __name__ == "__main__":
     unittest.main()

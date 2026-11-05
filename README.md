@@ -90,7 +90,7 @@ the units never point at a version that is gone. The same hook rewrites the unit
 files you already installed from the current templates (it never installs or
 enables one). The file it replaces is kept beside it as `<unit>.bak-<date-time>`,
 so a hand edit is not lost; a deliberate change belongs in a drop-in,
-`<unit>.d/override.conf`, which is left alone. `install.sh` runs once; it does not need re-running after an upgrade.
+`<unit>.d/override.conf`, which is left alone. Old copies are not pruned. `install.sh` keeps a replaced unit the same way; it does not need re-running after an upgrade.
 
 Start a boss inside tmux:
 
