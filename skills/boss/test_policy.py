@@ -70,7 +70,7 @@ QUOTES = {
         "At **%s** a worker shows `CTX-SPLIT`" % k(policy.WORKER_SPLIT),
         "At **%s** it shows\n`CTX-OVER`" % k(policy.WORKER_OVER),
         "- Waiting on CI or merging, with the PR open: never restart.",
-        "and restart at the next boundary if that is more than about 35",
+        "and restarts at the next boundary if that is more than about 35",
         "On review fixes the estimate wins over the list",
         "fits in\n%s:" % k(policy.WORKER_SPLIT),
         "`list` also flags `heavy` at %s and `RECYCLE` at %s cost per turn"

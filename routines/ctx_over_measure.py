@@ -41,7 +41,7 @@ MAX_LOAD = 20
 RESTART_TURNS = 35          # the owner's line: a restart pays when more than this is left
 ASK_WITHIN = 15             # a worker that ended this many turns after the ask reached its boundary
 CROSS = re.compile(r"<cross-session-message")
-ASK = re.compile(r"CTX-OVER|you are at \d+k|past the (?:150k|250k)|(?:next|current) boundary|stop at the (?:next|current) (?:boundary|state)\b|write the hand-?off", re.I)
+ASK = re.compile(r"CTX-OVER|you are at \d+k|past the (?:150k|250k)|(?:next|current) boundary|stop at the (?:next|current) (?:boundary|state)\b|write the hand-?off|how (?:much|many turns)[^.?\n]* left", re.I)
 
 
 def is_worker(path):
