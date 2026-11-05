@@ -14,3 +14,7 @@
 
 - [x] Test or check first: a run of `test_bin` with a private `TMPDIR` leaves no `boss-bin-*` directory
 - [x] The count after the fix is 0, stated here: 0 `boss-bin-*` directories (and 0 entries of any kind) left in an empty private `TMPDIR` after `python3 -m unittest test_bin` (53 tests OK).
+
+**Same leak elsewhere (measured 2026-11-05, empty private `TMPDIR`, one run of each file; left alone, per the brief):**
+- `skills/boss/test_boss_store.py`: 42 entries left
+- `skills/boss/test_fleet.py`: 5 entries left
