@@ -211,6 +211,16 @@ class Timeouts(Base):
     def child_pid(self):
         return int((self.sb.root / "child.pid").read_text())
 
+    def child_is_gone(self):
+        # SIGKILL is delivered at once but the child leaves the process table a moment later, and
+        # _stop reaps only the reviewer; so ask until it is gone, and only a child still there after
+        # the deadline is a kill that never came.
+        pid = self.child_pid()
+        deadline = time.monotonic() + 10
+        while alive(pid) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        return not alive(pid)
+
     def test_a_hung_codex_is_timeout_with_no_exit_code_and_the_fallback_runs(self):
         self.sb.stub("codex", hang=True)
         self.sb.stub("claude", answer=approve())
@@ -224,14 +234,13 @@ class Timeouts(Base):
     def test_a_timeout_kills_the_reviewer_and_everything_it_started(self):
         self.sb.stub("codex", hang=True, child=True)
         self.chain(codex_timeout=1)
-        pid = self.child_pid()
-        self.assertFalse(alive(pid), "the reviewer's child survived the timeout")
+        self.assertTrue(self.child_is_gone(), "the reviewer's child survived the timeout")
 
     def test_a_reviewer_that_ignores_term_is_killed_after_the_grace_period(self):
         self.sb.stub("codex", hang=True, child=True, ignore_term=True)
         with mock.patch.object(rc, "TERM_GRACE", 0.5):
             self.chain(codex_timeout=1)
-        self.assertFalse(alive(self.child_pid()), "SIGKILL never followed SIGTERM")
+        self.assertTrue(self.child_is_gone(), "SIGKILL never followed SIGTERM")
 
     def test_a_verdict_written_before_the_timeout_is_answered_with_exit_code_none(self):
         self.sb.stub("codex", answer=approve("early"), hang_after=True)
