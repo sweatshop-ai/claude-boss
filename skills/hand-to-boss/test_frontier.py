@@ -106,6 +106,13 @@ class FrontierCase(unittest.TestCase):
         self.assertRegex(text, r"\*\*Claimed by:\*\* Mei \d{4}-\d\d-\d\d \d\d:\d\d\n\n\*\*Status:\*\* in-progress")
         self.assertEqual(self.claim("1", "Ada").returncode, 3)
 
+    def test_claim_with_two_claimed_by_lines_leaves_one_and_blocks_a_second_claim(self):
+        text = ticket("01", "A", "None").replace("**Status:**", "**Claimed by:**\n\n**Claimed by:** none\n\n**Status:**")
+        self.put("01-a.md", text)
+        self.assertEqual(self.claim("1", "Ann").returncode, 0)
+        self.assertEqual((self.dir / "01-a.md").read_text().lower().count("claimed by"), 1)
+        self.assertEqual(self.claim("1", "Bob").returncode, 3)
+
     def test_a_name_that_starts_with_a_placeholder_word_is_a_claimant(self):
         self.put("01-a.md", ticket("01", "A", "None", claimed="Nobody-Special 2026-11-05 10:00"))
         code, out, _ = self.run_json()
