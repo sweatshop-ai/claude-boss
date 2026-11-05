@@ -22,7 +22,7 @@
 **Blocked by:**
 - External: the first time the owner makes such a report in a real session, after they update the plugin (ticket 21); Anton reads the line it wrote
 
-**Claimed by:** Mira 2026-11-05 09:13
+**Claimed by:**
 
 **Status:** waiting. Merged as 5afec09 (PR 71); the live test is the owner's first real report
 

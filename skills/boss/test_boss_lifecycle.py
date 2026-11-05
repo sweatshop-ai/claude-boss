@@ -879,5 +879,29 @@ class ListAndFields(unittest.TestCase):
         self.assertIn("set-option -p -t %6 @boss_pane %1", (self.tmp / "calls").read_text())
 
 
+class ConciergeTexts(unittest.TestCase):
+    """The owner read a boss's question as a lesser worker's: nothing on it said who wrote it."""
+
+    def text(self, *rel):
+        return " ".join(Path(__file__).resolve().parent.joinpath(*rel).read_text().split())
+
+    def test_the_texts_make_a_question_name_its_boss_and_hold_one_question(self):
+        brief = self.text("references", "concierge-brief.md")
+        self.assertIn("naming the boss that wrote it and its track", brief)
+        self.assertIn("From <the sender's name>, the boss that sent this question.", brief)
+        self.assertNotIn("from address>.", brief)           # a socket path tells the owner nothing
+        self.assertIn("NO ANSWER <id>.<n>:", brief)
+        self.assertIn("(`<id>.<n>` for a numbered question)", brief)
+        self.assertIn("one question per call", brief)
+        self.assertIn("ask them one at a time", brief)
+        self.assertIn("ANSWER <id>.1:", brief)
+        self.assertIn("never send the message back", brief)
+        self.assertIn("Open with who you are", self.text("references", "concierge.md"))
+        self.assertIn("One question per `ASK`", self.text("references", "concierge.md"))
+        self.assertIn("Each `ASK` opens with your own name and your track", self.text("SKILL.md"))
+        self.assertIn("clears only when every `q7.<n>` has an `ANSWER`", self.text("references", "concierge.md"))
+        self.assertIn("one question per `ASK`", self.text("references", "escalation.md"))
+
+
 if __name__ == "__main__":
     unittest.main()

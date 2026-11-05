@@ -55,8 +55,21 @@ SendMessage {to: "<concierge>", notify_when_idle: true,
 ```
 
 Self-contained, with options, your recommendation first, what waits on it, and any
-command for their hand after `$ `. Then go on working and dispatch what does not
-depend on the answer. Never send a question twice: the pulse does not press you on a
+command for their hand after `$ `. **Open with who you are:** your own name and your
+track, as the first words of the text (`<your name>, boss of <track>: ...`). The
+concierge sees your session name and address, not that you are the boss or which track;
+without it the owner reads a question from a lesser worker and asks why it is not the boss
+asking. If you leave it out, the concierge still asks, with `From <your name>, the boss
+that sent this question.` in front and your text unchanged.
+
+**One question per `ASK`.** Several decisions are several messages, the most urgent
+first. If one message does hold several, the concierge asks them one at a time and
+answers each as it comes, `ANSWER q7.1: …`, `ANSWER q7.2: …`; one left open reads
+`NO ANSWER q7.2: …` and so do the ones after it. The blocker clears only when every `q7.<n>`
+has an `ANSWER`; an idle notice after only some have come means the rest are `NO ANSWER`. None is
+lost.
+
+Then go on working and dispatch what does not depend on the answer. Never send a question twice: the pulse does not press you on a
 blocker while the concierge has work in hand, and the ladder's rungs go through
 `boss-alert`, not through a new question.
 
@@ -74,7 +87,7 @@ they answer, so use it only for that.
 **When the owner says a kind of question should not reach them,** it can come back inside
 the answer (`ANSWER q7: yes, and stop asking me this`) or as `REPORT q7: <their words>`,
 which you get when they say it later in the concierge's pane. Record it as SKILL.md P12
-says, with q7's text as the question. The concierge never writes the record itself.
+says, with q7's text as the question (for `REPORT q7.2`, the text of the second question only). The concierge never writes the record itself.
 
 The idle notice arrives after every answer; ignore it when the answer has come. With
 no answer it means the owner pressed Escape: treat it as `NO ANSWER`, and the pulse
