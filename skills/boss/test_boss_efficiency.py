@@ -499,6 +499,35 @@ class Measures(unittest.TestCase):
         self.assertGreaterEqual(m["ci_s"], 590)
 
 
+class ConciergeQuestions(unittest.TestCase):
+    """The concierge asks the owner for the boss; it is a worker session, not a boss."""
+
+    def test_a_concierge_that_asks_three_questions_counts_three(self):
+        c = Cfg()
+        c.goal("alpha-x")
+        c.worker(NOW - DAY, [], name="Pia", asks=3, until=NOW - DAY + 3600)
+        c.boss("alpha-x", [], NOW - DAY, sends=[(NOW - DAY + 60, "Pia")], until=NOW - DAY + 3600)
+        idx, _, _ = week(c.dir)
+        self.assertEqual(core.measure_track(idx, "alpha-x", NOW - 7 * DAY, NOW)["asks"], 3)
+
+    def test_a_question_the_boss_asked_itself_counts_once_beside_the_concierge(self):
+        c = Cfg()
+        c.goal("alpha-x")
+        c.worker(NOW - DAY, [], name="Pia", asks=3, until=NOW - DAY + 3600)
+        c.boss("alpha-x", [], NOW - DAY, asks=2, sends=[(NOW - DAY + 30, "Pia")], until=NOW - DAY + 3600)
+        idx, _, _ = week(c.dir)
+        m = core.measure_track(idx, "alpha-x", NOW - 7 * DAY, NOW)
+        self.assertEqual(m["asks"], 5)
+
+    def test_a_concierge_question_outside_the_window_is_not_counted(self):
+        c = Cfg()
+        c.goal("alpha-x")
+        c.worker(NOW - DAY, [], name="Pia", asks=3, until=NOW - DAY + 3600)
+        c.boss("alpha-x", [], NOW - DAY, sends=[(NOW - DAY + 60, "Pia")], until=NOW - DAY + 3600)
+        idx, _, _ = week(c.dir)
+        self.assertEqual(core.measure_track(idx, "alpha-x", NOW - 7 * DAY, NOW - DAY + 50)["asks"], 0)
+
+
 class Verdict(unittest.TestCase):
     def track(self, tokens, build=1.0, ci=0.0, asks=0, msgs=10, outside=0):
         t = int(tokens)

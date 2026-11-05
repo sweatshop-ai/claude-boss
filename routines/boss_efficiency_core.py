@@ -519,6 +519,7 @@ def measure_track(index, track, start, end):
     days = (end - start) / 86400          # a rate stays per day of the window, not of the shortened track
     end = index.clip_end(track, end)
     ev, wh, tok = [], collections.Counter(), collections.Counter()
+    asks = 0
     spans = []
     ci_waits = 0
     for s, a, b in index.workers.get(track, []):
@@ -536,7 +537,7 @@ def measure_track(index, track, start, end):
         for sub in s["subs"]:
             if sub["s"] and a <= sub["s"] < b: tok["sub_rev" if sub["review"] else "sub_oth"] += sub["cost"]
         ci_waits += sum(1 for x, y in s["ci_waits"] if a <= x < b)
-    asks = 0
+        asks += sum(1 for T in s["asks"] if a <= T < b)   # workers lack the tool; the concierge asks for the boss
     for s, a, b in index.bosses.get(track, []):
         a, b = max(a, start), min(b, end)
         if b <= a: continue
