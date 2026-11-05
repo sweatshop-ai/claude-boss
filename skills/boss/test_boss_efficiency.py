@@ -523,6 +523,55 @@ class ConciergeQuestions(unittest.TestCase):
         m = core.measure_track(idx, "alpha-x", NOW - 7 * DAY, NOW)
         self.assertEqual(m["asks"], 5)
 
+    def test_a_boss_serving_two_tracks_has_each_concierge_question_on_the_track_it_was_on(self):
+        c = Cfg()
+        sock = "uds:/run/cc-socks/boss.sock"
+        c.goal("alpha-x"); c.goal("beta-y")
+        seed(c, sock=sock, track="alpha-x", at=NOW - 3 * DAY)          # the vote: this socket serves alpha-x
+        t0 = NOW - DAY
+        c.boss("alpha-x", [], t0 - 3600, until=t0 + 7200,
+               cmds=[(t0 - 3600, "boss-marker register alpha-x"), (t0 - 600, "boss-marker register beta-y")])
+        c.worker(t0, [(t0 + 20, sock, "ASK q1: which?")], name="Pia", asks=1, until=t0 + 3600)
+        idx, _, socks = week(c.dir)
+        self.assertEqual(socks[sock], "alpha-x")
+        self.assertEqual(core.measure_track(idx, "beta-y", NOW - 7 * DAY, NOW)["asks"], 1)
+        self.assertEqual(core.measure_track(idx, "alpha-x", NOW - 7 * DAY, NOW)["asks"], 0)
+
+    def test_the_time_a_concierge_question_stays_open_is_in_the_ask_seconds(self):
+        c = Cfg()
+        c.goal("alpha-x")
+        c.worker(NOW - DAY, [(NOW - DAY + 20, "uds:/run/cc-socks/boss.sock", "ASK q1: which?")], name="Pia", asks=1, until=NOW - DAY + 3600)
+        c.boss("alpha-x", [], NOW - DAY, sends=[(NOW - DAY + 60, "Pia")], until=NOW - DAY + 3600)
+        idx, _, _ = week(c.dir)
+        self.assertEqual(core.measure_track(idx, "alpha-x", NOW - 7 * DAY, NOW)["states"]["ask"], 30)
+
+    def test_an_ask_naming_a_track_on_a_socket_with_no_vote_is_still_placed(self):
+        c = Cfg()
+        c.goal("alpha-x")
+        c.worker(NOW - DAY, [(NOW - DAY + 20, "uds:/run/cc-socks/new.sock", "ASK q1: see pm/alpha-x.md")], name="Pia", asks=1, until=NOW - DAY + 3600)
+        c.boss("alpha-x", [], NOW - DAY, sends=[(NOW - DAY + 60, "Pia")], until=NOW - DAY + 3600)
+        idx, wk, _ = week(c.dir)
+        self.assertEqual(idx.tracks(), ["alpha-x"])
+        self.assertEqual(core.measure_track(idx, "alpha-x", NOW - 7 * DAY, NOW)["asks"], 1)
+
+    def test_two_bosses_alive_together_leave_the_vote_to_decide_whatever_the_scan_order(self):
+        c = Cfg()
+        sock = "uds:/run/cc-socks/boss.sock"
+        c.goal("alpha-x"); c.goal("beta-y")
+        seed(c, sock=sock, track="alpha-x", at=NOW - 3 * DAY)
+        t0 = NOW - DAY
+        c.boss("alpha-x", [], t0 - 3600, until=t0 + 7200)                  # owns the socket, stays
+        c.boss("alpha-x", [], t0 - 3600, until=t0 + 7200,                  # another boss that moves away
+               cmds=[(t0 - 3600, "boss-marker register alpha-x"), (t0 - 600, "boss-marker register beta-y")])
+        c.worker(t0, [(t0 + 20, sock, "ASK q1: which?")], name="Pia", asks=1, until=t0 + 3600)
+        got = set()
+        for order in (sorted, lambda x: sorted(x, reverse=True)):
+            sessions = [core.scan_session(p, ["alpha-x", "beta-y"]) for p in order((c.dir / "projects" / "p").glob("*.jsonl"))]
+            idx = core.Index(sessions, core.markers(c.dir), core.resolve_sockets(sessions))
+            got.add((core.measure_track(idx, "alpha-x", NOW - 7 * DAY, NOW)["asks"],
+                     core.measure_track(idx, "beta-y", NOW - 7 * DAY, NOW)["asks"]))
+        self.assertEqual(got, {(1, 0)})
+
     def test_a_question_the_guard_refused_is_not_counted_again_when_the_concierge_asks_it(self):
         c = Cfg()
         c.goal("alpha-x")
@@ -530,6 +579,34 @@ class ConciergeQuestions(unittest.TestCase):
         c.boss("alpha-x", [], NOW - DAY, refused=1, sends=[(NOW - DAY + 30, "Pia")], until=NOW - DAY + 3600)
         idx, _, _ = week(c.dir)
         self.assertEqual(core.measure_track(idx, "alpha-x", NOW - 7 * DAY, NOW)["asks"], 1)
+
+    def test_a_question_answered_with_the_guards_words_still_counts(self):
+        c = Cfg()
+        c.goal("alpha-x")
+        c.boss("alpha-x", [], NOW - DAY, asks=1, until=NOW - DAY + 3600)
+        f = next((c.dir / "projects" / "p").glob("boss*.jsonl"))
+        lines = [json.loads(l) for l in f.read_text().splitlines()]
+        for r in lines:
+            for b in (r.get("message") or {}).get("content") or []:
+                if isinstance(b, dict) and b.get("type") == "tool_result":
+                    b["content"] = "User has answered: " + core.GUARD_REFUSAL      # not an error: the owner saw it
+        f.write_text("".join(json.dumps(r) + "\n" for r in lines))
+        idx, _, _ = week(c.dir)
+        self.assertEqual(core.measure_track(idx, "alpha-x", NOW - 7 * DAY, NOW)["asks"], 1)
+
+    def test_a_text_with_a_closing_angle_bracket_before_the_tag_does_not_hide_the_ask(self):
+        c = Cfg()
+        c.goal("alpha-x")
+        c.worker(NOW - DAY, [], name="Pia", asks=2, until=NOW - DAY + 3600)
+        f = next((c.dir / "projects" / "p").glob("wrk*.jsonl"))
+        lines = [json.loads(l) for l in f.read_text().splitlines()]
+        lines.append(dict(type="user", timestamp=iso(NOW - DAY + 20), message=dict(
+            content='a > b <cross-session-message from="uds:/run/cc-socks/boss.sock" from-name="x">\n'
+                    'ASK q1: which?\n</cross-session-message>')))
+        f.write_text("".join(json.dumps(r) + "\n" for r in lines))
+        c.boss("alpha-x", [], NOW - DAY, sends=[(NOW - DAY + 60, "Pia")], until=NOW - DAY + 3600)
+        idx, _, _ = week(c.dir)
+        self.assertEqual(core.measure_track(idx, "alpha-x", NOW - 7 * DAY, NOW)["asks"], 2)
 
     def test_a_question_the_owner_dismissed_still_counts(self):
         c = Cfg()

@@ -17,6 +17,7 @@ import unittest
 from pathlib import Path
 
 GUARD = Path(__file__).resolve().parent / "boss-guard.py"
+sys.path.insert(0, str(GUARD.parent.parent.parent / "routines"))
 
 
 class GuardCase(unittest.TestCase):
@@ -474,6 +475,13 @@ class QuestionsGoThroughTheConcierge(GuardCase):
         self.assertEqual(out["permissionDecision"], "deny")
         self.assertIn("Odile", out["permissionDecisionReason"])
         self.assertIn("SendMessage", out["permissionDecisionReason"])
+
+    def test_the_refusal_carries_the_phrase_the_efficiency_measure_looks_for(self):
+        # boss_efficiency_core drops a refused ask by this phrase; rewording the reason must fail here.
+        import boss_efficiency_core
+        self.session("c-sid", "%6", "Odile")
+        self.panes(self.BOSS, "%6\tboss:0.1\t%1\tclaude\t/w\tOdile\tconcierge")
+        self.assertIn(boss_efficiency_core.GUARD_REFUSAL, self.ask()["permissionDecisionReason"])
 
     def test_a_question_for_the_owners_consent_stays_with_the_boss(self):
         # A peer message is never consent, so an answer relayed by the concierge
