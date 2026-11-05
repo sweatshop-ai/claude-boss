@@ -98,3 +98,15 @@ Everything comes from files, with one tool, by arithmetic; no judgement in the t
 ## What would make the replay impossible as described
 
 Nothing is impossible, but two things are not as described: **no CI and no PR flow exist** (items 1–2), and **"something deploys from agentview main" is not what I found**: there is no `main` and no workflow; the live thing is the systemd units pointing into the live checkout path, which the copy avoids by living elsewhere with its own `.git`.
+
+## Boss's call on section 7 (Anton, 2026-11-05)
+
+Decided by the boss; the owner can still overrule. The owner still decides when it starts and creates the repo.
+
+- **Review gate:** both arms use the current rule from ticket 02.
+- **Ticket 18:** out of both arms. Real transcripts must not be used, and a fixture version is a different ticket.
+- **Dashboard noise:** accepted, `ab-` prefix, no separate config dir.
+- **Done:** merged PRs with CI green, as the owner said: the private repo and `test.yml`.
+- **Order:** one after the other, not at once. The Codex limit ran out twice the night before under less load, and two arms sharing it and this laptop would skew each other.
+- **Correction:** the plan's note on `branch_deploys.py` stands as measured (exit 1 on agentview); the exit 0 in the original message was read from a pipe.
+- **Not built yet:** the clean-replay script and the repo, until the owner decides.
