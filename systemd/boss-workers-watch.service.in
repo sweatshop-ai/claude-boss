@@ -1,5 +1,5 @@
 # Generated from the plugin's template: bin/boss-link rewrites this file when the
-# template changes, keeping the replaced one as <unit>.bak-<date>. Put a deliberate
+# template changes, keeping the replaced one as <unit>.bak-<YYYY-MM-DD-HHMMSS>. Put a deliberate
 # change in a drop-in, <unit>.d/override.conf, which is left alone.
 [Unit]
 Description=Watchdog for Claude boss/worker tmux sessions (API errors, frozen panes, unanswered prompts)

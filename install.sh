@@ -30,6 +30,8 @@ CFG="${CLAUDE_CONFIG_DIR:-}"          # an empty value means unset (see boss_sto
 LINK="$CFG/routines/claude-boss"
 UNITS="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 
+. "$ROOT/bin/boss-unit-lib.sh"
+
 [[ -d $CFG ]] || { echo "No Claude config at $CFG" >&2; exit 1; }
 
 # ---------------------------------------------------------------- 1. state
@@ -49,8 +51,7 @@ if [[ -z ${NO_TIMERS:-} ]]; then
     for u in boss-ladder.service boss-ladder.timer \
              boss-workers-watch.service boss-workers-watch.timer \
              boss-efficiency.service boss-efficiency.timer; do
-      sed -e "s|@ROOT@|$LINK|g" -e "s|@CFG@|$CFG|g" \
-          "$ROOT/systemd/$u.in" > "$UNITS/$u"
+      write_unit "$UNITS/$u" "$(sed -e "s|@ROOT@|$LINK|g" -e "s|@CFG@|$CFG|g" "$ROOT/systemd/$u.in"; echo x)"
     done
     systemctl --user daemon-reload
     systemctl --user enable --now boss-ladder.timer boss-workers-watch.timer boss-efficiency.timer
