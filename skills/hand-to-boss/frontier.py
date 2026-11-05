@@ -92,8 +92,9 @@ def parse(path):
             if key == "status":
                 t["status"] = val
             elif key == "claimed by":
-                # a template placeholder is no claimant
-                t["claimed_by"] = "" if val.lower() in ("none", "nobody", "-") else val
+                # a template placeholder is no claimant, and never hides a real one
+                if val.lower() not in ("none", "nobody", "-"):
+                    t["claimed_by"] = val
         i += 1
     return t
 
