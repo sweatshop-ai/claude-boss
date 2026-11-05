@@ -14,12 +14,18 @@ The dry run answers, with the commands and what came back:
 
 **Blocked by:** None (the dry run can start immediately; the force-push waits on the owner's consent and on every open PR of this track being merged)
 
-**Claimed by:** Otilia 2026-11-04 21:12
+**Claimed by:**
 
-**Status:** in-progress
+**Status:** waits for the owner (GitHub Support request for the 69 refs/pull refs; plugin update in ticket 21)
 
-- [x] The dry-run report exists under `~/.claude/pm/`, outside the repo, with the commands and results above (report: `~/.claude/pm/boss-efficiency.scrub-dryrun.md`)
-- [ ] The owner has given consent in the boss's own question, on that report
-- [ ] A fresh clone returns no hit for any name in the list, across all refs, in contents, paths and messages
-- [ ] What git cannot reach is listed, each item done or handed to the owner
-- [ ] The plugin still installs and updates from its marketplace source after the rewrite
+- [x] The dry-run report exists under `~/.claude/pm/`, outside the repo, with the commands and results above (reports: `~/.claude/pm/boss-efficiency.scrub-dryrun.md`, `~/.claude/pm/boss-efficiency.scrub-dryrun-2.md`)
+- [x] The owner has given consent in the boss's own question, on that report (the owner ran the force-push themselves on 2026-11-05)
+- [x] A fresh clone returns no hit for any name in the list, across all branches and tags, in contents, paths and messages (also for the personal and work addresses and the gateway IP; the only match left is a common word the list flags as ambiguous). The 69 `refs/pull/*` refs still carry the old history: see the next item
+- [ ] What git cannot reach is listed, each item done or handed to the owner. Done: PR 10 and issue 10 body edited, PRs 12, 13, 14 closed, comments and releases without hit. **Owner's:** the GitHub Support request for the 69 `refs/pull/*` refs (repo `sweatshop-ai/claude-boss`, first changed commit `33a28d2b3dedc77981a36e4cab7aafa992a59cbc`); the Paste is on the boss's card
+- [ ] The plugin still installs and updates from its marketplace source after the rewrite. Install proven from the rewritten repo in a temporary config (0.21.3 at the new main); the update on this machine is the owner's, ticket 21
+
+**Result (2026-11-05):** all 6 branches and both tags rewritten (482 commits, 80 refs); main `ca83c5e`, v0.4.0 `a2a7c6a`, v0.5.0 `5f9394f`. CI on `ca83c5e`: 1 check, `pytest`, success. Backup (mirror and bundle) and old tips are under `~/.claude/pm/scrub3/`.
+
+**Stay on purpose, locally:** worktree `03-fallback-confined` (uncommitted edits in 4 files) and worktree `merge` (detached at a local merge commit that was never pushed and is not in the backup). The shared checkout, the second clone and worktrees 02 and 07 are moved or removed.
+
+**Stale references:** old commit ids cited in tickets and verdict comments no longer exist on the branches; `scrub3/rewrite.git/filter-repo/commit-map` maps old to new. They are not rewritten.
