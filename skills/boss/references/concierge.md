@@ -71,6 +71,11 @@ something for good, widening a rule). For those, ask in your own turn, with the
 question starting `CONSENT:`. The guard lets it through, and your turn stops until
 they answer, so use it only for that.
 
+**When the owner says a kind of question should not reach them,** it can come back inside
+the answer (`ANSWER q7: yes, and stop asking me this`) or as `REPORT q7: <their words>`,
+which you get when they say it later in the concierge's pane. Record it as SKILL.md P12
+says, with q7's text as the question. The concierge never writes the record itself.
+
 The idle notice arrives after every answer; ignore it when the answer has come. With
 no answer it means the owner pressed Escape: treat it as `NO ANSWER`, and the pulse
 presses you again on the open blocker. Questions queue: it holds one at a time, and

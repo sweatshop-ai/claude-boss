@@ -934,6 +934,52 @@ class Alert(unittest.TestCase):
         self.assertNotIn("SECRET", r.stdout + r.stderr)
 
 
+class OwnerReports(unittest.TestCase):
+    """The owner's "not this kind of question" reports (ticket 06): counted by kind, never read for their words."""
+
+    def put(self, c, *recs):
+        f = c.dir / "pm" / "unwanted-questions.jsonl"
+        with open(f, "a") as fh:
+            for track, kind, at in recs:
+                fh.write(json.dumps(dict(date=iso(at)[:19] + "Z", session="s", track=track, kind=kind,
+                                         question="SECRET QUESTION", words="SECRET WORDS")) + "\n")
+
+    def test_reports_in_the_window_are_counted_per_track_and_kind(self):
+        c = Cfg()
+        self.put(c, ("alpha-x", "merge-go-ahead", NOW - DAY), ("alpha-x", "merge-go-ahead", NOW - 2 * DAY),
+                 ("alpha-x", "naming", NOW - DAY), ("beta-y", "naming", NOW - DAY), ("alpha-x", "naming", NOW - 20 * DAY))
+        got, _ = core.owner_reports(c.dir, NOW - 7 * DAY, NOW)
+        self.assertEqual(got, {"alpha-x": {"merge-go-ahead": 2, "naming": 1}, "beta-y": {"naming": 1}})
+
+    def test_a_kind_reported_twice_on_a_track_is_proposed_even_across_weeks(self):
+        c = Cfg()
+        self.put(c, ("alpha-x", "naming", NOW - 20 * DAY), ("alpha-x", "naming", NOW - DAY), ("alpha-x", "once", NOW - DAY))
+        _, props = core.owner_reports(c.dir, NOW - 7 * DAY, NOW)
+        self.assertEqual(props, [("alpha-x", "naming", 2)])
+
+    def test_a_recurring_kind_with_nothing_new_this_week_is_not_proposed_again(self):
+        c = Cfg()
+        self.put(c, ("alpha-x", "naming", NOW - 30 * DAY), ("alpha-x", "naming", NOW - 20 * DAY))
+        self.assertEqual(core.owner_reports(c.dir, NOW - 7 * DAY, NOW)[1], [])
+
+    def test_no_file_and_damaged_lines_are_no_reports_not_a_crash(self):
+        c = Cfg()
+        self.assertEqual(core.owner_reports(c.dir, NOW - 7 * DAY, NOW), ({}, []))
+        (c.dir / "pm" / "unwanted-questions.jsonl").write_text("not json\n[1]\n{}\n")
+        self.assertEqual(core.owner_reports(c.dir, NOW - 7 * DAY, NOW), ({}, []))
+
+    def test_the_report_and_the_alert_carry_kinds_and_counts_and_never_the_owners_words(self):
+        c = Cfg()
+        seed(c)
+        self.put(c, ("alpha-x", "naming", NOW - 3 * DAY), ("alpha-x", "naming", NOW - DAY))
+        r = subprocess.run([sys.executable, str(PLUGIN / "routines" / "boss_efficiency_core.py"),
+                            "--end", dt.datetime.fromtimestamp(NOW).isoformat()],
+                           env=dict(os.environ, CLAUDE_CONFIG_DIR=str(c.dir), DRY_RUN="1"), capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("Proposal: alpha-x: naming, reported 2 times", r.stdout)
+        self.assertNotIn("SECRET", r.stdout + r.stderr)
+
+
 class Run(unittest.TestCase):
     def env(self, c, **kw):
         e = dict(os.environ, CLAUDE_CONFIG_DIR=str(c.dir), DRY_RUN="", BOSS_SLACK_ENV="/nonexistent/slack.env")
