@@ -2,12 +2,13 @@
 
 ## Unreleased
 
-- **A worker's report to the boss's name that fails is retried, not left in the pane (ticket 29).** A
-  send to the name in an incoming message's `from-name` can fail with "No agent named ... is reachable"
-  while the `from` socket address works. The reporting contract now says: retry on the `from` address,
-  never end a turn on a report only printed in the pane; wait with `Monitor` or `run_in_background`,
-  not a `pgrep` loop, and check no background task is running before reporting. Phase A says `shell`
-  means a background job, and a quiet `shell` worker is read by its pane's last turn line.
+- **A worker's report to the boss's name that fails is retried, not left in the pane (ticket 29).** Cause
+  found by reproduction: the `from-name` on a boss's message (a session title) is not the name in the
+  session registry, so a send to the `from-name` fails with "No agent named ... is reachable" while the
+  registry name and the `from` socket address are delivered. The registry belongs to Claude Code, not
+  this repo; why the two names differ (a `/remote-control` rename is one candidate) is not shown. The
+  reporting contract now tells the worker to retry on the `from` address and to wait without a `pgrep`
+  loop; Phase A says what `shell` means.
 
 - **Reviews graded by risk and size (ticket 02, owner's decision of 2026-11-05).** P6 no longer
   says "every PR, up to three rounds". Under 100 added lines and not sensitive: one Codex round,

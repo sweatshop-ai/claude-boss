@@ -638,10 +638,10 @@ concerned — invisibly.
 > tell me that too, in one line. You have no `AskUserQuestion`: a choice you
 > cannot make yourself comes to me, with the options and your recommendation.
 >
-> If a send to me fails, retry on the `from` address of my message, and never end
-> a turn on a report only printed in your pane. Wait with `Monitor` or
-> `run_in_background`, not a `pgrep` loop, and before you report check that no
-> background task of yours is still running.
+> If a send to me fails, retry on the `from` address of my latest message, and
+> never end a turn on a report only printed in your pane. Wait with `Monitor` or
+> `run_in_background`, not a `pgrep` loop; a task you started and no longer need
+> is stopped before you report, and one you still wait on (CI) is named in it.
 
 Workers are started with `--disallowedTools AskUserQuestion` (`launch_claude` in
 `boss-lifecycle.sh`), so only your concierge, or you if you have none, asks the owner. A worker's question rang
@@ -833,11 +833,10 @@ Parse `$ARGUMENTS`: empty or `status` → **A** · `dispatch <task> [worker]` �
 
 1. **`boss-lifecycle.sh list --mine`** — coordinate, name, live state, **CTX**,
    **COST/TURN**. This is the roster; it is scoped to you and it is small.
-   `shell` means a background job is running, not that the worker is working.
-   From a `shell` worker you hear nothing: read the pane's last turn line
-   (`✻ ... done <time>`) before you wait on it; a turn that is over with a
-   report not sent is a lost report, so ask the worker for it. (`list` does not
-   show the turn state; the retire and restart refusals do.)
+   `shell` means a background job is running, not necessarily that a turn is.
+   When a `shell` worker is quiet, read the pane's last turn line
+   (`✻ ... done <time>`) before you wait on it; a turn that is over with no
+   report is a lost report, so ask the worker for it.
 2. **Plain `list` once per session** — another boss (`other(%N)`), and anything
    `unowned` that you are in fact using. Claim that before going further.
    `ListAgents` only for the three cases in Who your workers are.
