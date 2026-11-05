@@ -21,7 +21,9 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Claimed by:** Mira 2026-11-05 09:13
+
+**Status:** in-progress
 
 - [x] The owner labels a sample of past questions
 - [x] Measured on it: the sample holds too few of the other kind to measure a filter, so none is built
