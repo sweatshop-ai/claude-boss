@@ -77,7 +77,7 @@ An alert Slack did not take is kept in the state (`unsent`) and sent again, mark
 start of the next run; the run exits 2 until it goes out. The week itself is still the next baseline: dropping
 it would leave nothing adjacent to compare the following week with, and the change would go unreported
 for good. When the body cannot run the week at all (the transcripts lock not taken in two hours, or the scan
-killed at its cap) it posts that through `boss_efficiency_core.py --alert` and exits 1 (lock) or 124 (cap);
+killed at its cap) it posts that through `boss_efficiency_core.py --alert` and exits 1 (lock), 124 (cap) or 137 (a scan that ignored the TERM);
 if Slack is out too the log says `ALERT NOT SENT` and the exit is 3.
 
 An anomaly is a change in **how a track spends**, compared with the week before,

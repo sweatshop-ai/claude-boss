@@ -12,6 +12,9 @@
 # the plugin repo is public. No model is called.
 #
 #   DRY_RUN=1   print the report and what would be alerted, write nothing
+#   BOSS_EFFICIENCY_LOCK_WAIT, BOSS_EFFICIENCY_TIMEOUT, BOSS_EFFICIENCY_KILL
+#               seconds to wait for the lock (7200), to let the scan run (3600), and to
+#               wait after the TERM before the kill (30); the tests shorten them
 #   ARGS        passed on: --end 2026-11-04 --weeks 4 for a backfill
 set -uo pipefail
 
@@ -52,9 +55,9 @@ fi
 # Best-effort class 2 at its lowest priority, not idle (-c3): an idle scan can starve on a busy
 # disk and hit the cap below, which loses the week.
 CAP="${BOSS_EFFICIENCY_TIMEOUT:-3600}"
-timeout -k 30 "$CAP" nice -n 19 ionice -c2 -n7 python3 -B "$CORE" "$@"
+timeout -k "${BOSS_EFFICIENCY_KILL:-30}" "$CAP" nice -n 19 ionice -c2 -n7 python3 -B "$CORE" "$@"
 rc=$?
-if [ "$rc" -eq 124 ]; then
+if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then      # 137: it ignored the TERM and was killed 30 s later
     echo "TIMED OUT after ${CAP}s"
     missed "scan timed out after ${CAP} s"
 fi

@@ -27,3 +27,6 @@ Not built (part 1, PR 67; each fails closed, a refusal costs one retry; Opus rou
 - C1. PR 67, `retire_require_idle`: a pane this same boss claims while it waits is refused, because the owner-changed check runs before the own-boss rule.
 - C4. PR 67, `retire_require_idle`: the owner is read on every retry, so one failed `boss-panes.py get` during a long `--wait-idle` refuses the retire and says why.
 - No `restart` variant of the owner tests (`test_boss_lifecycle.py`), only `retire`.
+- [ ] c. PR 69, `systemd/*.service.in`: `Environment=CLAUDE_CONFIG_DIR=@CFG@` is not quoted, and systemd splits `Environment=` on spaces, so a config dir with a space is cut short; quoting needs `check_units`' sed to strip the quotes. Far-fetched (the default is `~/.claude`).
+- [ ] d. PR 69, `routines/boss_efficiency_core.py`: a dry run skips the pending `unsent` alerts without saying so; it could print how many wait.
+- [ ] d. PR 69, `skills/boss/test_boss_efficiency.py`: `MissedRun` repeats the fake Slack server of `Alert` and the lock-holding block of `Run`; `Alert` still imports `http.server` and `threading` locally; `UnsentAlert.week` shares a name with the module `week()` helper; `run_week` patches `core` by hand where `mock.patch.object` is the usual idiom.
