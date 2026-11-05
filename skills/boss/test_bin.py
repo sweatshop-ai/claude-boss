@@ -469,7 +469,7 @@ class StableLink(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual((self.units() / "boss-efficiency.service").read_text(),
                          f"[X]\nExec={self.link}/routines/boss-efficiency.service.sh\nCfg={self.cfg}\nMemoryMax=1G\n")
-        self.assertEqual(sorted(p.name for p in self.units().iterdir() if ".bak-" not in p.name),
+        self.assertEqual(sorted(p.name for p in self.units().iterdir() if ".bak-" not in p.name and p.name != ".boss-units.lock"),
                          ["boss-efficiency.service"])
         self.assertEqual(self.systemctl_calls(), ["--user daemon-reload"])
 
@@ -524,25 +524,51 @@ class StableLink(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(os.readlink(self.home / ".claude" / "routines" / "claude-boss"), str(self.roots[0]))
 
-    def test_a_refresh_is_quiet_on_stderr_and_never_overwrites_an_earlier_copy(self):
+    def test_a_refresh_is_quiet_on_stderr_and_a_second_edit_in_the_same_second_keeps_both(self):
         self.run_link_with_fake_systemctl(self.roots[1])
         self.units().mkdir(parents=True)
         unit = self.units() / "boss-efficiency.service"
         unit.write_text("[X]\nfirst edit\n")
         r = self.run_link_with_fake_systemctl(self.roots[1])
         self.assertEqual(r.stderr, "")
-        (copy,) = self.units().glob("boss-efficiency.service.bak-*")
-        unit.write_text("[X]\nsecond edit\n")
-        # same second: the copy name is taken, so the earlier copy must survive
-        subprocess.run(["bash", "-c", 'date() { echo 2000-01-01-000000; }; . "$1"; write_unit "$2" "$3"',
-                        "_", str(HERE.parents[1] / "bin" / "boss-unit-lib.sh"), str(unit), "new\nx"],
-                       capture_output=True, text=True, check=True)
-        subprocess.run(["bash", "-c", 'date() { echo 2000-01-01-000000; }; . "$1"; write_unit "$2" "$3"',
-                        "_", str(HERE.parents[1] / "bin" / "boss-unit-lib.sh"), str(unit), "newer\nx"],
-                       capture_output=True, text=True, check=True)
-        fixed = self.units() / "boss-efficiency.service.bak-2000-01-01-000000"
-        self.assertEqual(fixed.read_text(), "[X]\nsecond edit\n")
-        self.assertEqual(copy.read_text(), "[X]\nfirst edit\n")
+        lib = str(HERE.parents[1] / "bin" / "boss-unit-lib.sh")
+        for edit in ("second edit", "third edit"):
+            unit.write_text("[X]\n%s\n" % edit)
+            subprocess.run(["bash", "-c", 'date() { echo 2000-01-01-000000; }; . "$1"; write_unit "$2" "$3"',
+                            "_", lib, str(unit), "new\nx"], capture_output=True, text=True, check=True)
+        texts = sorted(c.read_text() for c in self.units().glob("boss-efficiency.service.bak-*"))
+        self.assertEqual(texts, ["[X]\nfirst edit\n", "[X]\nsecond edit\n", "[X]\nthird edit\n"])
+        self.assertEqual(list(self.units().glob("*.tmp-*")), [])
+
+    def test_runs_at_the_same_moment_never_lose_the_hand_edit(self):
+        self.run_link_with_fake_systemctl(self.roots[1])
+        self.units().mkdir(parents=True)
+        names = ("boss-efficiency.service", "boss-efficiency.timer")
+        for n in names:
+            (self.units() / n).write_text("[X]\nhand edit of %s\n" % n)
+        env = {"PATH": "%s:%s" % (self.fake_systemctl(), os.environ["PATH"]), "HOME": str(self.home),
+               "CLAUDE_CONFIG_DIR": str(self.cfg)}
+        procs = [subprocess.Popen([str(self.LINK_BIN), str(self.roots[1])], env=env, stdout=subprocess.PIPE,
+                                  stderr=subprocess.PIPE, text=True) for _ in range(6)]
+        outs = [p.communicate(timeout=30) for p in procs]
+        self.assertEqual([p.returncode for p in procs], [0] * 6, outs)
+        for n in names:
+            kept = [c.read_text() for c in self.units().glob(n + ".bak-*")]
+            self.assertEqual(kept, ["[X]\nhand edit of %s\n" % n])
+
+    def test_a_copy_that_cannot_be_made_leaves_the_unit_alone_and_does_not_fail(self):
+        self.run_link_with_fake_systemctl(self.roots[1])
+        self.units().mkdir(parents=True)
+        unit = self.units() / "boss-efficiency.service"
+        unit.write_text("[X]\nhand edit\n")
+        self.units().chmod(0o555)
+        self.addCleanup(lambda: self.units().chmod(0o755))
+        if os.access(self.units(), os.W_OK):
+            self.skipTest("directory permissions are not enforced here")
+        r = self.run_link_with_fake_systemctl(self.roots[1])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("left alone", r.stderr)
+        self.assertEqual(unit.read_text(), "[X]\nhand edit\n")
 
 
 class InstallKeepsUnits(unittest.TestCase):
