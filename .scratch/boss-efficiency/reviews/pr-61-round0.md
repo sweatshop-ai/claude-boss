@@ -1,0 +1,3 @@
+# PR 61 (ticket 29) reviews, round 0
+
+Standards (mattpocock-skills:code-review): no breaches; 4 judgement smells (duplicate wording in CHANGELOG, Phase A repeats the `shell` meaning, `from-name` unnamed in SKILL.md, a parenthetical about `list`). Spec: retry rule, shell line, Monitor sentence VERIFIED; cause of failed send NOT FOUND in the diff (added to CHANGELOG). Fresh Opus: 4 findings VERIFIED: "not working" and "hear nothing" too absolute for a mid-turn shell worker; "Monitor" vs "check none running" collide for a CI wait; "my message" ambiguous. All applied in the second commit. Codex out until 04:38: follow-up owed.
