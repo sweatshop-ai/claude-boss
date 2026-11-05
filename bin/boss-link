@@ -51,6 +51,7 @@ check_units() {
   for u in boss-ladder.service boss-ladder.timer boss-workers-watch.service \
            boss-workers-watch.timer boss-efficiency.service boss-efficiency.timer; do
     [[ -f $tdir/$u.in ]] || continue
+    [[ -L $units/$u ]] && continue      # masked (a link to /dev/null) or linked on purpose: the owner's choice
     if [[ ! -f $units/$u ]]; then absent="$absent $u"; continue; fi
     any=1
     tpl="$tdir/$u.in"

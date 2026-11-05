@@ -516,6 +516,13 @@ class StableLink(unittest.TestCase):
         self.assertEqual(self.snapshot(), before)
         self.assertEqual(self.systemctl_calls(), [])
 
+    def test_a_masked_unit_is_the_owners_choice_and_is_not_reported_missing(self):
+        self.run_link_with_fake_systemctl(self.roots[1])
+        self.put_unit("boss-efficiency.service", self.rendered(self.roots[1]))
+        (self.units() / "boss-efficiency.timer").symlink_to("/dev/null")          # systemctl --user mask
+        r = self.run_link_with_fake_systemctl(self.roots[1])
+        self.assertEqual((r.returncode, r.stdout, r.stderr), (0, "", ""))
+
     def test_a_machine_that_never_ran_install_hears_nothing_about_missing_units(self):
         self.run_link_with_fake_systemctl(self.roots[1])
         for setup in (lambda: None,                                           # no units dir at all
