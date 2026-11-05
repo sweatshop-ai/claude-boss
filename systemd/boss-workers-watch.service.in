@@ -7,7 +7,8 @@ Documentation=file://@ROOT@/routines/boss-workers-watch.md
 
 [Service]
 # @ROOT@ is the stable link routines/claude-boss, not a version directory;
-# bin/boss-link moves it on every session start, so an upgrade needs no re-render.
+# bin/boss-link moves it on every session start, so a new plugin version needs no re-render;
+# a change to this template does, and boss-link says so.
 Type=oneshot
 ExecStart=@ROOT@/routines/boss-workers-watch.sh
 # The check is a handful of tmux commands and at most one curl; anything

@@ -7,7 +7,8 @@ Documentation=file://@ROOT@/routines/boss-efficiency.md
 
 [Service]
 # @ROOT@ is the stable link routines/claude-boss, not a version directory;
-# bin/boss-link moves it on every session start, so an upgrade needs no re-render.
+# bin/boss-link moves it on every session start, so a new plugin version needs no re-render;
+# a change to this template does, and boss-link says so.
 Type=oneshot
 ExecStart=@ROOT@/routines/boss-efficiency.sh
 # A scan of the transcripts takes minutes at nice 19; it can also wait up to 2 h

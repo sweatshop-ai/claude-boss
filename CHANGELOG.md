@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **The guard no longer waves through three commands, and the version check no longer counts an orphan (ticket 33).**
+  `sed -i 's/a/b/;e cmd;s/x/y/'` passed as a plain substitution, `wc --files0-from=-` passed as a plain filter, and
+  `cd <owned>/missing && ...; <anything>` kept the owned directory past the `;`. All three were already so before
+  PR 56. `boss-guard.py` now keeps the delimiter and newlines out of the substitution, allows only short flags per
+  filter, and checks every `cd` of an `&&` chain when the chain ends. `version_gap.py` read no entrypoint from the
+  real `.in_use` markers (pid and procStart only), so its orphan check never ran; it now takes the entrypoint from
+  `sessions/<pid>.json` when that record's start time is the marker's, and without a record it judges on pid and
+  start time alone. Comment fixes: the `.service.in` headers, `install.sh` and `bin/boss-link`.
+
 - **A worker's report to the boss's name that fails is retried, not left in the pane (ticket 29).** Cause
   found by reproduction: the `from-name` on a boss's message (a session title) is not the name in the
   session registry, so a send to the `from-name` fails with "No agent named ... is reachable" while the
