@@ -233,9 +233,6 @@ def scan_session(path, tracks=()):
         if out["name"] is None and d.get("type") == "attachment" and "Your name in this session" in line:
             m = SESSION_NAME.search(json.dumps(d.get("attachment")))
             if m: out["name"] = m.group(1)
-        if "This session is " in line:            # a ListAgents result names the session and its ref
-            for nm, ref in OWN_REF.findall(line):
-                if nm == out["name"]: out["refs"].append(ref)
         if "<task-notification>" in line and t:
             for m in NOTIF.findall(line): notif.setdefault(m, ts(t))
         if d.get("type") not in ("user", "assistant") or not t or d.get("isSidechain"): return
@@ -274,6 +271,9 @@ def scan_session(path, tracks=()):
                     if b.get("tool_use_id") in pending_marks and not b.get("is_error"):
                         out["goal_status"].extend(pending_marks.pop(b["tool_use_id"]))     # a failed command marks nothing
                     x = tools.get(b.get("tool_use_id"))
+                    if x and x["name"] == "ListAgents":       # only its result names the session and its ref
+                        for nm, ref in OWN_REF.findall(json.dumps(b.get("content"))):
+                            if nm == out["name"]: out["refs"].append(ref)
                     if x and x["e"] is None:
                         x["e"] = T
                         tx = json.dumps(b.get("content"))[:300]

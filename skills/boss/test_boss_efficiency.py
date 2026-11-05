@@ -72,7 +72,7 @@ class Cfg:
             recs.append(dict(type="assistant", timestamp=iso(T), message=dict(id="c%d%s" % (i, sid), usage={}, content=[
                 dict(type="tool_use", id="cmd%d%s" % (i, sid), name="Bash", input=dict(command=cmd))])))
             recs.append(dict(type="user", timestamp=iso(T + 1), message=dict(content=[
-                dict(type="tool_result", tool_use_id="cmd%d%s" % (i, sid), content="ok" if not ok or ok[0] else "Exit code 1",
+                dict(type="tool_result", tool_use_id="cmd%d%s" % (i, sid), content=ok[1] if len(ok) > 1 else "ok" if not ok or ok[0] else "Exit code 1",
                      is_error=bool(ok and not ok[0]))])))
         for i, (T, text) in enumerate(listing):
             recs.append(dict(type="assistant", timestamp=iso(T), message=dict(id="l%d%s" % (i, sid), usage={}, content=[
@@ -300,6 +300,17 @@ class AttributionByName(unittest.TestCase):
         c.boss("alpha-x", [], NOW - DAY, sends=[(NOW - DAY + 60, "Mira [ffffff]")])
         _, wk, _ = week(c.dir)
         self.assertEqual(wk["tracks"]["alpha-x"]["tokens"]["build"], 0)
+
+    def test_a_ref_line_in_a_result_that_is_not_a_listing_is_not_the_sessions_own_ref(self):
+        read = "This session is Mira [ab12cd] \u2014 the name other sessions use to message it."
+        c = Cfg()
+        c.goal("alpha-x")
+        c.worker(NOW - DAY, [], cost=900, name="Mira", until=NOW - DAY + 3600,
+                 cmds=[(NOW - DAY + 5, "cat skills/boss/test_boss_efficiency.py", True, read)])
+        c.worker(NOW - DAY + 30, [], cost=7000, name="Mira", until=NOW - DAY + 3600)
+        c.boss("alpha-x", [], NOW - DAY, sends=[(NOW - DAY + 60, "Mira [ab12cd]")], until=NOW - DAY + 3600)
+        _, wk, _ = week(c.dir)
+        self.assertEqual(wk["tracks"].get("alpha-x", {"tokens": {"build": 0}})["tokens"]["build"], 0)
 
     def test_a_session_dispatched_by_socket_is_not_counted_twice(self):
         c = Cfg()
