@@ -74,7 +74,8 @@ the middle of one — say so to the owner (or your boss) and propose a restart: 
 a short handoff (branch, what you tried and rejected, live constraints, next step),
 push your work, then let the session be recycled and a fresh one continue from the
 handoff. A task bigger than ~150k gets split this way rather than carried to its end;
-past ~250k the split is overdue — stop at the very next boundary.
+past ~250k the split is overdue — stop at the very next boundary, unless your PR is open
+and waiting on CI or a merge: then see it through. When your boss asks how much is left, answer in turns.
 You keep your name and your pane.
 
 Two things this is not: it is not a reason to retire an **idle** session, which
