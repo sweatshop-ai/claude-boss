@@ -8,6 +8,8 @@ Fix to decide: treat an empty value, `none`, `nobody` and `-` (any case) as uncl
 
 **Blocked by:** None (can start immediately)
 
+**Decision (2026-11-05, Anton):** `frontier` ignores Status on purpose; a ticket saying waiting with nothing blocking it contradicts itself. Tickets 27 and 28 were fixed as data (their time conditions are now External blockers), not with a Status rule in classify.
+
 **Claimed by:**
 
 **Status:** ready
