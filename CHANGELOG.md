@@ -18,6 +18,13 @@
   "sensitive" and records it on the PR; the worker may raise it, never lower it. The dispatch
   carries a short text of the rules.
 
+- **A rule for a worker past 250k (ticket 03).** `CTX-OVER` no longer reads "overdue, ask for the
+  boundary now". The owner's two tests apply: never restart a worker waiting on CI or merging with its
+  PR open; otherwise ask how many turns are left and restart at the next boundary if more than about
+  35, review fixes included (the estimate wins over the list). Nothing enforces the flag, it only
+  shows in `list`, so the boss has to ask. New `routines/ctx_over_measure.py` reads that, per worker, into a private file
+  under `<config>/pm/`.
+
 - **The P17 dispatch text no longer asks for the database URL.** A URL can carry `user:pass@`, and the
   worker's report is copied into the boss's messages and transcripts. The worker now reports the
   database's host, port and name, never the URL as a whole and never a password or token. Found by
