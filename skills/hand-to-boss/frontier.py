@@ -346,17 +346,13 @@ def claim(folder, num, name):
             return 3
         line = "**Claimed by:** %s %s" % (name, datetime.now().strftime("%Y-%m-%d %H:%M"))
         lines = t["path"].read_text(encoding="utf-8").splitlines()
-        at = next((i for i, l in enumerate(lines) if FIELD.match(l.strip())
-                   and FIELD.match(l.strip()).group(1).lower() == "status"), None)
-        had = next((i for i, l in enumerate(lines) if FIELD.match(l.strip())
-                    and FIELD.match(l.strip()).group(1).lower() == "claimed by"), None)
-        if had is not None:
-            lines[had] = line
-            if at is not None:
-                lines[at] = "**Status:** in-progress"
-            else:
-                lines += ["", "**Status:** in-progress"]
-        elif at is None:
+        # one Claimed by line survives: parse keeps the last, so drop them all and write one
+        def is_field(l, key):
+            m = FIELD.match(l.strip())
+            return bool(m) and m.group(1).lower() == key
+        lines = [l for l in lines if not is_field(l, "claimed by")]
+        at = next((i for i, l in enumerate(lines) if is_field(l, "status")), None)
+        if at is None:
             lines += ["", line, "", "**Status:** in-progress"]
         else:
             lines[at:at + 1] = [line, "", "**Status:** in-progress"]
