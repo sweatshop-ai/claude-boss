@@ -199,7 +199,7 @@ machinery that watches your team can see it.
 boss-start [track]                                        # the owner runs this: fable, high, autocompact 450k
 boss-lifecycle.sh spawn <project-dir> [name] [--model M]  # prints pane id + name; M defaults to opus, effort medium
 boss-lifecycle.sh spawn <dir> --concierge                 # holds your questions to the owner; sonnet
-boss-lifecycle.sh claim <pane-id> [name]                  # adopt a worker
+boss-lifecycle.sh claim <pane-id> [name] [--concierge]    # adopt a worker; --concierge re-marks a restarted concierge
 boss-lifecycle.sh retire <pane-id> [--kill]               # refuses if BUSY
 boss-lifecycle.sh restart <pane-id>                       # keeps name + model
 boss-lifecycle.sh move <pane-id> <new-project-dir>

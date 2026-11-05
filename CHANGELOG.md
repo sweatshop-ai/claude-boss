@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **A concierge keeps its role through a reboot (ticket 43).** `claim <pane> --concierge` puts
+  `@worker_role` back on a pane, and so the `[concierge]` label and the guard that protects a held question, but only
+  when a process in the pane's tree started with `--append-system-prompt-file .../references/concierge-brief.md`, the
+  argument `launch_claude` gives a concierge and no worker. Any other pane is refused and left unmarked, so the flag alone never gives a
+  worker `AskUserQuestion`. `--concierge` on `retire`, `restart`, `move` is still refused.
 - **`test_bin` removes the directories its `Tools` tests make (ticket 44).** A run left 40 `boss-bin-*` directories in `$TMPDIR`; it now leaves none.
 
 ## 0.22.0 — 2026-11-05

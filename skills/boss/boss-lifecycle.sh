@@ -8,7 +8,7 @@
 #
 # Usage:
 #   boss-lifecycle.sh spawn <project-dir> [name-hint] [--model <name>] [--concierge]
-#   boss-lifecycle.sh claim <pane-id> [name]
+#   boss-lifecycle.sh claim <pane-id> [name] [--concierge]
 #   boss-lifecycle.sh retire <pane-id> [--kill] [--require-idle [--expect-session S] [--expect-last U] [--wait-idle SECONDS [--stop-shells]]
 #   boss-lifecycle.sh restart <pane-id> [--require-idle [--expect-session S] [--expect-last U] [--wait-idle SECONDS] [--stop-shells]]
 #   boss-lifecycle.sh move <pane-id> <new-project-dir>
@@ -87,8 +87,8 @@ if [[ -n "$WAIT_IDLE" ]]; then
   RETRY_EVERY=$(awk -v e="$RETRY_EVERY" 'BEGIN { print (e < 1) ? 1 : e }')
 fi
 set -- ${_args[@]+"${_args[@]}"}
-if [[ -n "$ROLE" && "${1:-}" != spawn ]]; then
-  printf '%s\n' "--concierge only applies to spawn: a worker must not get AskUserQuestion" >&2; exit 1
+if [[ -n "$ROLE" && "${1:-}" != spawn && "${1:-}" != claim ]]; then
+  printf '%s\n' "--concierge only applies to spawn and claim: a worker must not get AskUserQuestion" >&2; exit 1
 fi
 
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
@@ -312,12 +312,38 @@ cmd_spawn() {
   printf '%s\t%s\n' "$pane" "${n:-unnamed}"
 }
 
+# Does a process in the pane's tree run with the concierge brief? The role is
+# tmux state and a reboot erases it, so claim --concierge puts it back, but only
+# on a session that really started as a concierge: launch_claude gives exactly
+# that one `--append-system-prompt-file .../references/concierge-brief.md`, and a
+# flag alone must never give a worker AskUserQuestion. The file name elsewhere in
+# a pane (an editor, a grep, a tool call) is not the flag, so the argument vector
+# is read from /proc and the path must follow the flag directly.
+pane_runs_concierge_brief() {
+  local pid p; pid=$(pane_prop "$1" '#{pane_pid}' 2>/dev/null || true)
+  [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+  for p in $(ps -eo pid=,ppid= | awk -v root="$pid" '
+      { par[$1] = $2 }
+      END { for (q in par) for (x = q; x != "" && x != 0; x = par[x]) if (x == root) { print q; break } }'); do
+    { tr '\0' '\n' <"/proc/$p/cmdline"; } 2>/dev/null | awk '
+      prev == "--append-system-prompt-file" && $0 ~ /\/references\/concierge-brief\.md$/ { found = 1 }
+      { prev = $0 }
+      END { exit !found }' && return 0
+  done
+  return 1
+}
+
 cmd_claim() {
   local target=${1:-} name=${2:-}
   [[ -n "$target" ]] || die "usage: claim <pane-id> [name]"
   [[ -n "$BOSS_PANE" ]] || die "claim needs a boss pane (TMUX_PANE is unset)"
   local pane; pane=$(resolve_pane "$target")
+  if [[ -n "$ROLE" ]]; then
+    pane_runs_concierge_brief "$pane" ||
+      die "$pane does not run with the concierge brief: not marking it a concierge (a worker must not get AskUserQuestion)"
+  fi
   claim_pane "$pane"
+  if [[ -n "$ROLE" ]]; then tmux set-option -p -t "$pane" @worker_role "$ROLE"; fi
   if [[ -n "$name" ]]; then set_agent_name "$pane" "$name" >/dev/null; fi
   local n; n=$(mirror_name "$pane")
   printf 'claimed %s as %s\n' "$pane" "${n:-unnamed}"
@@ -584,5 +610,5 @@ case "${1:-}" in
   move)    shift; cmd_move "$@" ;;
   list)    shift; cmd_list "$@" ;;
   ctx)     shift; python3 "$PANES_PY" "$@" ;;
-  *) die "usage: $(basename "$0") {spawn <dir> [name] [--model M] [--concierge] | claim <pane> [name] | retire <pane> [--kill] | restart <pane> | move <pane> <dir> | list [--mine] | ctx [pane]} [--force] [--require-idle [--expect-session S] [--expect-last U] [--wait-idle SECONDS] [--stop-shells]]" ;;
+  *) die "usage: $(basename "$0") {spawn <dir> [name] [--model M] [--concierge] | claim <pane> [name] [--concierge] | retire <pane> [--kill] | restart <pane> | move <pane> <dir> | list [--mine] | ctx [pane]} [--force] [--require-idle [--expect-session S] [--expect-last U] [--wait-idle SECONDS] [--stop-shells]]" ;;
 esac

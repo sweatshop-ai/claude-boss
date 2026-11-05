@@ -8,9 +8,11 @@ Ready for a worker when picked, but a small one.
 
 **Blocked by:** None (can start immediately)
 
-**Claimed by:**
+**Claimed by:** Otilia (boss Anton), 2026-11-05
 
-**Status:** ready-for-agent
+**Status:** in-progress
 
-- [ ] Test first: after the tmux state is gone, claiming a concierge's name gives it the concierge role again
-- [ ] `--concierge` on `claim` is still refused where it was refused (line 91), or the refusal is changed on purpose and the test says why
+**Decision:** `claim <pane> --concierge` is accepted, and stamps the role only when a process in the pane's tree has `concierge-brief.md` in its command line (`pane_runs_concierge_brief`, via `ps`). That file is what `launch_claude` passes a concierge and never a worker, so the check is the session's real start state, not the flag. The registry was not used: a role stored there would be a second source to keep in step. A pane without the brief is refused before anything is stamped. `--concierge` on retire/restart/move is refused as before.
+
+- [x] Test first: after the tmux state is gone, claiming a concierge's name gives it the concierge role again
+- [x] `--concierge` on `claim` is still refused where it was refused (line 91), or the refusal is changed on purpose and the test says why
