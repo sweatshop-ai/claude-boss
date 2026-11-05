@@ -106,6 +106,15 @@ while IFS=$'\t' read -r id idx cmd path role name; do
             nb=$(grep -v '^[[:space:]]*$' <<<"$cap")
             dialog_cap=$(tail -n 7 <<<"$nb" | tr -s '[:space:]' ' ')
             dialog_foot=$(tail -n 15 <<<"$nb" | tr -s '[:space:]' ' ')
+            # An AskUserQuestion ends in "Enter to select ... Esc to cancel"; a
+            # permission dialog or the trust prompt never does. With that footer
+            # at the bottom the dialog is the owner's question, whatever its
+            # options say, so a question with short options (the "Yes, and
+            # always ..." option inside the 7 rows) stays silent.
+            if tail -n 4 <<<"$nb" | tr -s '[:space:]' ' ' | grep -q 'Enter to select'; then
+                dialog_cap=""
+                dialog_foot=""
+            fi
         fi
 
         # Case-sensitive on purpose: the TUI banner says "API Error"; a
