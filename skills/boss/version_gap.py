@@ -80,7 +80,7 @@ def proc_start(pid):
 
 def _same_process(mark, cfg=None):
     """The file's pid is a live session: registry.is_live's rules, so a reused pid, a
-    zombie, an orphan and a marker with no start time all count as gone.
+    zombie, an orphan with a session record and a marker with no start time count as gone.
 
     The marker holds pid and procStart only, so the entrypoint, which decides whether a
     controlling terminal is required, comes from sessions/<pid>.json. That record counts
@@ -90,7 +90,8 @@ def _same_process(mark, cfg=None):
     try:
         rec = json.loads(mark.read_text())
         session = registry.by_pid(mark.name, cfg) or {}
-        entry = session.get("entrypoint") if str(session.get("procStart")) == str(rec.get("procStart")) else None
+        same = str(session.get("procStart")) == str(rec.get("procStart"))
+        entry = session.get("entrypoint") if same else None
         return registry.is_live({"pid": mark.name, "procStart": rec.get("procStart"),
                                  "entrypoint": entry})
     except (OSError, ValueError, AttributeError):
