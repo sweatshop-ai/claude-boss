@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **A concierge keeps its role through a reboot (ticket 43).** `claim <pane> --concierge` puts
+  `@worker_role` back on a pane, and so the `[concierge]` label and the guard that protects a held question, but only
+  when a process in the pane's tree runs with `concierge-brief.md`, the file `launch_claude` gives a
+  concierge and no worker. Any other pane is refused and left unmarked, so the flag alone never gives a
+  worker `AskUserQuestion`. `--concierge` on `retire`, `restart`, `move` is still refused.
+
 ## 0.22.0 — 2026-11-05
 
 - **The efficiency scan takes a worker's own session ref only from a `ListAgents` result (ticket 38).** A worker that

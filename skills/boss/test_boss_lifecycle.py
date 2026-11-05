@@ -162,6 +162,7 @@ case "$1" in
       '#{@boss_pane}') echo '' ;;
       '#{pane_current_command}') cat "$STUB_DIR/cmd" ;;
       '#{@worker_role}') cat "$STUB_DIR/role" 2>/dev/null ;;
+      '#{pane_pid}') cat "$STUB_DIR/panepid" 2>/dev/null ;;
       *) echo '' ;;
     esac ;;
   send-keys)
@@ -712,6 +713,34 @@ class RestartKeepsName(unittest.TestCase):
         r = self.run_lifecycle("restart", "%5", "--concierge", row="w-sid\tidle\tpin1")
         self.assertNotEqual(r.returncode, 0)
         self.assertFalse(self.launches() if (self.tmp / "calls").exists() else [])
+
+    def claim_concierge(self, argv):
+        """claim --concierge on a pane whose process tree is `argv` (a reboot-shaped case:
+        no @worker_role on the pane, the session started with or without the brief)."""
+        kid = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"] + argv)
+        try:
+            (self.tmp / "panepid").write_text("%d\n" % kid.pid)
+            env = dict(os.environ, PATH="%s:%s" % (self.tmp / "bin", os.environ["PATH"]), TMUX="stub",
+                       TMUX_PANE="%1", STUB_DIR=str(self.tmp), STUB_ROW="w-sid\tidle\tpin1")
+            r = subprocess.run(["bash", str(self.tmp / "boss-lifecycle.sh"), "claim", "%5", "--concierge"],
+                               env=env, capture_output=True, text=True, timeout=60)
+        finally:
+            kid.kill()
+            kid.wait()
+        return r, (self.tmp / "calls").read_text()
+
+    def test_claim_concierge_marks_a_pane_whose_session_runs_the_brief(self):
+        r, calls = self.claim_concierge(["--append-system-prompt-file", "/x/references/concierge-brief.md"])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("set-option -p -t %5 @worker_role concierge", calls)
+
+    def test_claim_concierge_refuses_a_worker(self):
+        # A flag alone must not give a worker AskUserQuestion.
+        r, calls = self.claim_concierge(["--disallowedTools", "AskUserQuestion"])
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("does not run with the concierge brief", r.stderr)
+        self.assertNotIn("@worker_role", calls)
+        self.assertNotIn("@boss_pane", calls)
 
     def test_a_name_held_elsewhere_is_reported_not_claimed(self):
         # Another live session holds Wanda, so the hook names the new one Greta.

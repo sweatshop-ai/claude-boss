@@ -87,8 +87,8 @@ if [[ -n "$WAIT_IDLE" ]]; then
   RETRY_EVERY=$(awk -v e="$RETRY_EVERY" 'BEGIN { print (e < 1) ? 1 : e }')
 fi
 set -- ${_args[@]+"${_args[@]}"}
-if [[ -n "$ROLE" && "${1:-}" != spawn ]]; then
-  printf '%s\n' "--concierge only applies to spawn: a worker must not get AskUserQuestion" >&2; exit 1
+if [[ -n "$ROLE" && "${1:-}" != spawn && "${1:-}" != claim ]]; then
+  printf '%s\n' "--concierge only applies to spawn and claim: a worker must not get AskUserQuestion" >&2; exit 1
 fi
 
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
@@ -312,11 +312,35 @@ cmd_spawn() {
   printf '%s\t%s\n' "$pane" "${n:-unnamed}"
 }
 
+# Does a process in the pane's tree run with the concierge brief? The role is
+# tmux state and a reboot erases it, so claim --concierge puts it back, but only
+# on a session that really started as a concierge: launch_claude gives exactly
+# that one `--append-system-prompt-file .../concierge-brief.md`, and a flag
+# alone must never give a worker AskUserQuestion.
+pane_runs_concierge_brief() {
+  local pid; pid=$(pane_prop "$1" '#{pane_pid}' 2>/dev/null || true)
+  [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+  ps -eo pid=,ppid=,args= | awk -v root="$pid" '
+    { id = $1; par[id] = $2; sub(/^ *[0-9]+ +[0-9]+ */, ""); args[id] = $0 }
+    END {
+      for (q in par) {
+        for (x = q; x != "" && x != 0; x = par[x])
+          if (x == root) { if (args[q] ~ /concierge-brief\.md/) found = 1; break }
+      }
+      exit !found
+    }'
+}
+
 cmd_claim() {
   local target=${1:-} name=${2:-}
   [[ -n "$target" ]] || die "usage: claim <pane-id> [name]"
   [[ -n "$BOSS_PANE" ]] || die "claim needs a boss pane (TMUX_PANE is unset)"
   local pane; pane=$(resolve_pane "$target")
+  if [[ -n "$ROLE" ]]; then
+    pane_runs_concierge_brief "$pane" ||
+      die "$pane does not run with the concierge brief: not marking it a concierge (a worker must not get AskUserQuestion)"
+    tmux set-option -p -t "$pane" @worker_role "$ROLE"
+  fi
   claim_pane "$pane"
   if [[ -n "$name" ]]; then set_agent_name "$pane" "$name" >/dev/null; fi
   local n; n=$(mirror_name "$pane")
@@ -584,5 +608,5 @@ case "${1:-}" in
   move)    shift; cmd_move "$@" ;;
   list)    shift; cmd_list "$@" ;;
   ctx)     shift; python3 "$PANES_PY" "$@" ;;
-  *) die "usage: $(basename "$0") {spawn <dir> [name] [--model M] [--concierge] | claim <pane> [name] | retire <pane> [--kill] | restart <pane> | move <pane> <dir> | list [--mine] | ctx [pane]} [--force] [--require-idle [--expect-session S] [--expect-last U] [--wait-idle SECONDS] [--stop-shells]]" ;;
+  *) die "usage: $(basename "$0") {spawn <dir> [name] [--model M] [--concierge] | claim <pane> [name] [--concierge] | retire <pane> [--kill] | restart <pane> | move <pane> <dir> | list [--mine] | ctx [pane]} [--force] [--require-idle [--expect-session S] [--expect-last U] [--wait-idle SECONDS] [--stop-shells]]" ;;
 esac
