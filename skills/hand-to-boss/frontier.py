@@ -93,7 +93,7 @@ def parse(path):
                 t["status"] = val
             elif key == "claimed by":
                 # a template placeholder is no claimant, and never hides a real one
-                if val.lower() not in ("none", "nobody", "-"):
+                if val and val.lower() not in ("none", "nobody", "-"):
                     t["claimed_by"] = val
         i += 1
     return t

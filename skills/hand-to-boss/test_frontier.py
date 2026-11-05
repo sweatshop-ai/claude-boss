@@ -117,13 +117,14 @@ class FrontierCase(unittest.TestCase):
         before = ticket("01", "A", "None").replace(
             "**Status:**", "**Claimed by:** Ann 2026-11-05 10:00\n\n**Claimed by:** none\n\n**Status:**")
         after = ticket("02", "B", "None", claimed="Ann 2026-11-05 10:00") + "\n**Claimed by:** nobody\n"
+        empty = ticket("03", "C", "None", claimed="Ann 2026-11-05 10:00") + "\n**Claimed by:**\n"
         self.put("01-a.md", before)
         self.put("02-b.md", after)
+        self.put("03-c.md", empty)
         code, out, _ = self.run_json()
-        self.assertEqual(self.by_num(out)["01"]["state"], "claimed")
-        self.assertEqual(self.by_num(out)["02"]["state"], "claimed")
-        self.assertEqual(self.claim("1", "Bob").returncode, 3)
-        self.assertEqual(self.claim("2", "Bob").returncode, 3)
+        for n in ("01", "02", "03"):
+            self.assertEqual(self.by_num(out)[n]["state"], "claimed")
+            self.assertEqual(self.claim(n, "Bob").returncode, 3)
 
     def test_a_name_that_starts_with_a_placeholder_word_is_a_claimant(self):
         self.put("01-a.md", ticket("01", "A", "None", claimed="Nobody-Special 2026-11-05 10:00"))
