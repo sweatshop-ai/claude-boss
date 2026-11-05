@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **The efficiency scan takes a worker's own session ref only from a `ListAgents` result (ticket 38).** A worker that
+  read a file holding a "This session is NAME [ref]" line no longer records that ref as its own, so a send to
+  its real ref keeps its attribution.
 - **`boss-unask` survives a torn record, and its example cannot end early (ticket 37).** `read` decodes per
   line, so an interrupted multi-byte append skips that line instead of failing `list` and the weekly
   routine; the `record` example in SKILL.md ends on `END_OF_OWNER_REPORT_8c41f7`, not `EOF`, so a line

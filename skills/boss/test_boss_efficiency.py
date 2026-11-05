@@ -58,8 +58,8 @@ class Cfg:
 
     def session(self, sid, at, sock_msgs, cost, asks=0, bash=None, name=None, until=None, sends=(), cmds=(), listing=(), refused=0):
         """`name`: the start name the hook records. `until`: a last record at that time.
-        `sends`: [(T, to)] SendMessage calls. `cmds`: [(T, command)] or [(T, command, False)] Bash calls and
-        their result (success unless False). `listing`: [(T, text)] a ListAgents result the session got."""
+        `sends`: [(T, to)] SendMessage calls. `cmds`: [(T, command)], [(T, command, False)] or [(T, command, True, text)] Bash calls
+        and their result (success unless False; `text` is the output). `listing`: [(T, text)] a ListAgents result the session got."""
         recs = []
         if name:
             recs.append(dict(type="attachment", timestamp=iso(at), attachment=dict(
