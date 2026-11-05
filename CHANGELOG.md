@@ -11,6 +11,17 @@
   The boss and team skills now define a turn as one model message, matching `ctx_over_measure.py`, and the
   self-contained dispatch says `code-review` runs once per PR.
 
+- **Efficiency routine: the five open lines of the Codex pass on PR 49 (ticket 32, part 3).**
+  `bin/boss-link` now also names a unit template with no installed unit (a timer added since
+  `install.sh` last ran), but only when another boss unit is installed. The three service
+  templates carry `Environment=CLAUDE_CONFIG_DIR=@CFG@` (the ladder had the same gap as the
+  efficiency measure and the watchdog), and the comparison reads that line back, so a session
+  under another config dir stays quiet. An alert Slack did not take is kept and resent with the
+  next run instead of being lost with the baseline; a lock wait of two hours or a scan killed
+  at its cap now posts an alert, and exits 3 with `ALERT NOT SENT` in the log when Slack is out
+  too. Stale socket ties are not changed: a collision needs the same pid and costs the new boss's
+  first two dispatches.
+
 - **The guard no longer waves through three commands, and the version check no longer counts an orphan (ticket 33).**
   `sed -i 's/a/b/;e cmd;s/x/y/'` passed as a plain substitution, `wc --files0-from=-` passed as a plain filter, and
   `cd <owned>/missing && ...; <anything>` kept the owned directory past the `;`. All three were already so before

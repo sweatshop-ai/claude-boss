@@ -7,12 +7,15 @@ Every fixture is synthetic: invented track names and sockets, written into a
 throwaway CLAUDE_CONFIG_DIR. Nothing here reads a real transcript.
 """
 import datetime as dt
+import http.server
 import json
 import os
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
+import urllib.parse
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -642,6 +645,160 @@ class Verdict(unittest.TestCase):
         week["tracks"]["alpha-x"].update(wall_s=3600, states={k: 0 for k in core.STATES}, asks_per_day=0, ci_waits=0, ci_s=0)
         self.assertEqual(core.judge(week, None), ([], []))
         self.assertIn("35/100", core.render(week, "x", [], []))
+
+
+class UnsentAlert(unittest.TestCase):
+    """An alert Slack did not take is kept and sent with the next run; the week stays a baseline."""
+
+    def week(self, end, build):
+        m = dict(budget_share=0.1, total_tokens=200_000_000, asks=0, wall_s=3600, asks_per_day=0, ci_waits=0, ci_s=0,
+                 states={k: 0 for k in core.STATES}, tokens=dict.fromkeys(core.PHASES, 0),
+                 worker_s=dict(ci=0, llm=1000), coverage=dict(messages=10, outside=0))
+        m["tokens"].update(build=int(2e8 * build), fix=int(2e8 * (1 - build)))
+        return dict(start=end - 7 * DAY, end=end, tracks={"alpha-x": m}, total_tokens=200_000_000,
+                    coverage=dict(messages=10, outside=0, share=0.0))
+
+    def run_week(self, c, end, build, sends):
+        """core.run for one window; `sends` holds the Slack answers in turn. Returns (rc, texts it tried)."""
+        tried = []
+
+        def fake_alert(text, dry):
+            tried.append(text)
+            return sends.pop(0)
+        old = core.measure_window, core.alert
+        core.measure_window = lambda idx, start, end_: self.week(end_, build)
+        core.alert = fake_alert
+        try:
+            rc, _ = core.run(c.dir, end, 1, False)
+        finally:
+            core.measure_window, core.alert = old
+        return rc, tried
+
+    def state(self, c):
+        return json.loads((c.dir / "routines" / "state" / "boss-efficiency.json").read_text())
+
+    def test_a_flagged_week_whose_alert_failed_is_sent_with_the_next_run(self):
+        c = Cfg()
+        c.goal("alpha-x")
+        self.assertEqual(self.run_week(c, NOW, 0.8, []), (0, []))
+        rc, tried = self.run_week(c, NOW + 7 * DAY, 0.5, [False])                # Slack is down
+        self.assertEqual((rc, len(tried)), (2, 1))
+        self.assertIn("build 50% against 80%", tried[0])
+        self.assertEqual(len(self.state(c)["unsent"]), 1)
+        rc, tried = self.run_week(c, NOW + 14 * DAY, 0.5, [True, True])           # the change persists, Slack is back
+        self.assertEqual(rc, 0)
+        self.assertEqual(len(tried), 1, tried)                                    # the old one; 0.5 against 0.5 says nothing new
+        self.assertIn("build 50% against 80%", tried[0])
+        self.assertEqual(self.state(c)["unsent"], [])
+
+    def test_a_rerun_of_the_week_that_gets_through_drops_its_unsent_entry(self):
+        c = Cfg()
+        c.goal("alpha-x")
+        self.run_week(c, NOW, 0.8, [])
+        self.run_week(c, NOW + 7 * DAY, 0.5, [False])
+        rc, tried = self.run_week(c, NOW + 7 * DAY, 0.5, [True, True])           # the same week again
+        self.assertEqual(self.state(c)["unsent"], [])
+        self.assertEqual(self.run_week(c, NOW + 14 * DAY, 0.5, [])[1], [])        # nothing left to repeat
+
+    def test_an_unsent_alert_keeps_failing_the_run_until_it_goes_out(self):
+        c = Cfg()
+        c.goal("alpha-x")
+        self.run_week(c, NOW, 0.8, [])
+        self.run_week(c, NOW + 7 * DAY, 0.5, [False])
+        rc, _ = self.run_week(c, NOW + 14 * DAY, 0.5, [False])
+        self.assertEqual(rc, 2)
+        self.assertEqual(len(self.state(c)["unsent"]), 1)
+
+    def test_a_delivered_alert_leaves_nothing_to_resend(self):
+        c = Cfg()
+        c.goal("alpha-x")
+        self.run_week(c, NOW, 0.8, [])
+        self.assertEqual(self.run_week(c, NOW + 7 * DAY, 0.5, [True])[0], 0)
+        self.assertEqual(self.state(c).get("unsent", []), [])
+
+
+class MissedRun(unittest.TestCase):
+    """The body alerts when it cannot run the week at all, and fails visibly when Slack is out too."""
+
+    def setUp(self):
+        self.c = Cfg()
+        self.got = []
+        got = self.got
+
+        class H(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):
+                got.append(self.rfile.read(int(self.headers["Content-Length"])).decode())
+                self.send_response(200); self.end_headers(); self.wfile.write(b'{"ok": true}')
+
+            def log_message(self, *a): pass
+
+        self.srv = http.server.HTTPServer(("127.0.0.1", 0), H)
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+        self.addCleanup(self.srv.shutdown)
+        self.slack = Path(tempfile.mkdtemp()) / "slack.env"
+        self.slack.write_text("SLACK_BOT_TOKEN=tok\nSLACK_CHANNEL_ID=C1\n")
+
+    def env(self, **kw):
+        e = dict(os.environ, CLAUDE_CONFIG_DIR=str(self.c.dir), DRY_RUN="", BOSS_SLACK_ENV=str(self.slack),
+                 BOSS_SLACK_API="http://127.0.0.1:%d/" % self.srv.server_port, BOSS_EFFICIENCY_LOCK_WAIT="1")
+        e.update(kw)
+        return e
+
+    def log(self):
+        return (self.c.dir / "routines" / "logs" / "boss-efficiency.log").read_text()
+
+    def hold_lock(self):
+        import fcntl
+        held = open(self.c.dir / "pm" / ".boss-efficiency-transcripts.lock", "w")
+        fcntl.flock(held, fcntl.LOCK_EX)
+        self.addCleanup(held.close)
+
+    def slow_nice(self):
+        """A `nice` that outlasts the cap, so the body's `timeout` kills it."""
+        d = Path(tempfile.mkdtemp())
+        (d / "nice").write_text("#!/bin/sh\nexec sleep 30\n")
+        (d / "nice").chmod(0o755)
+        return dict(PATH="%s:%s" % (d, os.environ["PATH"]), BOSS_EFFICIENCY_TIMEOUT="1")
+
+    def test_a_lock_that_is_never_free_sends_an_alert_and_still_fails(self):
+        self.hold_lock()
+        r = subprocess.run([str(BODY)], env=self.env(), capture_output=True, text=True)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertEqual(len(self.got), 1, self.got)
+        self.assertIn("lock", urllib.parse.unquote_plus(self.got[0]))
+        self.assertNotIn("ALERT NOT SENT", self.log())
+
+    def test_a_scan_killed_by_the_cap_sends_an_alert_and_still_fails(self):
+        r = subprocess.run([str(BODY)], env=self.env(**self.slow_nice()), capture_output=True, text=True)
+        self.assertEqual(r.returncode, 124, r.stdout + r.stderr)
+        self.assertEqual(len(self.got), 1, self.got)
+        self.assertIn("timed out", urllib.parse.unquote_plus(self.got[0]))
+
+    def test_a_scan_that_ignores_the_first_signal_is_alerted_too(self):
+        d = Path(tempfile.mkdtemp())
+        (d / "nice").write_text("#!/bin/sh\ntrap '' TERM\nsleep 30\n")
+        (d / "nice").chmod(0o755)
+        r = subprocess.run([str(BODY)], env=self.env(PATH="%s:%s" % (d, os.environ["PATH"]), BOSS_EFFICIENCY_TIMEOUT="1",
+                                                     BOSS_EFFICIENCY_KILL="1"), capture_output=True, text=True)
+        self.assertEqual(r.returncode, 137, r.stdout + r.stderr)
+        self.assertEqual(len(self.got), 1, self.got)
+        self.assertIn("timed out", urllib.parse.unquote_plus(self.got[0]))
+
+    def test_with_slack_unreachable_the_miss_is_logged_and_the_exit_is_distinct(self):
+        self.hold_lock()
+        r = subprocess.run([str(BODY)], env=self.env(BOSS_SLACK_ENV="/nonexistent/slack.env"), capture_output=True, text=True)
+        self.assertEqual(r.returncode, 3, r.stdout + r.stderr)
+        self.assertIn("ALERT NOT SENT", self.log())
+        r = subprocess.run([str(BODY)], env=self.env(BOSS_SLACK_ENV="/nonexistent/slack.env", **self.slow_nice()),
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 3, r.stdout + r.stderr)
+
+    def test_a_dry_run_alerts_nobody(self):
+        self.hold_lock()
+        r = subprocess.run([str(BODY)], env=self.env(DRY_RUN="1"), capture_output=True, text=True)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertEqual(self.got, [])
+        self.assertIn("would alert", r.stdout)
 
 
 class Usage(unittest.TestCase):

@@ -463,8 +463,8 @@ class StableLink(unittest.TestCase):
 
     # --- the units: bin/boss-link only reads them; install.sh is the one writer
 
-    def rendered(self, root, cfg=None):
-        return (root / "systemd" / "boss-efficiency.service.in").read_text() \
+    def rendered(self, root, cfg=None, name="boss-efficiency.service"):
+        return (root / "systemd" / (name + ".in")).read_text() \
             .replace("@ROOT@", str(self.link)).replace("@CFG@", str(cfg or self.cfg))
 
     def put_unit(self, name, text):
@@ -492,6 +492,7 @@ class StableLink(unittest.TestCase):
     def test_a_current_unit_is_silent_also_under_another_config_dir(self):
         self.run_link_with_fake_systemctl(self.roots[1])
         self.put_unit("boss-efficiency.service", self.rendered(self.roots[1]))
+        self.put_unit("boss-efficiency.timer", self.rendered(self.roots[1], name="boss-efficiency.timer"))
         r = self.run_link_with_fake_systemctl(self.roots[1])
         self.assertEqual((r.returncode, r.stdout, r.stderr), (0, "", ""))
         other = self.tmp / "other-cfg"
@@ -501,12 +502,64 @@ class StableLink(unittest.TestCase):
         r = subprocess.run([str(self.LINK_BIN), str(self.roots[1])], env=env, capture_output=True, text=True, timeout=10)
         self.assertNotIn("differ", r.stdout + r.stderr)
 
+    def test_a_template_with_no_installed_unit_is_named_once_another_boss_unit_is_installed(self):
+        self.run_link_with_fake_systemctl(self.roots[1])
+        self.put_unit("boss-efficiency.service", self.rendered(self.roots[1]))      # the timer was added since
+        before = self.snapshot()
+        r = self.run_link_with_fake_systemctl(self.roots[1])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        lines = r.stdout.strip().splitlines()
+        self.assertEqual(len(lines), 1, r.stdout)
+        self.assertIn("boss-efficiency.timer", lines[0])
+        self.assertNotIn("boss-efficiency.service", lines[0])
+        self.assertIn("install.sh", lines[0])
+        self.assertEqual(self.snapshot(), before)
+        self.assertEqual(self.systemctl_calls(), [])
+
+    def test_a_masked_unit_is_the_owners_choice_and_is_not_reported_missing(self):
+        self.run_link_with_fake_systemctl(self.roots[1])
+        self.put_unit("boss-efficiency.service", self.rendered(self.roots[1]))
+        (self.units() / "boss-efficiency.timer").symlink_to("/dev/null")          # systemctl --user mask
+        r = self.run_link_with_fake_systemctl(self.roots[1])
+        self.assertEqual((r.returncode, r.stdout, r.stderr), (0, "", ""))
+
+    def test_a_machine_that_never_ran_install_hears_nothing_about_missing_units(self):
+        self.run_link_with_fake_systemctl(self.roots[1])
+        for setup in (lambda: None,                                           # no units dir at all
+                      lambda: self.units().mkdir(parents=True),               # an empty one
+                      lambda: self.put_unit("other.service", "[X]\n")):       # a unit that is not the boss's
+            setup()
+            r = self.run_link_with_fake_systemctl(self.roots[1])
+            self.assertEqual((r.returncode, r.stdout, r.stderr), (0, "", ""))
+
     def test_a_machine_with_the_template_missing_or_a_broken_unit_dir_never_fails(self):
         self.run_link_with_fake_systemctl(self.roots[1])
         self.put_unit("boss-efficiency.service", "")
         (self.units() / "boss-efficiency.timer").symlink_to(self.tmp / "nowhere")
         r = self.run_link_with_fake_systemctl(self.roots[1])
         self.assertEqual(r.returncode, 0, r.stderr)
+
+    # --- the services carry CLAUDE_CONFIG_DIR, and the comparison reads it back
+
+    REAL = HERE.parents[1]
+    SERVICES = ("boss-ladder.service", "boss-workers-watch.service", "boss-efficiency.service")
+
+    def test_every_service_runs_under_the_config_dir_it_logs_to(self):
+        for u in self.SERVICES:
+            text = (self.REAL / "systemd" / (u + ".in")).read_text()
+            self.assertIn("\nEnvironment=CLAUDE_CONFIG_DIR=@CFG@\n", text, u)
+
+    def test_the_real_units_stay_quiet_under_another_session_config_dir(self):
+        units = [p.name[:-3] for p in sorted((self.REAL / "systemd").glob("*.in"))]
+        for u in units:
+            self.put_unit(u, (self.REAL / "systemd" / (u + ".in")).read_text()
+                          .replace("@ROOT@", str(self.link)).replace("@CFG@", str(self.cfg)))
+        other = self.tmp / "other-cfg"
+        (other / "routines").mkdir(parents=True)
+        (other / "routines" / "claude-boss").symlink_to(self.REAL)
+        self.run_link(str(self.REAL))                                           # links self.cfg to the real root
+        r = self.run_link(str(self.REAL), cfg=str(other))
+        self.assertEqual((r.returncode, r.stdout, r.stderr), (0, "", ""))
 
     def test_parallel_runs_change_nothing_in_the_units_dir(self):
         self.run_link_with_fake_systemctl(self.roots[1])

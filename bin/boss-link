@@ -24,8 +24,11 @@
 # link points at (MemoryMax reached fresh installs only, because install.sh copies the
 # units once) and, when one differs, prints one line saying which and that `install.sh`
 # brings it up to date. It writes nothing: a unit may hold a hand edit, and the owner's
-# explicit `install.sh` is the one place that replaces it (keeping a dated copy). The
-# comparison reads @ROOT@ and @CFG@ from the installed unit's own lines, so a session
+# explicit `install.sh` is the one place that replaces it (keeping a dated copy). It also names a
+# template with no installed unit (a timer added since install.sh last ran), but only when another boss
+# unit is installed: a machine that never ran install.sh hears nothing. The
+# comparison reads @ROOT@ and @CFG@ from the installed unit's own lines (the Environment=
+# CLAUDE_CONFIG_DIR line, else the log path), so a session
 # under another CLAUDE_CONFIG_DIR does not make it noisy. It never fails a session start.
 set -euo pipefail
 
@@ -42,20 +45,28 @@ cfg="${CLAUDE_CONFIG_DIR:-}"           # an empty value means unset (see boss_st
 link="$cfg/routines/claude-boss"
 
 check_units() {
-  local units="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user" tdir u tpl got r c differ=
+  local units="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user" tdir u tpl got r c differ= absent= any=
   tdir="$(readlink -f -- "$link")/systemd"
   [[ -d $units && -d $tdir ]] || return 0
   for u in boss-ladder.service boss-ladder.timer boss-workers-watch.service \
            boss-workers-watch.timer boss-efficiency.service boss-efficiency.timer; do
-    [[ -f $units/$u && -f $tdir/$u.in ]] || continue
+    [[ -f $tdir/$u.in ]] || continue
+    [[ -L $units/$u ]] && continue      # masked (a link to /dev/null) or linked on purpose: the owner's choice
+    if [[ ! -f $units/$u ]]; then absent="$absent $u"; continue; fi
+    any=1
     tpl="$tdir/$u.in"
     r="$(sed -n 's|^ExecStart=\(.*\)/routines/[^/]*$|\1|p' "$units/$u" | head -n1)"
-    c="$(sed -n 's|^StandardOutput=append:\(.*\)/routines/logs/[^/]*$|\1|p' "$units/$u" | head -n1)"
+    c="$(sed -n -e 's|^Environment=CLAUDE_CONFIG_DIR=\(.*\)$|\1|p' -e 's|^StandardOutput=append:\(.*\)/routines/logs/[^/]*$|\1|p' "$units/$u" | head -n1)"
     got="$(sed -e "s|@ROOT@|${r:-$link}|g" -e "s|@CFG@|${c:-$cfg}|g" "$tpl"; echo x)"
     [[ "$(cat -- "$units/$u"; echo x)" == "$got" ]] || differ="$differ $u"
   done
   if [[ -n $differ ]]; then
     echo "boss-link: installed unit(s) differ from this version's templates:$differ; run $(readlink -f -- "$link")/install.sh to bring them up to date (a replaced unit is kept as .bak-<date-time>)"
+  fi
+  # A unit this version added reaches only those who rerun install.sh. A machine with no boss unit
+  # at all never ran it, so it hears nothing.
+  if [[ -n $any && -n $absent ]]; then
+    echo "boss-link: this version has unit(s) with no installed unit:$absent; run $(readlink -f -- "$link")/install.sh to add them"
   fi
   return 0
 }
