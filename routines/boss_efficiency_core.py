@@ -78,6 +78,7 @@ COST_WEIGHT = dict(i=1.0, cw=1.25, cr=0.1, o=5.0)           # cost units per tok
 PHASES = ("build", "fix", "sub_rev", "sub_oth", "boss")
 STATES = ("work", "fix", "test", "review", "ci", "bg_other", "ask", "bossact", "parked", "nobody")
 
+GUARD_REFUSAL = "Send it to your concierge"          # boss-guard.py's deny reason
 ASK_MSG = re.compile(r"\s*ASK \S+:")
 FROM = re.compile(r'<cross-session-message from="([^"]+)"')
 DISP = re.compile(r"Boss dispatch from ([^,\n]+), track [`'\"]?([A-Za-z0-9._-]+)")
@@ -266,7 +267,7 @@ def scan_session(path, tracks=()):
             for b in content:
                 if isinstance(b, dict) and b.get("type") == "tool_result":
                     is_result = True
-                    if b.get("is_error") and b.get("tool_use_id") in ask_at:
+                    if b.get("tool_use_id") in ask_at and GUARD_REFUSAL in json.dumps(b.get("content")):
                         out["asks"].remove(ask_at.pop(b["tool_use_id"]))      # refused by the guard: the owner never saw it
                     if b.get("tool_use_id") in pending_marks and not b.get("is_error"):
                         out["goal_status"].extend(pending_marks.pop(b["tool_use_id"]))     # a failed command marks nothing
@@ -280,7 +281,7 @@ def scan_session(path, tracks=()):
             tx = text_of(m)
             f = FROM.search(tx[:400])
             if f:
-                body = tx[tx.find(">") + 1:tx.find(">") + 900]
+                body = tx[tx.find(">", f.end()) + 1:tx.find(">", f.end()) + 900]
                 if ASK_MSG.match(body): out["concierge"] = True       # the boss sends it `ASK <id>:`
                 g = DISP.search(body)
                 g3 = None if g else (disp3.search(body) if disp3 else None)
