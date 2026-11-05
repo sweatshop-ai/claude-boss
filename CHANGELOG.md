@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.22.0 — 2026-11-05
 
 - **The efficiency scan takes a worker's own session ref only from a `ListAgents` result (ticket 38).** A worker that
   read a file holding a "This session is NAME [ref]" line no longer records that ref as its own, so a send to
