@@ -4,9 +4,10 @@
 
 **Blocked by:** None (can start immediately)
 
-**Claimed by:** none
 
-**Status:** ready
+**Claimed by:** Rune 2026-11-05 10:25
+
+**Status:** in-progress
 
 - [ ] b. PR 71, `skills/boss/SKILL.md:739`: the `boss-unask record` example uses a heredoc with the fixed delimiter `EOF`; a question or owner wording with a line that is exactly `EOF` ends it early and the rest of the report text runs as shell. VERIFIED on main. Use framing that cannot collide (a delimiter checked absent from the content, or stdin from a file).
 - [ ] b. PR 71, `skills/boss/unask.py:81`: `read_text()` raises `UnicodeDecodeError` on a torn multi-byte record (an interrupted append), before the per-line skip runs; `boss-unask list` and `owner_reports()` in the weekly routine then fail until the file is repaired. VERIFIED on main and reproduced (`UnicodeDecodeError` from `unask.read`). Read bytes and decode per line with `errors="replace"`, or skip lines that do not decode.
