@@ -8,7 +8,7 @@
 #
 # Usage:
 #   boss-lifecycle.sh spawn <project-dir> [name-hint] [--model <name>] [--concierge]
-#   boss-lifecycle.sh claim <pane-id> [name]
+#   boss-lifecycle.sh claim <pane-id> [name] [--concierge]
 #   boss-lifecycle.sh retire <pane-id> [--kill] [--require-idle [--expect-session S] [--expect-last U] [--wait-idle SECONDS [--stop-shells]]
 #   boss-lifecycle.sh restart <pane-id> [--require-idle [--expect-session S] [--expect-last U] [--wait-idle SECONDS] [--stop-shells]]
 #   boss-lifecycle.sh move <pane-id> <new-project-dir>
@@ -315,20 +315,22 @@ cmd_spawn() {
 # Does a process in the pane's tree run with the concierge brief? The role is
 # tmux state and a reboot erases it, so claim --concierge puts it back, but only
 # on a session that really started as a concierge: launch_claude gives exactly
-# that one `--append-system-prompt-file .../concierge-brief.md`, and a flag
-# alone must never give a worker AskUserQuestion.
+# that one `--append-system-prompt-file .../references/concierge-brief.md`, and a
+# flag alone must never give a worker AskUserQuestion. The file name elsewhere in
+# a pane (an editor, a grep, a tool call) is not the flag, so the argument vector
+# is read from /proc and the path must follow the flag directly.
 pane_runs_concierge_brief() {
-  local pid; pid=$(pane_prop "$1" '#{pane_pid}' 2>/dev/null || true)
+  local pid p; pid=$(pane_prop "$1" '#{pane_pid}' 2>/dev/null || true)
   [[ "$pid" =~ ^[0-9]+$ ]] || return 1
-  ps -eo pid=,ppid=,args= | awk -v root="$pid" '
-    { id = $1; par[id] = $2; sub(/^ *[0-9]+ +[0-9]+ */, ""); args[id] = $0 }
-    END {
-      for (q in par) {
-        for (x = q; x != "" && x != 0; x = par[x])
-          if (x == root) { if (args[q] ~ /concierge-brief\.md/) found = 1; break }
-      }
-      exit !found
-    }'
+  for p in $(ps -eo pid=,ppid= | awk -v root="$pid" '
+      { par[$1] = $2 }
+      END { for (q in par) for (x = q; x != "" && x != 0; x = par[x]) if (x == root) { print q; break } }'); do
+    tr '\0' '\n' <"/proc/$p/cmdline" 2>/dev/null | awk '
+      prev == "--append-system-prompt-file" && $0 ~ /\/references\/concierge-brief\.md$/ { found = 1 }
+      { prev = $0 }
+      END { exit !found }' && return 0
+  done
+  return 1
 }
 
 cmd_claim() {
@@ -339,9 +341,9 @@ cmd_claim() {
   if [[ -n "$ROLE" ]]; then
     pane_runs_concierge_brief "$pane" ||
       die "$pane does not run with the concierge brief: not marking it a concierge (a worker must not get AskUserQuestion)"
-    tmux set-option -p -t "$pane" @worker_role "$ROLE"
   fi
   claim_pane "$pane"
+  if [[ -n "$ROLE" ]]; then tmux set-option -p -t "$pane" @worker_role "$ROLE"; fi
   if [[ -n "$name" ]]; then set_agent_name "$pane" "$name" >/dev/null; fi
   local n; n=$(mirror_name "$pane")
   printf 'claimed %s as %s\n' "$pane" "${n:-unnamed}"

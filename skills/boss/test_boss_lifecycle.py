@@ -204,6 +204,9 @@ if sys.argv[1:2] == ["--state"]:
 elif sys.argv[1:2] == ["--set-name"]:
     with open(os.path.join(os.environ["STUB_DIR"], "calls"), "a") as fh:
         fh.write("set-name " + " ".join(sys.argv[2:]) + "\n")
+elif sys.argv[1:2] == ["stamp"]:
+    if os.path.exists(os.path.join(os.environ["STUB_DIR"], "stamp-fails")):
+        sys.exit(1)
 elif sys.argv[1:2] == ["get"]:
     if os.path.exists(os.path.join(os.environ["STUB_DIR"], "get-fails")):
         sys.exit(1)                                   # a crash: no output at all
@@ -709,15 +712,18 @@ class RestartKeepsName(unittest.TestCase):
         self.assertIn("set-option -pu -t %5 @worker_role", (self.tmp / "calls").read_text())
         self.assertIn("set-option -pu -t %5 @custom_title", (self.tmp / "calls").read_text())
 
-    def test_the_concierge_flag_means_spawn_only(self):
-        r = self.run_lifecycle("restart", "%5", "--concierge", row="w-sid\tidle\tpin1")
-        self.assertNotEqual(r.returncode, 0)
+    def test_the_concierge_flag_means_spawn_and_claim_only(self):
+        for cmd in ("restart", "retire", "move"):
+            r = self.run_lifecycle(cmd, "%5", "--concierge", row="w-sid\tidle\tpin1")
+            self.assertNotEqual(r.returncode, 0, cmd)
+            self.assertIn("only applies to spawn and claim", r.stderr, cmd)
         self.assertFalse(self.launches() if (self.tmp / "calls").exists() else [])
 
     def claim_concierge(self, argv):
         """claim --concierge on a pane whose process tree is `argv` (a reboot-shaped case:
         no @worker_role on the pane, the session started with or without the brief)."""
-        kid = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"] + argv)
+        # pane_pid is the pane's shell and the session is its child, the normal shape
+        kid = subprocess.Popen(["bash", "-c", 'python3 -c "import time; time.sleep(30)" "$@"; true', "sh"] + argv)
         try:
             (self.tmp / "panepid").write_text("%d\n" % kid.pid)
             env = dict(os.environ, PATH="%s:%s" % (self.tmp / "bin", os.environ["PATH"]), TMUX="stub",
@@ -733,6 +739,18 @@ class RestartKeepsName(unittest.TestCase):
         r, calls = self.claim_concierge(["--append-system-prompt-file", "/x/references/concierge-brief.md"])
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("set-option -p -t %5 @worker_role concierge", calls)
+
+    def test_claim_concierge_refuses_a_pane_that_only_mentions_the_brief(self):
+        # An editor or a grep on the file is not the flag a concierge starts with.
+        r, calls = self.claim_concierge(["/x/references/concierge-brief.md"])
+        self.assertNotEqual(r.returncode, 0)
+        self.assertNotIn("@worker_role", calls)
+
+    def test_claim_concierge_stamps_nothing_when_the_claim_fails(self):
+        (self.tmp / "stamp-fails").touch()
+        r, calls = self.claim_concierge(["--append-system-prompt-file", "/x/references/concierge-brief.md"])
+        self.assertNotEqual(r.returncode, 0)
+        self.assertNotIn("@worker_role", calls)
 
     def test_claim_concierge_refuses_a_worker(self):
         # A flag alone must not give a worker AskUserQuestion.
