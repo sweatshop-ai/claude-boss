@@ -28,4 +28,12 @@
 - [x] The owner labels a sample of past questions
 - [x] Measured on it: the sample holds too few of the other kind to measure a filter, so none is built
 - [ ] A report in plain words is recorded and honoured in the track, tested in a live session
-- [ ] The weekly routine counts the reports
+- [x] The weekly routine counts the reports (PR for this ticket)
+
+## Left over from review (2026-11-05)
+
+- The live-session test is owed: a temp config has no login and credentials are not copied. It happens the first time the owner makes such a report in a real session, after they update the plugin; read the line `boss-unask` wrote.
+- The weekly windows are `[now-7d, now)`, not tied to the Monday timer: a late run leaves a gap, the next overlaps.
+- `TRACK_RE` in `boss_store.py` ends in `$` and accepts a trailing newline.
+- Kind slugs are free per session; two names for one kind under-count. Look again when real reports exist.
+- Should it also hold outside boss sessions? That would be a rule in `~/.claude/CLAUDE.md`; not changed here, for the owner to decide.
