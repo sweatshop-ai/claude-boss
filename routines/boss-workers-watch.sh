@@ -97,8 +97,9 @@ while IFS=$'\t' read -r id idx cmd path role name; do
         # questions that may themselves read "Do you want to proceed ...?" or
         # offer "Yes, and always ...", so for it only the last lines count, not
         # the scrollback: 7 non-blank lines for the header and option wording
-        # (a worst-case question starts matching at 8), 15 for the permission
-        # footer and trust prompt, which no question carries. Wraps on a narrow
+        # (a question without option descriptions starts matching at 7, the
+        # footer check below covers it), 15 for the permission footer and
+        # trust prompt, which no question carries. Wraps on a narrow
         # pane split a phrase over two lines, so each window is joined into one.
         dialog_cap=$(tr -s '[:space:]' ' ' <<<"$cap")
         dialog_foot="$dialog_cap"
@@ -111,7 +112,9 @@ while IFS=$'\t' read -r id idx cmd path role name; do
             # at the bottom the dialog is the owner's question, whatever its
             # options say, so a question with short options (the "Yes, and
             # always ..." option inside the 7 rows) stays silent.
-            if tail -n 4 <<<"$nb" | tr -s '[:space:]' ' ' | grep -q 'Enter to select'; then
+            # A permission option that quotes the phrase still carries 'Tab to amend'.
+            tail4=$(tail -n 4 <<<"$nb" | tr -s '[:space:]' ' ')
+            if grep -q 'Enter to select' <<<"$tail4" && ! grep -q 'Tab to amend' <<<"$tail4"; then
                 dialog_cap=""
                 dialog_foot=""
             fi
