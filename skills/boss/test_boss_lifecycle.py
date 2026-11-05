@@ -429,9 +429,9 @@ class RequireIdle(unittest.TestCase):
         self.assertEqual(keys, [])
 
     def test_a_pane_claimed_by_another_boss_during_the_wait_gets_no_exit(self):
-        """The owner is read once by resolve_pane, before the wait. Another boss
-        may claim the pane (or --force it) while this one waits; /exit would then
-        stop a session that is no longer ours."""
+        """resolve_pane reads the owner before the wait; the wait reads it again
+        before every status read. Another boss may claim the pane while this one
+        waits; /exit would then stop a session that is no longer ours."""
         (self.tmp / "owners").write_text("%1\n%1\n%9\n")
         r, keys = self.run_waiting(["w-sid\tbusy\tp1\tp1", "w-sid\tidle\tp2\tp2"], wait=self.ROOM,
                                    extra_env={"BOSS_RETRY_EVERY": "1"})
