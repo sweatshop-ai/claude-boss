@@ -92,7 +92,8 @@ def parse(path):
             if key == "status":
                 t["status"] = val
             elif key == "claimed by":
-                t["claimed_by"] = val
+                # a template placeholder is no claimant
+                t["claimed_by"] = "" if val.lower() in ("none", "nobody", "-") else val
         i += 1
     return t
 
@@ -330,7 +331,7 @@ def claim(folder, num, name):
             for e in errors:
                 print("frontier: " + e, file=sys.stderr)
             return 2
-        out = classify(tickets)
+        classify(tickets)
         t = next((t for t in tickets if t["num"] == num), None)
         if t is None:
             print("frontier: no ticket %s" % num, file=sys.stderr)
@@ -347,7 +348,15 @@ def claim(folder, num, name):
         lines = t["path"].read_text(encoding="utf-8").splitlines()
         at = next((i for i, l in enumerate(lines) if FIELD.match(l.strip())
                    and FIELD.match(l.strip()).group(1).lower() == "status"), None)
-        if at is None:
+        had = next((i for i, l in enumerate(lines) if FIELD.match(l.strip())
+                    and FIELD.match(l.strip()).group(1).lower() == "claimed by"), None)
+        if had is not None:
+            lines[had] = line
+            if at is not None:
+                lines[at] = "**Status:** in-progress"
+            else:
+                lines += ["", "**Status:** in-progress"]
+        elif at is None:
             lines += ["", line, "", "**Status:** in-progress"]
         else:
             lines[at:at + 1] = [line, "", "**Status:** in-progress"]
