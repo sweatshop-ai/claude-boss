@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **`test_bin` removes the directories its `Tools` tests make (ticket 44).** A run left 40 `boss-bin-*` directories in `$TMPDIR`; it now leaves none.
+
 ## 0.22.0 — 2026-11-05
 
 - **The efficiency scan takes a worker's own session ref only from a `ListAgents` result (ticket 38).** A worker that
