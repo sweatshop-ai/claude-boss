@@ -53,7 +53,7 @@ class Cfg:
         self.session(sid, at, sock_msgs, cost, bash=bash, **kw)
         return sid
 
-    def session(self, sid, at, sock_msgs, cost, asks=0, bash=None, name=None, until=None, sends=(), cmds=(), listing=()):
+    def session(self, sid, at, sock_msgs, cost, asks=0, bash=None, name=None, until=None, sends=(), cmds=(), listing=(), refused=0):
         """`name`: the start name the hook records. `until`: a last record at that time.
         `sends`: [(T, to)] SendMessage calls. `cmds`: [(T, command)] or [(T, command, False)] Bash calls and
         their result (success unless False). `listing`: [(T, text)] a ListAgents result the session got."""
@@ -84,12 +84,13 @@ class Cfg:
         t = at
         recs.append(dict(type="assistant", timestamp=iso(t), message=dict(
             id="m%s" % sid, usage=dict(input_tokens=cost, output_tokens=0), content=[])))
-        for i in range(asks):
+        for i in range(asks + refused):
             t += 60
             recs.append(dict(type="assistant", timestamp=iso(t), message=dict(id="a%d%s" % (i, sid), usage={}, content=[
                 dict(type="tool_use", id="q%d%s" % (i, sid), name="AskUserQuestion", input={})])))
             recs.append(dict(type="user", timestamp=iso(t + 30), message=dict(content=[
-                dict(type="tool_result", tool_use_id="q%d%s" % (i, sid), content="ok")])))
+                dict(type="tool_result", tool_use_id="q%d%s" % (i, sid), content="ok" if i < asks else "An open question stops your turn. Send it to your concierge Pia",
+                     is_error=i >= asks)])))
         if bash:
             t += 60
             recs.append(dict(type="assistant", timestamp=iso(t), message=dict(id="b" + sid, usage={}, content=[
@@ -497,6 +498,65 @@ class Measures(unittest.TestCase):
         self.assertEqual(m["asks_per_day"], 1.0)
         self.assertEqual(m["ci_waits"], 1)
         self.assertGreaterEqual(m["ci_s"], 590)
+
+
+class ConciergeQuestions(unittest.TestCase):
+    """The concierge asks the owner for the boss; it is a worker session, not a boss."""
+
+    def test_a_concierge_that_asks_three_questions_counts_three(self):
+        c = Cfg()
+        c.goal("alpha-x")
+        c.worker(NOW - DAY, [(NOW - DAY + 20, "uds:/run/cc-socks/boss.sock", "ASK q1: which?")], name="Pia", asks=3, until=NOW - DAY + 3600)
+        c.boss("alpha-x", [], NOW - DAY, sends=[(NOW - DAY + 60, "Pia")], until=NOW - DAY + 3600)
+        idx, _, _ = week(c.dir)
+        self.assertEqual(core.measure_track(idx, "alpha-x", NOW - 7 * DAY, NOW)["asks"], 3)
+
+    def test_a_question_the_boss_asked_itself_counts_once_beside_the_concierge(self):
+        c = Cfg()
+        c.goal("alpha-x")
+        c.worker(NOW - DAY, [(NOW - DAY + 20, "uds:/run/cc-socks/boss.sock", "ASK q1: which?")], name="Pia", asks=3, until=NOW - DAY + 3600)
+        c.boss("alpha-x", [], NOW - DAY, asks=2, sends=[(NOW - DAY + 30, "Pia")], until=NOW - DAY + 3600)
+        idx, _, _ = week(c.dir)
+        m = core.measure_track(idx, "alpha-x", NOW - 7 * DAY, NOW)
+        self.assertEqual(m["asks"], 5)
+
+    def test_a_question_the_guard_refused_is_not_counted_again_when_the_concierge_asks_it(self):
+        c = Cfg()
+        c.goal("alpha-x")
+        c.worker(NOW - DAY, [(NOW - DAY + 20, "uds:/run/cc-socks/boss.sock", "ASK q1: which?")], name="Pia", asks=1, until=NOW - DAY + 3600)
+        c.boss("alpha-x", [], NOW - DAY, refused=1, sends=[(NOW - DAY + 30, "Pia")], until=NOW - DAY + 3600)
+        idx, _, _ = week(c.dir)
+        self.assertEqual(core.measure_track(idx, "alpha-x", NOW - 7 * DAY, NOW)["asks"], 1)
+
+    def test_a_question_the_owner_dismissed_still_counts(self):
+        c = Cfg()
+        c.goal("alpha-x")
+        c.boss("alpha-x", [], NOW - DAY, asks=1, until=NOW - DAY + 3600)
+        p = c.dir / "projects" / "p"
+        f = next(p.glob("boss*.jsonl"))
+        lines = [json.loads(l) for l in f.read_text().splitlines()]
+        for r in lines:
+            for b in (r.get("message") or {}).get("content") or []:
+                if isinstance(b, dict) and b.get("type") == "tool_result": b["is_error"] = True; b["content"] = "rejected"
+        f.write_text("".join(json.dumps(r) + "\n" for r in lines))
+        idx, _, _ = week(c.dir)
+        self.assertEqual(core.measure_track(idx, "alpha-x", NOW - 7 * DAY, NOW)["asks"], 1)
+
+    def test_a_named_session_that_is_not_the_concierge_is_not_an_asker(self):
+        c = Cfg()
+        c.goal("alpha-x")
+        c.worker(NOW - DAY, [], name="Tove", asks=4, until=NOW - DAY + 3600)
+        c.boss("alpha-x", [], NOW - DAY, sends=[(NOW - DAY + 30, "Tove")], until=NOW - DAY + 3600)
+        idx, _, _ = week(c.dir)
+        self.assertEqual(core.measure_track(idx, "alpha-x", NOW - 7 * DAY, NOW)["asks"], 0)
+
+    def test_a_concierge_question_outside_the_window_is_not_counted(self):
+        c = Cfg()
+        c.goal("alpha-x")
+        c.worker(NOW - DAY, [(NOW - DAY + 20, "uds:/run/cc-socks/boss.sock", "ASK q1: which?")], name="Pia", asks=3, until=NOW - DAY + 3600)
+        c.boss("alpha-x", [], NOW - DAY, sends=[(NOW - DAY + 60, "Pia")], until=NOW - DAY + 3600)
+        idx, _, _ = week(c.dir)
+        self.assertEqual(core.measure_track(idx, "alpha-x", NOW - 7 * DAY, NOW - DAY + 50)["asks"], 0)
 
 
 class Verdict(unittest.TestCase):

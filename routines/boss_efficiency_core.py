@@ -78,6 +78,8 @@ COST_WEIGHT = dict(i=1.0, cw=1.25, cr=0.1, o=5.0)           # cost units per tok
 PHASES = ("build", "fix", "sub_rev", "sub_oth", "boss")
 STATES = ("work", "fix", "test", "review", "ci", "bg_other", "ask", "bossact", "parked", "nobody")
 
+GUARD_REFUSAL = "Send it to your concierge"          # boss-guard.py's deny reason
+ASK_MSG = re.compile(r"\s*ASK \S+:")
 FROM = re.compile(r'<cross-session-message from="([^"]+)"')
 DISP = re.compile(r"Boss dispatch from ([^,\n]+), track [`'\"]?([A-Za-z0-9._-]+)")
 NOTIF = re.compile(r"<tool-use-id>(toolu_\w+)</tool-use-id>")
@@ -216,7 +218,8 @@ def scan_session(path, tracks=()):
     path = str(path)
     recs, tools, notif, msgs = [], {}, {}, {}
     out = dict(sid=os.path.basename(path)[:-6], boss_regs=[], asks=[], xmsgs=[], dispatches=[], subs=[],
-               name=None, refs=[], sends=[], heard=[], done_commits=[], goal_status=[])
+               name=None, refs=[], sends=[], heard=[], done_commits=[], goal_status=[], concierge=False)
+    ask_at = {}                                   # AskUserQuestion tool_use id -> time, dropped if the call fails
     pending_marks = {}                            # tool_use id -> goal marks, kept once the command succeeds
     tracks = set(tracks)
     alt = "|".join(re.escape(t) for t in sorted(tracks, key=len, reverse=True))
@@ -245,7 +248,7 @@ def scan_session(path, tracks=()):
                     tools[b["id"]] = dict(s=T, e=None, cat=cat_tool(b["name"], inp), name=b["name"],
                                           bg=bool(inp.get("run_in_background")) or b["name"] == "Monitor",
                                           cmd=(inp.get("command") or "")[:260])
-                    if b["name"] == "AskUserQuestion": out["asks"].append(T)
+                    if b["name"] == "AskUserQuestion": out["asks"].append(T); ask_at[b["id"]] = T
                     if b["name"] == "SendMessage" and isinstance(inp.get("to"), str): out["sends"].append((T, *_recipient(inp["to"])))
                     if b["name"] == "Bash":
                         c = inp.get("command", "") or ""
@@ -264,6 +267,8 @@ def scan_session(path, tracks=()):
             for b in content:
                 if isinstance(b, dict) and b.get("type") == "tool_result":
                     is_result = True
+                    if b.get("tool_use_id") in ask_at and GUARD_REFUSAL in json.dumps(b.get("content")):
+                        out["asks"].remove(ask_at.pop(b["tool_use_id"]))      # refused by the guard: the owner never saw it
                     if b.get("tool_use_id") in pending_marks and not b.get("is_error"):
                         out["goal_status"].extend(pending_marks.pop(b["tool_use_id"]))     # a failed command marks nothing
                     x = tools.get(b.get("tool_use_id"))
@@ -276,7 +281,8 @@ def scan_session(path, tracks=()):
             tx = text_of(m)
             f = FROM.search(tx[:400])
             if f:
-                body = tx[tx.find(">") + 1:tx.find(">") + 900]
+                body = tx[tx.find(">", f.end()) + 1:tx.find(">", f.end()) + 900]
+                if ASK_MSG.match(body): out["concierge"] = True       # the boss sends it `ASK <id>:`
                 g = DISP.search(body)
                 g3 = None if g else (disp3.search(body) if disp3 else None)
                 trk = (g.group(2).rstrip(".`") if g else g3.group(1) if g3 else None)
@@ -519,6 +525,7 @@ def measure_track(index, track, start, end):
     days = (end - start) / 86400          # a rate stays per day of the window, not of the shortened track
     end = index.clip_end(track, end)
     ev, wh, tok = [], collections.Counter(), collections.Counter()
+    asks = 0
     spans = []
     ci_waits = 0
     for s, a, b in index.workers.get(track, []):
@@ -536,7 +543,7 @@ def measure_track(index, track, start, end):
         for sub in s["subs"]:
             if sub["s"] and a <= sub["s"] < b: tok["sub_rev" if sub["review"] else "sub_oth"] += sub["cost"]
         ci_waits += sum(1 for x, y in s["ci_waits"] if a <= x < b)
-    asks = 0
+        if s["concierge"]: asks += sum(1 for T in s["asks"] if a <= T < b)   # it asks the owner for the boss
     for s, a, b in index.bosses.get(track, []):
         a, b = max(a, start), min(b, end)
         if b <= a: continue
