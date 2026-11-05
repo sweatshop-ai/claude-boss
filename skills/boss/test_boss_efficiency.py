@@ -691,6 +691,15 @@ class UnsentAlert(unittest.TestCase):
         self.assertIn("build 50% against 80%", tried[0])
         self.assertEqual(self.state(c)["unsent"], [])
 
+    def test_a_rerun_of_the_week_that_gets_through_drops_its_unsent_entry(self):
+        c = Cfg()
+        c.goal("alpha-x")
+        self.run_week(c, NOW, 0.8, [])
+        self.run_week(c, NOW + 7 * DAY, 0.5, [False])
+        rc, tried = self.run_week(c, NOW + 7 * DAY, 0.5, [True, True])           # the same week again
+        self.assertEqual(self.state(c)["unsent"], [])
+        self.assertEqual(self.run_week(c, NOW + 14 * DAY, 0.5, [])[1], [])        # nothing left to repeat
+
     def test_an_unsent_alert_keeps_failing_the_run_until_it_goes_out(self):
         c = Cfg()
         c.goal("alpha-x")
@@ -762,6 +771,16 @@ class MissedRun(unittest.TestCase):
     def test_a_scan_killed_by_the_cap_sends_an_alert_and_still_fails(self):
         r = subprocess.run([str(BODY)], env=self.env(**self.slow_nice()), capture_output=True, text=True)
         self.assertEqual(r.returncode, 124, r.stdout + r.stderr)
+        self.assertEqual(len(self.got), 1, self.got)
+        self.assertIn("timed out", urllib.parse.unquote_plus(self.got[0]))
+
+    def test_a_scan_that_ignores_the_first_signal_is_alerted_too(self):
+        d = Path(tempfile.mkdtemp())
+        (d / "nice").write_text("#!/bin/sh\ntrap '' TERM\nsleep 30\n")
+        (d / "nice").chmod(0o755)
+        r = subprocess.run([str(BODY)], env=self.env(PATH="%s:%s" % (d, os.environ["PATH"]), BOSS_EFFICIENCY_TIMEOUT="1",
+                                                     BOSS_EFFICIENCY_KILL="1"), capture_output=True, text=True)
+        self.assertEqual(r.returncode, 137, r.stdout + r.stderr)
         self.assertEqual(len(self.got), 1, self.got)
         self.assertIn("timed out", urllib.parse.unquote_plus(self.got[0]))
 
