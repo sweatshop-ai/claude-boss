@@ -28,7 +28,14 @@
   The P17 proof asks for the resolved path of what runs, not only an import. `bin/boss-link` rewrites
   the installed systemd units from the current templates (so `MemoryMax=1G` reaches installs that
   predate it), only where the unit file already exists, never enabling or starting anything; it
-  runs `systemctl --user daemon-reload` after a rewrite. A replaced unit is first copied to `<unit>.bak-<date-time>`; a deliberate edit belongs in a drop-in (`<unit>.d/override.conf`), which is left alone.
+  runs `systemctl --user daemon-reload` after a rewrite. A replaced unit is first copied to `<unit>.bak-<YYYY-MM-DD-HHMMSS>`, here and in `install.sh` (one helper, `bin/boss-unit-lib.sh`, which locks against parallel session starts, never overwrites an earlier copy and leaves a unit alone when no copy can be made); old copies are not pruned. A deliberate edit belongs in a drop-in (`<unit>.d/override.conf`), which is left alone.
+
+- **A rule for a worker past 250k (ticket 03).** `CTX-OVER` no longer reads "overdue, ask for the
+  boundary now". The owner's two tests apply: never restart a worker waiting on CI or merging with its
+  PR open; otherwise ask how many turns are left and restart at the next boundary if more than about
+  35, review fixes included (the estimate wins over the list). Nothing enforces the flag, it only
+  shows in `list`, so the boss has to ask. New `routines/ctx_over_measure.py` reads that, per worker, into a private file
+  under `<config>/pm/`.
 
 - **The P17 dispatch text no longer asks for the database URL.** A URL can carry `user:pass@`, and the
   worker's report is copied into the boss's messages and transcripts. The worker now reports the
