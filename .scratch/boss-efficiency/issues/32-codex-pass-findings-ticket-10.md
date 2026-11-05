@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Claimed by:** nobody
+**Claimed by:** Solveig (part 1: PR 50, PR 60, PR 59 lines)
 
 **Status:** ready
 
