@@ -19,11 +19,12 @@
 - The weekly efficiency routine (ticket 04) counts the reports and, when one kind recurs, proposes a rule for the skill. A rule still goes through the normal review; no question is filtered automatically.
 - These reports are labels from the owner, given when he is in the moment, so Jev can be measured on them later if enough pile up.
 
-**Blocked by:** None (can start immediately)
+**Blocked by:**
+- External: the first time the owner makes such a report in a real session, after they update the plugin (ticket 21); Anton reads the line it wrote
 
 **Claimed by:** Mira 2026-11-05 09:13
 
-**Status:** in-progress
+**Status:** waiting. Merged as 5afec09 (PR 71); the live test is the owner's first real report
 
 - [x] The owner labels a sample of past questions
 - [x] Measured on it: the sample holds too few of the other kind to measure a filter, so none is built
