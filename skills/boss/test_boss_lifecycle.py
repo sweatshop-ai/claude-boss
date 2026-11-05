@@ -211,7 +211,14 @@ elif sys.argv[1:2] == ["get"]:
     after = os.path.join(d, "name-after")
     name = (open(after).read().strip() if os.path.exists(os.path.join(d, "launched"))
             and os.path.exists(after) else "Wanda")
-    known = {"name": name, "session": "w-sid", "owner": "-",
+    owner = "-"
+    oseq, ocount = os.path.join(d, "owners"), os.path.join(d, "owner-reads")
+    if os.path.exists(oseq):                       # one owner per read, the last one repeats
+        orows = open(oseq).read().splitlines()
+        n = int(open(ocount).read()) if os.path.exists(ocount) else 0
+        open(ocount, "w").write(str(n + 1))
+        owner = orows[min(n, len(orows) - 1)]
+    known = {"name": name, "session": "w-sid", "owner": owner,
              "waiting_for": os.environ.get("STUB_WAITING", "-"),
              "status": row[1] if len(row) > 1 else "-"}
     print("\t".join(known.get(f, "-") for f in sys.argv[3:]))
@@ -277,7 +284,7 @@ class RequireIdle(unittest.TestCase):
     def test_leftover_background_work_on_an_idle_worker_is_stopped(self):
         """Idle, same input as before /exit: the dialog is about an orphaned
         background task (a curl, a watcher), not a turn. Confirm 'Exit and stop tasks'."""
-        r, keys = self.run_retire("w-sid\tidle\tpin1", exits=False, dialog=True)
+        r, keys = self.run_retire("w-sid\tidle\tpin1\tpin1", exits=False, dialog=True)
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(keys, ["send-keys -t %5 /exit Enter", "send-keys -t %5 Enter"])
         self.assertIn("curl -s https://example.org/slow", r.stdout + r.stderr)
@@ -421,6 +428,48 @@ class RequireIdle(unittest.TestCase):
         self.assertIn("still busy after 1 s", r.stderr)          # --force does not relax --require-idle
         self.assertEqual(keys, [])
 
+    def test_a_pane_claimed_by_another_boss_during_the_wait_gets_no_exit(self):
+        """resolve_pane reads the owner before the wait; the wait reads it again
+        before every status read. Another boss may claim the pane while this one
+        waits; /exit would then stop a session that is no longer ours."""
+        (self.tmp / "owners").write_text("%1\n%1\n%9\n")
+        r, keys = self.run_waiting(["w-sid\tbusy\tp1\tp1", "w-sid\tidle\tp2\tp2"], wait=self.ROOM,
+                                   extra_env={"BOSS_RETRY_EVERY": "1"})
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("changed owner", r.stderr)
+        self.assertEqual(keys, [])
+
+    def test_a_claim_between_resolve_pane_and_the_first_owner_read_is_still_refused(self):
+        (self.tmp / "owners").write_text("%1\n%9\n")
+        r, keys = self.run_retire("w-sid\tidle\tpin1\tpin1")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("belongs to another boss", r.stderr)
+        self.assertEqual(keys, [])
+
+    def test_a_pane_that_keeps_its_owner_through_the_wait_is_retired(self):
+        (self.tmp / "owners").write_text("%1\n")
+        r, keys = self.run_waiting(["w-sid\tbusy\tp1\tp1", "w-sid\tidle\tp2\tp2"], wait=self.ROOM)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(keys, ["send-keys -t %5 /exit Enter"])
+
+    def test_with_no_transcript_pin_after_the_dialog_opens_the_turn_cannot_be_ruled_out(self):
+        """--state prints `-` for both pins when the transcript is missing, so
+        `$past2 == $past` held and a turn started in the gap went unseen. Doubt
+        refuses: the dialog is closed with one Escape and nothing is confirmed."""
+        r, keys = self.run_retire("w-sid\tidle\t-\t-", exits=False, dialog=True)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("no transcript pin", r.stderr)
+        self.assertEqual(keys, ["send-keys -t %5 /exit Enter", "send-keys -t %5 Escape"])
+
+    def test_the_last_sleep_of_a_wait_is_the_time_left_not_the_whole_interval(self):
+        import time
+        t0 = time.monotonic()
+        r, keys = self.run_retire("w-sid\tbusy\tp1\tp1", "--wait-idle", "1",
+                                  extra_env={"BOSS_RETRY_EVERY": "20"})
+        self.assertEqual(r.returncode, 1)
+        self.assertLess(time.monotonic() - t0, 10)
+        self.assertEqual(keys, [])
+
     def test_a_pin_cannot_hold_across_a_wait_and_the_refusal_says_so(self):
         r, keys = self.run_waiting(["w-sid\tbusy\tp1\tp1", "w-sid\tidle\tp2\tp2"], "--expect-last", "p1")
         self.assertEqual(r.returncode, 1)
@@ -505,8 +554,8 @@ class RequireIdle(unittest.TestCase):
         self.assertEqual(keys.count("send-keys -t %5 /exit Enter"), 1)
 
     def test_a_turn_in_the_gap_gets_one_escape_for_the_dialog(self):
-        (self.tmp / "row2").write_text("w-sid\tbusy\tpin2\n")
-        r, keys = self.run_retire("w-sid\tidle\tpin1", exits=False, dialog=True)
+        (self.tmp / "row2").write_text("w-sid\tbusy\tpin2\tpin2\n")
+        r, keys = self.run_retire("w-sid\tidle\tpin1\tpin1", exits=False, dialog=True)
         self.assertEqual(r.returncode, 1)
         self.assertIn("a turn started", r.stderr)
         self.assertEqual(keys, ["send-keys -t %5 /exit Enter", "send-keys -t %5 Escape"])

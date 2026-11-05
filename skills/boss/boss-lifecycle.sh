@@ -379,7 +379,14 @@ refuse_busy() {
 # Escapes abort ANY busy turn, so this path sends none before /exit. What is
 # left is the gap between the read below and the keystroke.
 retire_require_idle() {
-  local pane=$1 row sid st pin past over
+  local pane=$1 row sid st pin past over owner0 owner1
+  # resolve_pane checked the owner once, before any wait. Read it again before
+  # every status read, so the last owner read comes BEFORE the last status read
+  # and adds nothing to the gap between "idle" and the keystroke. Another boss
+  # may claim the pane meanwhile; /exit would then stop a session that is not
+  # ours (the same rule as resolve_pane: foreign and not --force, or changed).
+  owner0=$(pane_owner "$pane") || exit 1
+  owner1=$owner0
   row=$(python3 "$PANES_PY" --state "$pane" 2>/dev/null) || true
   IFS=$'\t' read -r sid st pin past over <<<"$row"
   # --wait-idle: a busy worker is read again on a timer instead of being
@@ -392,7 +399,9 @@ retire_require_idle() {
     printf '%s is %s: retrying every %s s for up to %s s, nothing is typed meanwhile\n' \
       "$pane" "$st" "$RETRY_EVERY" "$WAIT_IDLE" >&2
     while still_busy "$st" "$over" && (( SECONDS - t0 < WAIT_IDLE )); do
-      sleep "$RETRY_EVERY"
+      # The last sleep is the time left, so a wait of N s ends at N s.
+      sleep "$(awk -v e="$RETRY_EVERY" -v l=$((WAIT_IDLE - (SECONDS - t0))) 'BEGIN { print (l < 0) ? 0 : (l < e) ? l : e }')"
+      owner1=$(pane_owner "$pane") || exit 1
       row=$(python3 "$PANES_PY" --state "$pane" 2>/dev/null) || true
       IFS=$'\t' read -r sid st pin past over <<<"$row"
     done
@@ -420,6 +429,10 @@ retire_require_idle() {
     printf '%s: its turn is over and background work is still running; --stop-shells: the restart will stop it (the list follows)\n' \
       "$pane" >&2
   fi
+  [[ "$owner1" == "$owner0" ]] ||
+    die "$pane changed owner during the check (was ${owner0:-nobody}, now ${owner1:-nobody}): not retiring"
+  [[ -z "$owner1" || -z "$BOSS_PANE" || "$owner1" == "$BOSS_PANE" || -n "$FORCE" ]] ||
+    die "$pane belongs to another boss (pane $owner1), not you ($BOSS_PANE): not retiring"
   tmux send-keys -t "$pane" '/exit' Enter
   wait_for_cmd "$pane" "$SHELL_CMDS" "${BOSS_EXIT_WAIT:-15}" && return 0
   # The screen goes into a variable first: with `| grep -q` under pipefail, grep
@@ -434,6 +447,13 @@ retire_require_idle() {
     # idle worker that had background work left.
     local sid2 st2 pin2 past2 rc=1
     IFS=$'\t' read -r sid2 st2 pin2 past2 _ <<<"$(python3 "$PANES_PY" --state "$pane" 2>/dev/null)"
+    # Both pins must be real: with no transcript --state prints `-` twice, and
+    # "no change" between two blanks proves nothing. Doubt refuses, as at
+    # --expect-last: the dialog is closed with one Escape below.
+    if [[ -z "$past" || "$past" == "-" ]]; then
+      tmux send-keys -t "$pane" Escape
+      die "$pane: no transcript pin to compare after /exit, so a turn in the gap cannot be ruled out; the exit dialog was closed with one Escape and the worker left running"
+    fi
     if [[ "$sid2" == "$sid" && "$st2" =~ ^(idle|waiting|shell)$ && "$past2" == "$past" ]]; then
       rc=0; stop_leftover_background "$pane" || rc=$?
     fi
