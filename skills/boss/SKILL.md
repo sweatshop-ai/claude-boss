@@ -316,8 +316,8 @@ dispatch the remainder with the handoff as its input. At **250k** it shows
 
 A restart costs about 425k units of orientation and a turn above 250k costs 39k
 against 19k at 100–150k, so it pays after about 35 turns. The flag shows in `list`
-and nothing else acts on it: the boss has to ask. A turn here is one model message, so each tool call is its own turn, the unit of the
-35 and of the costs above. The measure is
+and nothing else acts on it: the boss has to ask. A turn here is one model message (one assistant message id), so calls batched in
+one message are one turn: the unit of the 35 and of the costs above. The measure is
 `routines/ctx_over_measure.py`.
 
 `list` also flags `heavy` at 60k and `RECYCLE` at 90k cost per turn; under this
@@ -891,7 +891,8 @@ Parse `$ARGUMENTS`: empty or `status` → **A** · `dispatch <task> [worker]` �
    workflow that runs an AI agent) and record it on the PR; you may raise it, never lower
    it; in doubt it is sensitive. Over 500 added lines: split first. Findings that are only
    tests, docs, style or far-fetched cases become tickets and the review ends; the PR
-   merges on its last GO."* For a branch that deploys nothing, add: *"Run only the test files your
+   merges on its last GO. The standards review (`code-review`) runs once per PR,
+   not on every head."* For a branch that deploys nothing, add: *"Run only the test files your
    change touches; the CI runs the full suite (P15)."* When that CI runs on a
    small shared runner pool, add P16's three push rules word for word. For a task
    that runs tests, a script or the app, add (P17): *"Before you trust a run, prove it hits

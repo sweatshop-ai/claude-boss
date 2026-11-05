@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **`restart --require-idle` re-checks the owner before `/exit`, refuses a dialog it cannot compare, and ends its wait on time (ticket 32, part 1).**
+  Codex found on the merged PR 50 that pane ownership was read once, before the `--wait-idle` loop, so a
+  boss that claimed or `--force`d the pane during the wait was sent `/exit` by the stale command; the owner
+  is now read again just before `/exit`. With no transcript both pins read `-`, "no change" held between two
+  blanks and a turn in the gap went unseen: that case now closes the exit dialog with one Escape and leaves
+  the worker running (refuse on doubt). The last sleep of a wait is the time left, not the whole interval.
+  The boss and team skills now define a turn as one model message, matching `ctx_over_measure.py`, and the
+  self-contained dispatch says `code-review` runs once per PR.
+
 - **The guard no longer waves through three commands, and the version check no longer counts an orphan (ticket 33).**
   `sed -i 's/a/b/;e cmd;s/x/y/'` passed as a plain substitution, `wc --files0-from=-` passed as a plain filter, and
   `cd <owned>/missing && ...; <anything>` kept the owned directory past the `;`. All three were already so before
