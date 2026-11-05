@@ -4,13 +4,14 @@
 
 **Blocked by:** None (can start immediately)
 
-**Claimed by:** Britt 2026-11-05 (from Elke, retired)
+**Claimed by:** none
 
-**Status:** in-progress (Codex out of tokens again until 2:43 PM on 2026-11-05)
+**Status:** in-progress (only library-mcp 227 is owed; Codex out of tokens until 2026-11-11 08:36)
 
 **Done 2026-11-05 (Britt):** claude-boss 58, 59, 60, 61, 62, 63, 50, 48, 49; findings in ticket 32.
 **Done 2026-11-05 (Britt, second run, 09:47-10:23):** claude-boss 52, 67, 71, 69, 65, 66, 70, 68, 51; findings of 71 and 69 in ticket 37.
-**Still owed:** claude-boss 57 (exit 7 at 10:23, usage limit again, 'try again at 2:43 PM'), sheaf 195 and 196, library-mcp 227 (thinkingtoo/tiroir-library-mcp, merge e20a4c4). The name grep of 57 found no hit.
+**Done 2026-11-05 (Britt, third run, after 14:43):** claude-boss 57 and 72, sheaf 195 and 196; the finding of 57 is in ticket 38.
+**Still owed:** library-mcp 227 (thinkingtoo/tiroir-library-mcp, merge e20a4c4): Codex hit its usage limit again at 15:00 (exit 7, 'try again at Nov 11th, 2026 8:36 AM'). The name grep of it found no hit.
 
 - [ ] The output is in a file and the verdict on the PR
 - [ ] Every finding answered: fixed, ticket, or rejected with the reason
