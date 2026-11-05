@@ -17,6 +17,7 @@ import unittest
 from pathlib import Path
 
 GUARD = Path(__file__).resolve().parent / "boss-guard.py"
+sys.path.insert(0, str(GUARD.parent.parent.parent / "routines"))
 
 
 class GuardCase(unittest.TestCase):
@@ -477,7 +478,6 @@ class QuestionsGoThroughTheConcierge(GuardCase):
 
     def test_the_refusal_carries_the_phrase_the_efficiency_measure_looks_for(self):
         # boss_efficiency_core drops a refused ask by this phrase; rewording the reason must fail here.
-        sys.path.insert(0, str(GUARD.parent.parent.parent / "routines"))
         import boss_efficiency_core
         self.session("c-sid", "%6", "Odile")
         self.panes(self.BOSS, "%6\tboss:0.1\t%1\tclaude\t/w\tOdile\tconcierge")

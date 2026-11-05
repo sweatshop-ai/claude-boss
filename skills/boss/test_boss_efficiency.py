@@ -545,6 +545,33 @@ class ConciergeQuestions(unittest.TestCase):
         idx, _, _ = week(c.dir)
         self.assertEqual(core.measure_track(idx, "alpha-x", NOW - 7 * DAY, NOW)["states"]["ask"], 30)
 
+    def test_an_ask_naming_a_track_on_a_socket_with_no_vote_is_still_placed(self):
+        c = Cfg()
+        c.goal("alpha-x")
+        c.worker(NOW - DAY, [(NOW - DAY + 20, "uds:/run/cc-socks/new.sock", "ASK q1: see pm/alpha-x.md")], name="Pia", asks=1, until=NOW - DAY + 3600)
+        c.boss("alpha-x", [], NOW - DAY, sends=[(NOW - DAY + 60, "Pia")], until=NOW - DAY + 3600)
+        idx, wk, _ = week(c.dir)
+        self.assertEqual(idx.tracks(), ["alpha-x"])
+        self.assertEqual(core.measure_track(idx, "alpha-x", NOW - 7 * DAY, NOW)["asks"], 1)
+
+    def test_two_bosses_alive_together_leave_the_vote_to_decide_whatever_the_scan_order(self):
+        c = Cfg()
+        sock = "uds:/run/cc-socks/boss.sock"
+        c.goal("alpha-x"); c.goal("beta-y")
+        seed(c, sock=sock, track="alpha-x", at=NOW - 3 * DAY)
+        t0 = NOW - DAY
+        c.boss("alpha-x", [], t0 - 3600, until=t0 + 7200)                  # owns the socket, stays
+        c.boss("alpha-x", [], t0 - 3600, until=t0 + 7200,                  # another boss that moves away
+               cmds=[(t0 - 3600, "boss-marker register alpha-x"), (t0 - 600, "boss-marker register beta-y")])
+        c.worker(t0, [(t0 + 20, sock, "ASK q1: which?")], name="Pia", asks=1, until=t0 + 3600)
+        got = set()
+        for order in (sorted, lambda x: sorted(x, reverse=True)):
+            sessions = [core.scan_session(p, ["alpha-x", "beta-y"]) for p in order((c.dir / "projects" / "p").glob("*.jsonl"))]
+            idx = core.Index(sessions, core.markers(c.dir), core.resolve_sockets(sessions))
+            got.add((core.measure_track(idx, "alpha-x", NOW - 7 * DAY, NOW)["asks"],
+                     core.measure_track(idx, "beta-y", NOW - 7 * DAY, NOW)["asks"]))
+        self.assertEqual(got, {(1, 0)})
+
     def test_a_question_the_guard_refused_is_not_counted_again_when_the_concierge_asks_it(self):
         c = Cfg()
         c.goal("alpha-x")
