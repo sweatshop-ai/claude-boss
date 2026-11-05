@@ -144,5 +144,58 @@ class WatchCase(unittest.TestCase):
         self.assertIn("permission-prompt", second)
 
 
+LIFECYCLE = Path(__file__).resolve().parent / "boss-lifecycle.sh"
+
+
+@unittest.skipUnless(shutil.which("tmux"), "tmux is not installed")
+class ConciergeMarkCase(unittest.TestCase):
+    """The pane mark itself: boss-lifecycle.sh sets @worker_role, the watchdog's own
+    list-panes format reads it. Both run against a tmux server on a private
+    socket, so no pane of this machine is touched; `claude` is a stub that draws
+    a concierge's question."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="boss-mark-test-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        (self.tmp / "proj").mkdir()
+        (self.tmp / "screen.txt").write_text(QUESTION)
+        stub = self.tmp / "claude"
+        stub.write_text('#!/bin/bash\ncat "%s"\nexec -a claude sleep 120\n' % (self.tmp / "screen.txt"))
+        stub.chmod(0o755)
+        # TMUX_TMPDIR keeps even a bare `tmux` off the real server's socket.
+        self.env = {k: v for k, v in os.environ.items() if not k.startswith("TMUX")}
+        self.env.update(TMUX_TMPDIR=str(self.tmp), CLAUDE_CONFIG_DIR=str(self.tmp / "cfg"),
+                        BOSS_CLAUDE_CMD=str(stub), WATCH_STATE_DIR=str(self.tmp / "state"), DRY_RUN="1")
+        self.addCleanup(subprocess.run, ["tmux", "kill-server"], env=self.env, capture_output=True)
+        self.boss = self.tmux("new-session", "-d", "-x", "100", "-y", "30", "-P", "-F", "#{pane_id}")
+        self.tmux("set-option", "-g", "default-command", "bash --norc --noprofile")
+        self.env["TMUX"] = self.tmux("display-message", "-p", "#{socket_path},#{pid},0")
+        self.env["TMUX_PANE"] = self.boss
+
+    def tmux(self, *args):
+        env = {k: v for k, v in self.env.items() if k not in ("TMUX", "TMUX_PANE")}
+        r = subprocess.run(["tmux", "-f", "/dev/null", *args], env=env, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return r.stdout.strip()
+
+    def watch(self):
+        env = {k: v for k, v in self.env.items() if k not in ("TMUX", "TMUX_PANE")}
+        r = subprocess.run(["bash", str(SCRIPT)], env=env, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return r.stdout
+
+    def test_a_pane_marked_by_the_lifecycle_script_is_read_as_a_concierge_by_the_watchdog(self):
+        r = subprocess.run(["bash", str(LIFECYCLE), "spawn", str(self.tmp / "proj"), "--concierge"],
+                           env=self.env, capture_output=True, text=True, timeout=90)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        pane = r.stdout.split()[0]
+        self.assertIn("Merge PR 46 now?", self.tmux("capture-pane", "-p", "-t", pane))
+        self.assertEqual("".join(self.watch() for _ in range(3)), "")
+        # The same pane without the mark alerts, so the silence above came from the mark.
+        self.tmux("set-option", "-pu", "-t", pane, "@worker_role")
+        shutil.rmtree(self.tmp / "state", True)
+        self.assertIn("permission-prompt", "".join(self.watch() for _ in range(2)))
+
+
 if __name__ == "__main__":
     unittest.main()
