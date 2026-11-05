@@ -23,8 +23,10 @@ Classes, from the audit's codebook. a: a security property broken, data loss, or
 
 **Claimed by:** Birgit 2026-11-05 00:45
 
-**Status:** in-progress
+**Status:** done
+
+PR 59 merged as 1e6fc20 (squash, head 1130547). Reviews: `reviews/pr-59-*.md`. Two readings added to make the rule run, reported to the owner: the class a exception when rounds run out, and "the PR closes" read as "the review ends, the PR merges on its last GO". Codex follow-up owed from 04:38.
 
 - [x] Grilling round settled: what counts as sensitive, and who decides it for a PR
-- [ ] The rules are in the skill and quoted in the dispatch text
-- [ ] Reverts and post-merge defects are compared on the PRs that took the short path, before the path is widened
+- [x] The rules are in the skill and quoted in the dispatch text (PR 59, P6 and Phase B step 4; reviews `reviews/pr-59-*.md`)
+- Moved, not ticked: the comparison of reverts and post-merge defects on the PRs that took the short path can only be made once such PRs exist and have aged. It is now ticket 27, waiting on time. Ticket 02 closes on the rules being in place.
