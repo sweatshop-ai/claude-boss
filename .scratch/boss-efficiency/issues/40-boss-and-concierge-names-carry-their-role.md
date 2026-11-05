@@ -14,15 +14,17 @@ Why (the owner, 2026-11-05): a question arrived from a pane called Fatima and th
 | The boss's own tmux pane | pane title Claude Code sets | not changed: nothing here shows a name for it |
 | `boss-lifecycle.sh list`, `fleet.py` panes, registry, hooks | the bare name | not changed, on purpose; a test holds it |
 
-- [ ] The status line shows `Name [boss]`, `Name [concierge]`, bare name otherwise; a boss or concierge with no marker or role shows the bare name.
-- [ ] The pane title carries the role for a concierge; `@worker_name` and every parser stay bare.
-- [ ] FleetView tags a concierge; `name` is untouched.
-- [ ] A test in each repo: a label never reaches anything that resolves a name.
+- [x] The status line shows `Name [boss]`, `Name [concierge]`, bare name otherwise; a boss or concierge with no marker or role shows the bare name.
+- [x] The pane title carries the role for a concierge; `@worker_name` and every parser stay bare.
+- [x] FleetView tags a concierge; `name` is untouched.
+- [x] A test in each repo: a label never reaches anything that resolves a name.
 
 **Blocked by:** None (can start immediately)
 
 **Claimed by:** Vikram 2026-11-05
 
-**Status:** in progress
+**Status:** PRs open, awaiting merge order
+
+**PRs:** sweatshop-ai/claude-boss 75 (e2d7f56), sweatshop-ai/cc-agent-names 19 (1f4175a), thinkingtoo/agentview 2 (ee750a8).
 
 Codex owed: out until 2026-11-11 08:36; reviewed by a fresh Opus agent meanwhile.
