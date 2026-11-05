@@ -9,7 +9,9 @@
 - 35 days, 731 worker sessions: 210 past 250k (29%); 28 asked after the crossing (13%), 17 of them ended within 15 turns; 32% of worker cost above 250k; turns left median 50, more than 35 in 126 of 210.
 The audit's 38% is not this population (see ticket 03). Read the "after" over the same length of window and compare with the row of the same length, not across.
 
-**Blocked by:** time, and ticket 03 merged. At least 14 days of tracks after the merge, and 20 or more workers past 250k in that window; with fewer the two shares do not compare.
+**Blocked by:**
+- 03
+- External: time. At least 14 days of tracks after the merge, and 20 or more workers past 250k in that window; with fewer the two shares do not compare.
 
 **Claimed by:** nobody
 

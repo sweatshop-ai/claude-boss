@@ -92,7 +92,9 @@ def parse(path):
             if key == "status":
                 t["status"] = val
             elif key == "claimed by":
-                t["claimed_by"] = val
+                # a template placeholder is no claimant, and never hides a real one
+                if val and val.lower() not in ("none", "nobody", "-"):
+                    t["claimed_by"] = val
         i += 1
     return t
 
@@ -330,7 +332,7 @@ def claim(folder, num, name):
             for e in errors:
                 print("frontier: " + e, file=sys.stderr)
             return 2
-        out = classify(tickets)
+        classify(tickets)
         t = next((t for t in tickets if t["num"] == num), None)
         if t is None:
             print("frontier: no ticket %s" % num, file=sys.stderr)
@@ -345,8 +347,12 @@ def claim(folder, num, name):
             return 3
         line = "**Claimed by:** %s %s" % (name, datetime.now().strftime("%Y-%m-%d %H:%M"))
         lines = t["path"].read_text(encoding="utf-8").splitlines()
-        at = next((i for i, l in enumerate(lines) if FIELD.match(l.strip())
-                   and FIELD.match(l.strip()).group(1).lower() == "status"), None)
+        # one Claimed by line survives: parse keeps the last, so drop them all and write one
+        def is_field(l, key):
+            m = FIELD.match(l.strip())
+            return bool(m) and m.group(1).lower() == key
+        lines = [l for l in lines if not is_field(l, "claimed by")]
+        at = next((i for i, l in enumerate(lines) if is_field(l, "status")), None)
         if at is None:
             lines += ["", line, "", "**Status:** in-progress"]
         else:
