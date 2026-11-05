@@ -38,6 +38,23 @@ mkdir -p "$CFG/pm/.boss-sessions" "$CFG/pm/.pulse" \
 echo "state directories ready under $CFG"
 "$ROOT/bin/boss-link" "$ROOT"
 
+# A unit that exists and differs may hold a hand edit: it is copied to
+# <unit>.bak-<YYYY-MM-DD-HHMMSS> first and the path is printed (a copy by that name
+# already there is itself kept, as .~1~, by --backup=numbered). A template that does not
+# render writes nothing. bin/boss-link tells you when to run this again; it never writes.
+install_unit() {
+  local u=$1 want bak
+  want="$(sed -e "s|@ROOT@|$LINK|g" -e "s|@CFG@|$CFG|g" "$ROOT/systemd/$u.in"; echo x)" \
+    && [[ ${#want} -gt 1 ]] || { echo "install.sh: cannot render systemd/$u.in; $UNITS/$u left as it is" >&2; return 1; }
+  if [[ -f $UNITS/$u ]]; then
+    [[ "$(cat -- "$UNITS/$u"; echo x)" == "$want" ]] && return 0
+    bak="$UNITS/$u.bak-$(date +%Y-%m-%d-%H%M%S)"
+    cp -p --backup=numbered -- "$UNITS/$u" "$bak"
+    echo "previous $u kept as $bak"
+  fi
+  printf '%s' "${want%x}" > "$UNITS/$u"
+}
+
 # ---------------------------------------------------------------- 2. timers
 if [[ -z ${NO_TIMERS:-} ]]; then
   if ! command -v systemctl >/dev/null 2>&1; then
@@ -49,8 +66,7 @@ if [[ -z ${NO_TIMERS:-} ]]; then
     for u in boss-ladder.service boss-ladder.timer \
              boss-workers-watch.service boss-workers-watch.timer \
              boss-efficiency.service boss-efficiency.timer; do
-      sed -e "s|@ROOT@|$LINK|g" -e "s|@CFG@|$CFG|g" \
-          "$ROOT/systemd/$u.in" > "$UNITS/$u"
+      install_unit "$u"
     done
     systemctl --user daemon-reload
     systemctl --user enable --now boss-ladder.timer boss-workers-watch.timer boss-efficiency.timer

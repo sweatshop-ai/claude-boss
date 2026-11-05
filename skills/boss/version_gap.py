@@ -32,6 +32,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import boss_store  # noqa: E402
+import registry  # noqa: E402
 
 PLUGIN = "claude-boss"
 RELEASED_URL = ("https://raw.githubusercontent.com/sweatshop-ai/claude-boss/"
@@ -78,14 +79,14 @@ def proc_start(pid):
 
 
 def _same_process(mark):
-    """The file's pid is alive and is the process that wrote it, not a later one with the same pid."""
+    """The file's pid is a live session: registry.is_live's rules, so a reused pid, a
+    zombie, an orphan and a marker with no start time all count as gone."""
     try:
-        want = json.loads(mark.read_text()).get("procStart")
-        # field 22 of /proc/<pid>/stat, counted after the ')' that closes the command name
-        got = proc_start(mark.name)
+        rec = json.loads(mark.read_text())
+        return registry.is_live({"pid": mark.name, "procStart": rec.get("procStart"),
+                                 "entrypoint": rec.get("entrypoint")})
     except (OSError, ValueError, AttributeError):
         return False
-    return want is None or str(want) == got
 
 
 def released(cfg=None, fetch=None, now=None):
@@ -94,7 +95,7 @@ def released(cfg=None, fetch=None, now=None):
     cache = boss_store.version_gap_cache(cfg)
     try:
         seen = json.loads(cache.read_text())
-        if now < seen["until"]:
+        if seen["until"] - CACHE_TTL <= now < seen["until"]:    # `until` far ahead: the clock was set back
             return seen["version"]
     except (OSError, ValueError, KeyError, TypeError):
         pass

@@ -165,13 +165,17 @@ def workers(seats, boss_pane):
     return [s for s in owned(seats, boss_pane) if s.pane.role != CONCIERGE]
 
 
-def concierge_of(seats, boss_pane):
-    """The seat of the live session holding this boss's questions, or None."""
+def concierge_of(seats, boss_pane, blocked=False):
+    """The seat of the live session holding this boss's questions, or None.
+
+    A concierge on a permission or trust prompt holds nothing and hears nothing,
+    so the guard and the pulse skip it. `blocked=True` counts it anyway, for the
+    one caller that asks whether a concierge exists: spawn must not start a second.
+    """
     for s in owned(seats, boss_pane):
         if s.pane.role != CONCIERGE or not s.session:
             continue
-        # On a permission prompt or the like it holds nothing and hears nothing.
-        if (s.session.get("waitingFor") or QUESTION) == QUESTION:
+        if blocked or (s.session.get("waitingFor") or QUESTION) == QUESTION:
             return s
     return None
 

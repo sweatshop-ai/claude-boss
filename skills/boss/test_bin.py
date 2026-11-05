@@ -355,6 +355,10 @@ class StableLink(unittest.TestCase):
         (r / "routines" / "boss-ladder.sh").write_text("#!/bin/sh\n")
         (r / ".claude-plugin").mkdir()
         (r / ".claude-plugin" / "plugin.json").write_text(f'{{"name": "claude-boss", "version": "{version}"}}\n')
+        (r / "systemd").mkdir()
+        for name in ("boss-efficiency.service", "boss-efficiency.timer"):
+            (r / "systemd" / (name + ".in")).write_text(
+                f"[X]\nExecStart=@ROOT@/routines/{name}.sh\nStandardOutput=append:@CFG@/routines/logs/x.log\n" + ("MemoryMax=1G\n" if version >= "0.2.0" else ""))
         return r
 
     def run_link(self, *args, plugin_root=None, cfg=None):
@@ -428,10 +432,176 @@ class StableLink(unittest.TestCase):
         self.assertIn("not a claude-boss checkout", r.stderr)
         self.assertFalse(self.link.exists())
 
+    # --- the units: rewritten where the routine is installed, never installed
+
+    def units(self):
+        return self.home / ".config" / "systemd" / "user"
+
+    def fake_systemctl(self):
+        """A systemctl that only writes down what it was asked; the real one is never reached."""
+        bindir = self.tmp / "fakebin"
+        bindir.mkdir(exist_ok=True)
+        (bindir / "systemctl").write_text('#!/bin/sh\necho "$*" >> "%s/systemctl.log"\n' % self.tmp)
+        (bindir / "systemctl").chmod(0o755)
+        return bindir
+
+    def systemctl_calls(self):
+        log = self.tmp / "systemctl.log"
+        return log.read_text().splitlines() if log.exists() else []
+
+    def run_link_with_fake_systemctl(self, root):
+        env = {"PATH": "%s:%s" % (self.fake_systemctl(), os.environ["PATH"]), "HOME": str(self.home),
+               "CLAUDE_CONFIG_DIR": str(self.cfg)}
+        return subprocess.run([str(self.LINK_BIN), str(root)], env=env, capture_output=True, text=True,
+                              stdin=subprocess.DEVNULL, timeout=10)
+
+    def test_a_machine_without_the_routine_gets_no_unit_and_no_systemctl_call(self):
+        r = self.run_link_with_fake_systemctl(self.roots[1])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertFalse(self.units().exists())
+        self.assertEqual(self.systemctl_calls(), [])
+
+    # --- the units: bin/boss-link only reads them; install.sh is the one writer
+
+    def rendered(self, root, cfg=None):
+        return (root / "systemd" / "boss-efficiency.service.in").read_text() \
+            .replace("@ROOT@", str(self.link)).replace("@CFG@", str(cfg or self.cfg))
+
+    def put_unit(self, name, text):
+        self.units().mkdir(parents=True, exist_ok=True)
+        (self.units() / name).write_text(text)
+
+    def snapshot(self):
+        return {p.name: (p.read_bytes(), p.stat().st_mtime_ns) for p in self.units().iterdir()}
+
+    def test_a_differing_unit_is_named_in_one_line_and_nothing_is_written(self):
+        self.run_link_with_fake_systemctl(self.roots[0])
+        self.put_unit("boss-efficiency.service", self.rendered(self.roots[0]))     # an older version's unit
+        self.put_unit("boss-efficiency.timer", "[X]\nhand edit\n")
+        before = self.snapshot()
+        r = self.run_link_with_fake_systemctl(self.roots[1])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(len(r.stdout.strip().splitlines()), 2, r.stdout)       # the link line, then one line
+        line = r.stdout.strip().splitlines()[-1]
+        self.assertIn("boss-efficiency.service", line)
+        self.assertIn("boss-efficiency.timer", line)
+        self.assertIn("install.sh", line)
+        self.assertEqual(self.snapshot(), before)
+        self.assertEqual(self.systemctl_calls(), [])
+
+    def test_a_current_unit_is_silent_also_under_another_config_dir(self):
+        self.run_link_with_fake_systemctl(self.roots[1])
+        self.put_unit("boss-efficiency.service", self.rendered(self.roots[1]))
+        r = self.run_link_with_fake_systemctl(self.roots[1])
+        self.assertEqual((r.returncode, r.stdout, r.stderr), (0, "", ""))
+        other = self.tmp / "other-cfg"
+        (other / "routines").mkdir(parents=True)
+        env = {"PATH": os.environ["PATH"], "HOME": str(self.home), "CLAUDE_CONFIG_DIR": str(other)}
+        (other / "routines" / "claude-boss").symlink_to(self.link)    # same units dir, same link target
+        r = subprocess.run([str(self.LINK_BIN), str(self.roots[1])], env=env, capture_output=True, text=True, timeout=10)
+        self.assertNotIn("differ", r.stdout + r.stderr)
+
+    def test_a_machine_with_the_template_missing_or_a_broken_unit_dir_never_fails(self):
+        self.run_link_with_fake_systemctl(self.roots[1])
+        self.put_unit("boss-efficiency.service", "")
+        (self.units() / "boss-efficiency.timer").symlink_to(self.tmp / "nowhere")
+        r = self.run_link_with_fake_systemctl(self.roots[1])
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_parallel_runs_change_nothing_in_the_units_dir(self):
+        self.run_link_with_fake_systemctl(self.roots[1])
+        self.put_unit("boss-efficiency.service", "[X]\nhand edit\n")
+        before = self.snapshot()
+        env = {"PATH": "%s:%s" % (self.fake_systemctl(), os.environ["PATH"]), "HOME": str(self.home),
+               "CLAUDE_CONFIG_DIR": str(self.cfg)}
+        procs = [subprocess.Popen([str(self.LINK_BIN), str(self.roots[1])], env=env, stdout=subprocess.PIPE,
+                                  stderr=subprocess.PIPE, text=True) for _ in range(6)]
+        outs = [p.communicate(timeout=30) for p in procs]
+        self.assertEqual([p.returncode for p in procs], [0] * 6, outs)
+        self.assertEqual(self.snapshot(), before)
+
+    def test_the_uninstaller_names_units_so_a_copy_is_never_picked_up_by_a_glob(self):
+        text = (HERE.parents[1] / "uninstall.sh").read_text()
+        self.assertNotRegex(text, r'UNITS"?/\*')
+
     def test_an_empty_config_dir_means_home(self):
         r = self.run_link(str(self.roots[0]), cfg="")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(os.readlink(self.home / ".claude" / "routines" / "claude-boss"), str(self.roots[0]))
+
+class InstallKeepsUnits(unittest.TestCase):
+    """`install.sh` writes the units too, and a re-run must not lose a hand edit.
+    Everything runs against a temp HOME with a stub systemctl, never the real config."""
+
+    ROOT = HERE.parents[1]
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="boss-install-"))
+        self.addCleanup(lambda: subprocess.run(["rm", "-rf", str(self.tmp)]))
+        self.home = self.tmp / "home"
+        (self.home / ".claude").mkdir(parents=True)
+        self.units = self.home / ".config" / "systemd" / "user"
+        bindir = self.tmp / "fakebin"
+        bindir.mkdir()
+        (bindir / "systemctl").write_text('#!/bin/sh\necho "$*" >> "%s/systemctl.log"\n' % self.tmp)
+        (bindir / "systemctl").chmod(0o755)
+        self.env = {"PATH": "%s:%s" % (bindir, os.environ["PATH"]), "HOME": str(self.home),
+                    "CLAUDE_CONFIG_DIR": str(self.home / ".claude")}
+
+    def install(self):
+        return subprocess.run([str(self.ROOT / "install.sh")], env=self.env, capture_output=True,
+                              text=True, stdin=subprocess.DEVNULL, timeout=30)
+
+    def test_a_rerun_keeps_an_edited_unit_and_says_where(self):
+        r = self.install()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(list(self.units.glob("*.bak-*")), [])
+        unit = self.units / "boss-ladder.service"
+        unit.write_text("[Service]\nMemoryMax=4G   # my edit\n")
+        r = self.install()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stderr, "")
+        (copy,) = self.units.glob("*.bak-*")
+        self.assertRegex(copy.name, r"^boss-ladder\.service\.bak-\d{4}-\d\d-\d\d-\d{6}$")
+        self.assertEqual(copy.read_text(), "[Service]\nMemoryMax=4G   # my edit\n")
+        self.assertIn(str(copy), r.stdout)
+        self.assertNotIn("my edit", unit.read_text())
+
+    def test_a_rerun_with_nothing_changed_makes_no_copy(self):
+        self.install()
+        self.install()
+        self.assertEqual(list(self.units.glob("*.bak-*")), [])
+
+    def test_two_edits_in_the_same_second_are_both_kept(self):
+        self.install()
+        unit = self.units / "boss-ladder.service"
+        fake = self.tmp / "fakebin"
+        (fake / "date").write_text("#!/bin/sh\necho 2000-01-01-000000\n")
+        (fake / "date").chmod(0o755)
+        for edit in ("first", "second"):
+            unit.write_text("[Service]\n%s\n" % edit)
+            r = self.install()
+            self.assertEqual(r.returncode, 0, r.stderr)
+        kept = sorted(c.read_text() for c in self.units.glob("boss-ladder.service.bak-*"))
+        self.assertEqual(kept, ["[Service]\nfirst\n", "[Service]\nsecond\n"])
+
+    def test_a_template_that_does_not_render_writes_no_unit(self):
+        self.install()
+        unit = self.units / "boss-ladder.service"
+        unit.write_text("[Service]\nhand edit\n")
+        root = self.tmp / "root"
+        subprocess.run(["cp", "-r", str(self.ROOT), str(root)], check=True)
+        (root / "systemd" / "boss-ladder.service.in").unlink()
+        r = subprocess.run([str(root / "install.sh")], env=self.env, capture_output=True, text=True,
+                           stdin=subprocess.DEVNULL, timeout=30)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("boss-ladder.service", r.stderr)
+        self.assertEqual(unit.read_text(), "[Service]\nhand edit\n")
+        (root / "systemd" / "boss-ladder.service.in").write_text("")
+        r = subprocess.run([str(root / "install.sh")], env=self.env, capture_output=True, text=True,
+                           stdin=subprocess.DEVNULL, timeout=30)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertEqual(unit.read_text(), "[Service]\nhand edit\n")
 
 
 if __name__ == "__main__":

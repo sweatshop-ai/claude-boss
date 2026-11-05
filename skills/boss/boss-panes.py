@@ -168,10 +168,11 @@ def main():
         boss = args[args.index("--boss") + 1] if "--boss" in args[:-1] else ""
         return cmd_list(boss, "--mine" in args)
     if args and args[0] == "concierge":
-        # boss-lifecycle spawn --concierge: pane and name of the live one, if any.
+        # boss-lifecycle spawn --concierge: pane and name of the live one, if any,
+        # one waiting on a permission prompt included (a second would double it).
         boss = args[args.index("--boss") + 1] if "--boss" in args[:-1] else ""
         try:
-            seat = fleet.concierge_of(seats(), boss)
+            seat = fleet.concierge_of(seats(), boss, blocked=True)
         except fleet.TmuxUnavailable:
             return 1
         if seat:
