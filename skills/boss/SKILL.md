@@ -13,7 +13,7 @@ The owner watches those panes and can talk to any worker directly.
 
 **Argument**: `$ARGUMENTS`
 
-## Session start — do these five things
+## Session start — do these six things
 
 A boss is launched with `boss-start` (`${CLAUDE_PLUGIN_ROOT}/skills/boss/bin/boss-start`),
 which runs `claude --model fable --effort high --autocompact 450k
