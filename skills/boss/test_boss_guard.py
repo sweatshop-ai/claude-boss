@@ -29,6 +29,8 @@ class GuardCase(unittest.TestCase):
         self.markers.mkdir(parents=True)
         self.sid = "11111111-2222-3333-4444-555555555555"
         (self.markers / self.sid).write_text("demo\n", encoding="utf-8")
+        # `~/.claude/pm` in a command resolves under the scratch dir, and it exists
+        (self.cfg / ".claude" / "pm").mkdir(parents=True)
 
     def tearDown(self):
         import shutil
@@ -45,7 +47,7 @@ class GuardCase(unittest.TestCase):
             "tool_name": tool,
             "tool_input": tool_input,
         }
-        env = dict(os.environ, CLAUDE_CONFIG_DIR=str(self.cfg))
+        env = dict(os.environ, CLAUDE_CONFIG_DIR=str(self.cfg), HOME=str(self.cfg))
         res = subprocess.run([sys.executable, str(GUARD)], input=json.dumps(payload),
                              capture_output=True, text=True, env=env, timeout=15)
         self.assertEqual(res.returncode, 0, res.stderr)
@@ -210,6 +212,59 @@ class BashWritesToPm(GuardCase):
             before = len(self.log_lines())
             self.fire(cmd)
             self.assertEqual(len(self.log_lines()), before + 1, "not logged: `%s`" % cmd)
+
+
+class ClassifierGaps(GuardCase):
+    """Codex's six examples on the classifier. It warns and logs; it is no boundary.
+    Where the text cannot be read with certainty the call counts as work."""
+
+    def assertLogged(self, cmd):
+        before = len(self.log_lines())
+        self.fire(cmd)
+        self.assertEqual(len(self.log_lines()), before + 1, "not logged: `%s`" % cmd)
+
+    def assertQuiet(self, cmd):
+        self.assertEqual(self.fire(cmd), "", "scolded for `%s`" % cmd)
+
+    def test_a_sed_program_other_than_a_plain_substitution_is_work(self):
+        for cmd in ("sed -i 'w /repo/src/app.ts' ~/.claude/pm/a.md",
+                    "sed -i '1e rm -rf build' ~/.claude/pm/a.md",
+                    "sed -i 's/a/b/w /repo/src/app.ts' ~/.claude/pm/a.md",
+                    "sed -i 's/a/b/e' ~/.claude/pm/a.md"):
+            self.assertLogged(cmd)
+
+    def test_a_plain_substitution_is_still_coordination(self):
+        self.assertQuiet("sed -i 's/a/b/g' ~/.claude/pm/a.md")
+        self.assertQuiet("sed -i 's|a|b|' ~/.claude/pm/a.md")
+
+    def test_a_heredoc_marker_in_a_comment_hides_nothing(self):
+        self.assertLogged("echo x >> ~/.claude/pm/a.md # <<EOF\nnpm test\nEOF")
+        self.assertLogged("echo '<<EOF' >> ~/.claude/pm/a.md\nnpm test\nEOF")
+
+    def test_cat_reading_a_real_file_into_the_tracker_is_work(self):
+        self.assertLogged("cat /repo/src/app.ts >> ~/.claude/pm/a.md")
+        self.assertLogged("cat < /repo/src/app.ts >> ~/.claude/pm/a.md")
+        self.assertQuiet("cat ~/.claude/pm/b.md >> ~/.claude/pm/a.md")
+
+    def test_a_filter_after_a_pipe_takes_no_file_operands(self):
+        self.assertLogged("echo x | head /repo/src/app.ts")
+        self.assertLogged("echo x | head < /repo/src/app.ts")
+        self.assertQuiet("cd ~/.claude/pm && printf '%s\\n' x | /x/bin/boss-tracker append demo | head -n 5")
+        self.assertQuiet("echo x | cut -d , -f 2 | wc -l")
+        self.assertLogged("echo x | wc -c /repo/src/app.ts")      # -c takes a value for head, tail and cut, not wc
+        self.assertQuiet("echo x | head -c 5 | wc -c")
+
+    def test_a_cd_that_fails_does_not_own_the_cwd(self):
+        self.assertLogged("cd ~/.claude/pm/missing; echo x > src/app.ts")
+        self.assertQuiet("cd ~/.claude/pm; echo x > a.md")
+        self.assertLogged("cd ~/.claude/pm/missing && true; echo x > src/app.ts")
+
+    def test_a_heredoc_with_the_redirect_after_the_marker_is_a_heredoc(self):
+        self.assertQuiet("cat <<EOF >> ~/.claude/pm/a.md\n- rm -rf build; ok\nEOF")
+        self.assertQuiet("cat <<'EOF' >> ~/.claude/pm/a.md\n- $(literal)\nEOF")
+        self.assertLogged("cat <<EOF >> ~/.claude/pm/a.md\nbody\nEOF\nnpm test")
+        self.assertLogged("cat <<EOF | sh\nnpm test\nEOF")
+        self.assertLogged("cat <<EOF >> ~/.claude/pm/a.md; npm test\nbody\nEOF")
 
 
 class StillFlagged(GuardCase):

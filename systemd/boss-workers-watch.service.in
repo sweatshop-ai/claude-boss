@@ -1,3 +1,6 @@
+# Written by install.sh from the plugin's template, which keeps the file it replaces as
+# <unit>.bak-<YYYY-MM-DD-HHMMSS>. bin/boss-link says at session start when this file is
+# out of date. Put a deliberate change in a drop-in, <unit>.d/override.conf, which is left alone.
 [Unit]
 Description=Watchdog for Claude boss/worker tmux sessions (API errors, frozen panes, unanswered prompts)
 Documentation=file://@ROOT@/routines/boss-workers-watch.md

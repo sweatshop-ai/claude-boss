@@ -18,6 +18,22 @@
   "sensitive" and records it on the PR; the worker may raise it, never lower it. The dispatch
   carries a short text of the rules.
 
+- **Codex findings on PRs 43, 44, 45, 47 and 53 (ticket 25).** Guard classifier: a `sed` program
+  other than a plain `s/…/…/` substitution, a heredoc marker in a comment or in quotes, `cat` reading a
+  file beside a tracker write, a pipe filter with a file operand or `<`, and a `cd` that fails after
+  `;` now count as work; `cat <<EOF >> pm/x` is read as a heredoc. Where the text cannot be read with
+  certainty the call counts as work: the guard warns and logs, it is no boundary. `spawn --concierge`
+  finds a concierge waiting on a permission prompt and starts no second one. The update-gap check
+  counts a session live by `registry.is_live`'s rules and treats a cache dated far ahead as stale.
+  The P17 proof asks for the resolved path of what runs, not only an import. `bin/boss-link` compares the
+  installed systemd units with the current templates (taking `@ROOT@` and `@CFG@` from the installed unit's
+  own lines) and prints one line naming a unit that differs and the command `install.sh`; it writes
+  nothing and never fails a session start. `install.sh` is the one upgrade path (so `MemoryMax=1G` reaches
+  installs that predate it): it copies a differing unit to `<unit>.bak-<YYYY-MM-DD-HHMMSS>` first and
+  prints the path, and a template that does not render writes no unit. Old copies are not pruned. The
+  first run after this release replaces each service unit once, because its header changed. A deliberate
+  edit belongs in a drop-in (`<unit>.d/override.conf`), which is left alone.
+
 - **A rule for a worker past 250k (ticket 03).** `CTX-OVER` no longer reads "overdue, ask for the
   boundary now". The owner's two tests apply: never restart a worker waiting on CI or merging with its
   PR open; otherwise ask how many turns are left and restart at the next boundary if more than about
