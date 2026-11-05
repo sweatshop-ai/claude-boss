@@ -32,3 +32,4 @@ Setup only; neither arm started. Nothing under agentview's own repo or `dev` was
 
 - [x] Clean-ticket script, proven by grep
 - [x] Two copies, private repo with `replay-A` / `replay-B`, CI on t-compute proven
+- Kwame, 2026-11-05: briefs written at `/home/tiroir/Projects/ab-replay/brief-A.md` and `brief-B.md` (outside every repo; identical except the staffing paragraph and the arm letter; scrub list: no hit). `test.yml`'s pull_request trigger proven: a throwaway PR into `replay-A` ran `test` on `t-compute-3`, 572 tests, green; PR closed, branch deleted, `replay-A` still `b6be213`.
