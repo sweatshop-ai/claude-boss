@@ -73,6 +73,13 @@ Slack `#claude-ops`, posted by the core (not `boss-alert`, whose messages all st
 "blocked"), numbers and track names only, never transcript text. Silent otherwise;
 the report is written every week.
 
+An alert Slack did not take is kept in the state (`unsent`) and sent again, marked "(delayed)", at the
+start of the next run; the run exits 2 until it goes out. The week itself is still the next baseline: dropping
+it would leave nothing adjacent to compare the following week with, and the change would go unreported
+for good. When the body cannot run the week at all (the transcripts lock not taken in two hours, or the scan
+killed at its cap) it posts that through `boss_efficiency_core.py --alert` and exits 1 (lock) or 124 (cap);
+if Slack is out too the log says `ALERT NOT SENT` and the exit is 3.
+
 An anomaly is a change in **how a track spends**, compared with the week before,
 for a track live in both weeks with at least 100 M cost units in each (about a tenth
 of a week's budget):

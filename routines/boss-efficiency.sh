@@ -33,16 +33,30 @@ fi
 echo "=== run $(date -Is) dry_run=${DRY_RUN:-0} ==="
 # A dry run on a machine that never ran the routine has no pm directory: nothing to lock against.
 if [ -d "$CFG/pm" ]; then exec 9>"$TRANSCRIPTS_LOCK"; else exec 9>/dev/null; fi
+# The week cannot be measured at all: say so on Slack, because the core's own alert never runs. If Slack
+# is out too the log says ALERT NOT SENT and the exit is 3, not the 1 or 124 of a miss that was told.
+missed() {
+    if ! timeout 90 python3 -B "$CORE" --alert "boss-efficiency: $1; no weekly measure this run"; then
+        echo "ALERT NOT SENT: $1"
+        exit 3
+    fi
+}
+
 if ! flock -w "${BOSS_EFFICIENCY_LOCK_WAIT:-7200}" 9; then
     echo "transcripts lock still held after ${BOSS_EFFICIENCY_LOCK_WAIT:-7200} s, run skipped"
+    missed "transcripts lock still held after ${BOSS_EFFICIENCY_LOCK_WAIT:-7200} s"
     exit 1                     # a week with no measure is a failure the unit shows, not a pass
 fi
 
 # nice and ionice: the laptop is shared and the scan is the heaviest thing on it.
 # Best-effort class 2 at its lowest priority, not idle (-c3): an idle scan can starve on a busy
 # disk and hit the cap below, which loses the week.
-timeout -k 30 3600 nice -n 19 ionice -c2 -n7 python3 -B "$CORE" "$@"
+CAP="${BOSS_EFFICIENCY_TIMEOUT:-3600}"
+timeout -k 30 "$CAP" nice -n 19 ionice -c2 -n7 python3 -B "$CORE" "$@"
 rc=$?
-[ "$rc" -eq 124 ] && echo "TIMED OUT after 3600s"
+if [ "$rc" -eq 124 ]; then
+    echo "TIMED OUT after ${CAP}s"
+    missed "scan timed out after ${CAP} s"
+fi
 echo "core exit=$rc"
 exit "$rc"

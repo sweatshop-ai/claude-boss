@@ -795,6 +795,11 @@ def run(cfg, end, weeks, dry):
     idx = Index(sessions, markers(cfg), socks)
     history = state.get("weeks", [])
     problems = failed = 0
+    unsent = []                             # alerts Slack did not take: kept, and tried again with the next run
+    for item in state.get("unsent", []):
+        if dry or alert("(delayed) " + item["text"], dry): continue
+        unsent.append(item)
+        failed += 1
     for w in range(weeks):
         wend = end - (weeks - 1 - w) * 7 * 86400
         week = measure_window(idx, wend - 7 * 86400, wend)
@@ -805,17 +810,19 @@ def run(cfg, end, weeks, dry):
             # a rerun of the same week replaces it, whatever second it ran at (a day's slack covers DST)
             history = [h for h in history if abs(h["end"] - wend) >= 86400] + [week]
             history = sorted(history, key=lambda h: h["end"])[-HISTORY_WEEKS:]
-        if not dry:
-            state = dict(socks=socks, tracks=sorted(set(idx.tracks()) | set(state.get("tracks", []))), weeks=history)
-            write_outputs(cfg, label, week, text, state)
-        else:
-            print(text)
         if fails or flags:
             problems += 1
             failed += bool(fails)
-            sent = alert("boss-efficiency week ending %s: %s" % (label, "; ".join(
-                ["FAILED " + f for f in fails] + flags)), dry)
-            failed += (not sent) and not dry
+            said = "boss-efficiency week ending %s: %s" % (label, "; ".join(["FAILED " + f for f in fails] + flags))
+            if not alert(said, dry) and not dry:
+                failed += 1
+                unsent = [u for u in unsent if u["label"] != label] + [dict(label=label, text=said)]
+        if not dry:
+            state = dict(socks=socks, tracks=sorted(set(idx.tracks()) | set(state.get("tracks", []))), weeks=history,
+                         unsent=unsent)
+            write_outputs(cfg, label, week, text, state)
+        else:
+            print(text)
     return (2 if failed else 0), problems
 
 
@@ -823,7 +830,10 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--end", help="end of the last window, ISO date (default: now)")
     ap.add_argument("--weeks", type=int, default=1, help="how many weekly windows, oldest first (backfill)")
+    ap.add_argument("--alert", metavar="TEXT", help="only post TEXT to Slack (the body uses it when it cannot run); exit 3 if not sent")
     a = ap.parse_args(argv)
+    if a.alert is not None:
+        return 0 if alert(a.alert, os.environ.get("DRY_RUN") == "1") else 3
     end = dt.datetime.fromisoformat(a.end).timestamp() if a.end else dt.datetime.now().timestamp()
     rc, problems = run(boss_store.config_dir(), end, a.weeks, os.environ.get("DRY_RUN") == "1")
     print("boss-efficiency: %d window(s) with something to say" % problems)

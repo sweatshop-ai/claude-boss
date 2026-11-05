@@ -11,6 +11,7 @@ Documentation=file://@ROOT@/routines/boss-ladder.md
 # a change to this template does, and boss-link says so.
 Type=oneshot
 ExecStart=@ROOT@/routines/boss-ladder.sh
+Environment=CLAUDE_CONFIG_DIR=@CFG@
 StandardOutput=append:@CFG@/routines/logs/boss-ladder.log
 StandardError=append:@CFG@/routines/logs/boss-ladder.log
 # Local file reads plus at most one Slack post per marker. The body caps the
