@@ -78,13 +78,13 @@ def read(cfg=None):
     """Every well-formed report; a damaged line is skipped, not fatal."""
     out = []
     try:
-        text = path(cfg).read_text()
+        raw = path(cfg).read_bytes()
     except OSError:
         return out
-    for l in text.splitlines():
+    for l in raw.split(b"\n"):                      # a torn multi-byte tail fails per line, not for the file
         try:
-            r = json.loads(l)
-        except ValueError:
+            r = json.loads(l.decode())
+        except ValueError:                          # UnicodeDecodeError is one
             continue
         if (isinstance(r, dict) and all(isinstance(r.get(k), str) for k in ("date", "track", "kind"))
                 and boss_store.valid_track(r["track"]) and KIND_RE.fullmatch(r["kind"])):
