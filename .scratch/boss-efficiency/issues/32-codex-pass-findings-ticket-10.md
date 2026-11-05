@@ -8,7 +8,7 @@
 
 **Status:** ready
 
-- [ ] a. PR 49, `routines/boss_efficiency_core.py:391-393`: asks are counted only from boss sessions. The guard refuses the boss's own AskUserQuestion while a concierge lives, so the concierge's questions are attributed as a worker and never counted; questions/day and its alert (lines 497-498) read near zero in the standard workflow.
+- [x] a. (moved to ticket 35, not ready work here) PR 49, `routines/boss_efficiency_core.py:391-393`: asks are counted only from boss sessions. The guard refuses the boss's own AskUserQuestion while a concierge lives, so the concierge's questions are attributed as a worker and never counted; questions/day and its alert (lines 497-498) read near zero in the standard workflow.
 - [ ] b. PR 49, `install.sh:50-51`: the new timer and service exist only for users who rerun `install.sh`; `bin/boss-link` moves the symlink only. Same cause as the MemoryMax finding of PR 53 (ticket 25) and ticket 33 R4-9; one fix serves all.
 - [ ] b. PR 49, `systemd/boss-efficiency.service.in:8`: no `Environment=CLAUDE_CONFIG_DIR=@CFG@`, so a non-default config dir is ignored under systemd (the watchdog unit has the same gap).
 - [ ] b. PR 49, `routines/boss_efficiency_core.py:638-640`: a week with anomaly flags is added to the history and the state written before `alert()` runs; if Slack fails, that week is the next baseline and a persistent change is never reported.
