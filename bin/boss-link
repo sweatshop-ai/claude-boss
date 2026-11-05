@@ -3,8 +3,8 @@
 #
 #   $CLAUDE_CONFIG_DIR/routines/claude-boss -> <plugin root>
 #
-# The two systemd units run the ladder and the watchdog through that link, so
-# they survive a plugin upgrade: a marketplace install lands each version in a
+# The three systemd units run the ladder, the watchdog and the efficiency
+# measure through that link, so they survive a plugin upgrade: a marketplace install lands each version in a
 # new cache directory (plugins/cache/<marketplace>/claude-boss/<version>/), and
 # a unit written against one version dies with it. Measured 2026-10-23: both
 # timers failed on every tick for five days after the path moved.
