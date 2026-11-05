@@ -76,7 +76,7 @@ push your work, then let the session be recycled and a fresh one continue from t
 handoff. A task bigger than ~150k gets split this way rather than carried to its end;
 past ~250k the split is overdue — stop at the very next boundary, unless your PR is open and
 waiting on CI or a merge (then see it through) or your boss, having asked how much is left,
-tells you to carry on. Answer in turns: one turn is one of your replies, a tool call included.
+tells you to carry on. Answer in turns: one turn is one model message, so each tool call is its own turn.
 You keep your name and your pane.
 
 Two things this is not: it is not a reason to retire an **idle** session, which

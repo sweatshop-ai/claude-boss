@@ -62,7 +62,7 @@ class Measure(unittest.TestCase):
     def test_ordinary_messages_are_not_asks(self):
         for tx in ("what is the current status of CI", "stop at the first failure", "see CTX-SPLIT in the list"):
             self.assertIsNone(m.ASK.search(tx), tx)
-        for tx in ("you are at 267k", "stop at the current state", "(CTX-OVER)"):
+        for tx in ("you are at 267k", "stop at the current state", "(CTX-OVER)", "how much is left?", "how many turns are left"):
             self.assertTrue(m.ASK.search(tx), tx)
 
     def test_never_asked(self):
