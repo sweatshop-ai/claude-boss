@@ -218,7 +218,7 @@ def scan_session(path, tracks=()):
     path = str(path)
     recs, tools, notif, msgs = [], {}, {}, {}
     out = dict(sid=os.path.basename(path)[:-6], boss_regs=[], asks=[], xmsgs=[], dispatches=[], subs=[],
-               name=None, refs=[], sends=[], heard=[], done_commits=[], goal_status=[], concierge=False)
+               name=None, refs=[], sends=[], heard=[], done_commits=[], goal_status=[], concierge=False, ask_msgs=[])
     ask_at = {}                                   # AskUserQuestion tool_use id -> time, dropped if the call fails
     pending_marks = {}                            # tool_use id -> goal marks, kept once the command succeeds
     tracks = set(tracks)
@@ -267,7 +267,7 @@ def scan_session(path, tracks=()):
             for b in content:
                 if isinstance(b, dict) and b.get("type") == "tool_result":
                     is_result = True
-                    if b.get("tool_use_id") in ask_at and GUARD_REFUSAL in json.dumps(b.get("content")):
+                    if b.get("tool_use_id") in ask_at and b.get("is_error") and GUARD_REFUSAL in json.dumps(b.get("content")):
                         out["asks"].remove(ask_at.pop(b["tool_use_id"]))      # refused by the guard: the owner never saw it
                     if b.get("tool_use_id") in pending_marks and not b.get("is_error"):
                         out["goal_status"].extend(pending_marks.pop(b["tool_use_id"]))     # a failed command marks nothing
@@ -282,7 +282,9 @@ def scan_session(path, tracks=()):
             f = FROM.search(tx[:400])
             if f:
                 body = tx[tx.find(">", f.end()) + 1:tx.find(">", f.end()) + 900]
-                if ASK_MSG.match(body): out["concierge"] = True       # the boss sends it `ASK <id>:`
+                if ASK_MSG.match(body):                               # the boss sends it `ASK <id>:`
+                    out["concierge"] = True
+                    out["ask_msgs"].append(T)
                 g = DISP.search(body)
                 g3 = None if g else (disp3.search(body) if disp3 else None)
                 trk = (g.group(2).rstrip(".`") if g else g3.group(1) if g3 else None)
@@ -434,13 +436,28 @@ class Index:
                     for tr, a, b in windows[s["sid"]]:
                         if a <= T <= b: self.worker_msgs[tr].append(T)
                 continue
-            ev = [(T, socks.get(sock) or trk) for T, sock, trk, _ in s["xmsgs"] if socks.get(sock) or trk]
+            ev = [(T, self._asked_on(windows, s, T, socks.get(sock)) if T in s["ask_msgs"] else socks.get(sock) or trk)
+                  for T, sock, trk, _ in s["xmsgs"] if socks.get(sock) or trk]
             for i, (T, tr) in enumerate(ev):
                 end = ev[i + 1][0] if i + 1 < len(ev) else session_end(s)
                 self.workers[tr].append((s, T, end))
                 taken[s["sid"]].append((T, end))
         self._attribute_by_name(sessions, boss_sids, windows, taken)
         self._cut_finished(sessions, boss_sids)
+
+    @staticmethod
+    def _asked_on(windows, concierge, T, voted):
+        """The track a concierge was asked on: where the boss that serves the voted track was at T.
+
+        The socket vote gives one track per boss; a boss that moves to another
+        track keeps its socket. With no vote, or no such boss window at T, the vote stands.
+        """
+        if voted is None: return None
+        for sid, wins in windows.items():
+            if sid == concierge["sid"] or not any(tr == voted for tr, _, _ in wins): continue
+            for tr, a, b in wins:
+                if a <= T <= b: return tr
+        return voted
 
     def _attribute_by_name(self, sessions, boss_sids, windows, taken):
         """A worker the boss sent to or heard from by name counts in the boss's window.
