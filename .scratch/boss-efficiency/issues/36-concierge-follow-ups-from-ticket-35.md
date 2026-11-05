@@ -17,13 +17,18 @@
 
 **Status:** waiting
 
-Decisions and findings (Rumi, 2026-11-05, PR with branch `rumi/ticket-36`):
+Decisions and findings (Rumi, 2026-11-05, PR 70 merged as 904c1d6):
 
 - Item 1: built. An `ASK` message to a concierge is placed by where the boss that serves the voted track was at that moment (`Index._asked_on`); the rest of the concierge's messages keep the socket vote.
 - Item 3: did not reproduce on main. A concierge's `AskUserQuestion` is `ask_owner`, so `measure_track` already puts its open time in `states["ask"]` through the worker loop (the `ev` line for the `ask` group). The test is added as a guard and passes on main.
 - Item 4: the concierge's tokens stay in `build` (Anton's decision: 2.4% moves no conclusion).
 - Items 5, 6, 7: built. 5 needs `is_error` as well as the phrase; 6 is a test in `test_boss_guard.py` that runs the guard and looks for `GUARD_REFUSAL` in its reason; 7's test (text with `>` before the tag) was shown to fail when the hunk is reverted.
 - Item 8: class c, not built (Anton's decision).
+- Review of PR 70 (`reviews/pr-70-code-review.md`), two class b bugs found in the new code and fixed before the merge; the rest not built:
+  - c (not built): an ASK in the very second a boss switches track goes to the voted track (windows are inclusive, the two disagree, the vote decides).
+  - c (not built): the socket owner moves alpha to beta while another boss that once served alpha sits on gamma: the bosses disagree, so the ASK stays on alpha (the vote).
+  - c (not built): `T in s["ask_msgs"]` matches by timestamp, so a non-ASK message with the same timestamp as an ASK gets the same treatment.
+  - d (not built): the ASK flag could be a fifth field of the `xmsgs` tuple; `socks.get(sock)` is read three times in one comprehension; `_asked_on`'s parameter `concierge` is a session dict and the method is named by what it takes; the read-change-write of a transcript repeats in three tests (a `Cfg` helper); the item 3 test hard-codes 30 s.
 
 - [x] Item 1: a test with one boss, two tracks and one concierge, each `ASK` on the track the boss was on at that time
 - [x] Item 3: a test that a concierge question open time is in `states["ask"]` (did not reproduce; the test guards it)
