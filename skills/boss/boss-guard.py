@@ -218,8 +218,7 @@ def is_coordination(cmd):
         if words:
             if words[0] == "cd" and len(words) == 2:
                 cwd_own = own_state(words[1].rstrip("/") + "/")
-                if cwd_own:
-                    cd_dirs.append(os.path.expanduser(words[1]))
+                cd_dirs.append(os.path.expanduser(words[1]))
             elif piped and words[0] in FILTERS:
                 if not filter_is_plain(words):
                     return False
