@@ -51,7 +51,7 @@ def parse(text):
 def record(track, kind, text, cfg=None, session=None, now=None):
     if not boss_store.valid_track(track):
         raise ValueError("not a track name: %r" % track)
-    if not KIND_RE.match(kind or ""):
+    if not KIND_RE.fullmatch(kind or ""):
         raise ValueError("not a kind slug: %r (lowercase letters, digits, -)" % kind)
     q, w = parse(text)
     now = now or datetime.now(timezone.utc)
@@ -87,7 +87,7 @@ def read(cfg=None):
         except ValueError:
             continue
         if (isinstance(r, dict) and all(isinstance(r.get(k), str) for k in ("date", "track", "kind"))
-                and boss_store.valid_track(r["track"]) and KIND_RE.match(r["kind"])):
+                and boss_store.valid_track(r["track"]) and KIND_RE.fullmatch(r["kind"])):
             out.append(r)
     return out
 

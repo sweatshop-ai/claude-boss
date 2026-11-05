@@ -69,7 +69,7 @@ class Unask(unittest.TestCase):
         self.assertFalse(self.file.exists())
 
     def test_a_bad_track_or_kind_is_refused(self):
-        for track, kind in (("../x", "k"), ("Alpha", "k"), ("alpha-x", "Bad Kind"), ("alpha-x", "../k"), ("alpha-x", "")):
+        for track, kind in (("../x", "k"), ("Alpha", "k"), ("alpha-x", "Bad Kind"), ("alpha-x", "../k"), ("alpha-x", "merge\n"), ("alpha-x", "")):
             r = self.run_("record", track, kind, stdin="q\n--- owner ---\nw")
             self.assertEqual(r.returncode, 1, (track, kind))
         self.assertFalse(self.file.exists())
