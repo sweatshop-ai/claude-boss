@@ -721,6 +721,23 @@ class RestartKeepsName(unittest.TestCase):
         self.assertIn("not Wanda", r.stderr)
         self.assertIn("set-option -p -t %5 @worker_name Greta", calls)
 
+    def test_a_concierge_title_carries_its_role_but_its_address_stays_bare(self):
+        # Ticket 40: the owner reads the title; the watchdog and fleet.py match @worker_name.
+        (self.tmp / "role").write_text("concierge\n")
+        r, calls = self.run_restart()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("set-option -p -t %5 @worker_name Wanda", calls)
+        titles = [c for c in calls if " @custom_title " in c]
+        self.assertEqual(len(titles), 1, calls)
+        self.assertIn("@custom_title Wanda [concierge] — ", titles[0])
+        self.assertNotIn("[concierge]", " ".join(c for c in calls if " @worker_name " in c))
+
+    def test_a_plain_worker_title_is_its_bare_name(self):
+        r, calls = self.run_restart()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        titles = [c for c in calls if " @custom_title " in c]
+        self.assertTrue(titles and "[" not in titles[0], calls)
+
     def test_a_mirror_that_fails_fails_the_restart(self):
         # The watchdog only sees panes carrying @worker_name (Codex on #35).
         (self.tmp / "set-fails").touch()

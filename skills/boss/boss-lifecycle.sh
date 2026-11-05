@@ -160,8 +160,12 @@ mirror_name() {
   local pane=$1 n
   n=$(agent_name "$pane")
   [[ -n "$n" && "$n" != "-" ]] || return 0
+  # The title is for reading, so a concierge's carries its role. @worker_name is
+  # an address that the watchdog and fleet.py match on: it stays the bare name.
+  local shown=$n
+  [[ "$(pane_prop "$pane" '#{@worker_role}' 2>/dev/null || true)" == concierge ]] && shown="$n [concierge]"
   tmux set-option -p -t "$pane" @worker_name "$n"
-  tmux set-option -p -t "$pane" @custom_title "$n — $(basename "$(pane_prop "$pane" '#{pane_current_path}')")"
+  tmux set-option -p -t "$pane" @custom_title "$shown — $(basename "$(pane_prop "$pane" '#{pane_current_path}')")"
   printf '%s' "$n"
 }
 

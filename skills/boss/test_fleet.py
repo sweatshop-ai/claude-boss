@@ -159,6 +159,11 @@ class TheTmuxAdapter(unittest.TestCase):
         self.assertIn("#{?@boss_pane,#{@boss_pane},-}", fmt)
         self.assertIn("#{?@worker_name,#{@worker_name},-}", fmt)
 
+    def test_the_pane_listing_reads_the_address_not_the_title(self):
+        # Ticket 40: @custom_title carries the owner's "[concierge]" label.
+        self.assertNotIn("@custom_title", fleet.FORMAT)
+        self.assertIn("@worker_name", fleet.FORMAT)
+
     def test_a_server_with_no_panes_is_an_empty_fleet(self):
         (self.dir / "panes").write_text("")
         self.assertEqual(fleet.Tmux().panes(), [])
