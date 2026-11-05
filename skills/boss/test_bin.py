@@ -469,7 +469,8 @@ class StableLink(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual((self.units() / "boss-efficiency.service").read_text(),
                          f"[X]\nExec={self.link}/routines/boss-efficiency.service.sh\nCfg={self.cfg}\nMemoryMax=1G\n")
-        self.assertEqual(sorted(p.name for p in self.units().iterdir()), ["boss-efficiency.service"])
+        self.assertEqual(sorted(p.name for p in self.units().iterdir() if ".bak-" not in p.name),
+                         ["boss-efficiency.service"])
         self.assertEqual(self.systemctl_calls(), ["--user daemon-reload"])
 
     def test_a_unit_is_refreshed_also_when_the_link_is_already_right(self):
@@ -479,6 +480,24 @@ class StableLink(unittest.TestCase):
         r = self.run_link_with_fake_systemctl(self.roots[1])
         self.assertIn("boss-efficiency.timer", r.stdout)
         self.assertIn(f"Exec={self.link}/", (self.units() / "boss-efficiency.timer").read_text())
+
+    def test_a_hand_edited_unit_is_kept_as_a_copy_before_it_is_refreshed(self):
+        self.run_link_with_fake_systemctl(self.roots[1])
+        self.units().mkdir(parents=True)
+        unit = self.units() / "boss-efficiency.service"
+        unit.write_text("[X]\nMemoryMax=4G   # my edit\n")
+        r = self.run_link_with_fake_systemctl(self.roots[1])
+        copies = sorted(self.units().glob("boss-efficiency.service.bak-*"))
+        self.assertEqual(len(copies), 1, r.stdout)
+        self.assertEqual(copies[0].read_text(), "[X]\nMemoryMax=4G   # my edit\n")
+        self.assertIn(str(copies[0]), r.stdout)
+        self.assertIn("MemoryMax=1G", unit.read_text())
+        self.run_link_with_fake_systemctl(self.roots[1])          # now current: no second copy
+        self.assertEqual(sorted(self.units().glob("*.bak-*")), copies)
+
+    def test_the_uninstaller_names_units_so_a_copy_is_never_picked_up_by_a_glob(self):
+        text = (HERE.parents[1] / "uninstall.sh").read_text()
+        self.assertNotRegex(text, r'UNITS"?/\*')
 
     def test_a_current_unit_is_left_alone_in_silence(self):
         self.run_link_with_fake_systemctl(self.roots[1])
