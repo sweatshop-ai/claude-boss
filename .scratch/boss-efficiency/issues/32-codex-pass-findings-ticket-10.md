@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Claimed by:** Solveig (part 1: PR 50, PR 60, PR 59 lines)
+**Claimed by:** Solveig (part 1: PR 50, PR 60, PR 59 lines), Birgit (part 3: PR 49 lines)
 
 **Status:** ready
 
