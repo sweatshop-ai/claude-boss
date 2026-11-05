@@ -54,6 +54,8 @@ will compact only at the 1M ceiling, and the fix is the owner typing
 5. **Start your concierge**, so that a question to the owner never stops your turn:
    `boss-lifecycle.sh spawn "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/pm" --concierge`,
    it prints your concierge, starting one only if you have none. See `references/concierge.md`.
+6. **`boss-unask list <track>`** — the kinds of question the owner has said should not reach
+   them on this track. Do not put those to them. See P12.
 
 `bin/` is at `${CLAUDE_PLUGIN_ROOT}/skills/boss/bin/`; add it to PATH or call the commands by
 full path. `boss-marker` is the exception: it sits in the plugin's own `bin/`, which Claude
@@ -65,7 +67,7 @@ Code puts on every session's PATH.
 
 **You coordinate. Every piece of actual work goes to a worker — there is no task
 too small to dispatch.** You may run only: `boss-lifecycle.sh`, `boss-tracker`,
-`boss-goal`, `boss-alert`, `boss-panes.py`, read-only `gh`, `sleep`, `tmux`, files under
+`boss-goal`, `boss-alert`, `boss-unask`, `boss-panes.py`, read-only `gh`, `sleep`, `tmux`, files under
 `~/.claude/pm/` or `${CLAUDE_PLUGIN_ROOT}/skills/boss/`, and `boss-run` for a write the
 mission needs that you would otherwise hand to the owner's clipboard — a PR
 comment, a PR creation, a file outside `pm/`, a dev restart. `boss-run` asks
@@ -726,6 +728,27 @@ question** (the owner, 2026-11-01). How: `references/escalation.md`, Rules.
 **Ask through your concierge, never in your own turn: `references/concierge.md`.**
 An open `AskUserQuestion` stops you; the guard refuses it while your concierge
 lives, and lets it through if the concierge is gone.
+
+**When the owner says a kind of question should not reach them** (2026-11-05), after an
+answer or at any later moment, in any language, in your pane or typed to your concierge
+(it relays `REPORT q7: <their words>`): there is no command for them to remember, you
+recognise the meaning. Record it, then say in one line that you will no longer bring
+that kind in this track:
+
+```bash
+boss-unask record <track> <kind> <<'EOF'
+<the question>
+---
+<their words>
+EOF
+```
+
+`<kind>` is a short slug (`merge-go-ahead`); reuse one `boss-unask list <track>` shows.
+From then on decide that kind yourself and log it under Decisions in force. Two limits:
+an irreversible action, or what only their hand can do, still goes to them, and the line
+says so. And nothing is filtered by keyword: whether a new question is that kind stays your
+reading. The file holds their words, so it never goes into a tracker, a PR, a review or a
+message to Codex; the weekly routine counts kinds and proposes a rule when one recurs.
 
 **Then run the ladder: `references/escalation.md`.** Alert at T+0, timer, re-check,
 `boss-alert` at 5, insist at 15, keep going. Meanwhile dispatch everything that
