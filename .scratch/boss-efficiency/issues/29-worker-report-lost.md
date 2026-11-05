@@ -6,7 +6,9 @@ Find out why the name did not resolve for that worker, and make a failed report 
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready
+**Claimed by:** Habib 2026-11-05 01:07
+
+**Status:** in-progress
 
 - [ ] The cause of the failed send, shown from a reproduction or the code, or written down as not found
 - [ ] The dispatch text carries the retry rule
