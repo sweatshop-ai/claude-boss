@@ -10,7 +10,7 @@ Ready for a worker when picked, but a small one.
 
 **Claimed by:** Otilia (boss Anton), 2026-11-05
 
-**Status:** in-progress
+**Status:** done; merge ac75ca1, PR 79. Codex owed until 2026-11-11.
 
 **Decision:** `claim <pane> --concierge` is accepted, and stamps the role only when a process in the pane's tree has `concierge-brief.md` in its command line (`pane_runs_concierge_brief`, via `ps`). That file is what `launch_claude` passes a concierge and never a worker, so the check is the session's real start state, not the flag. The registry was not used: a role stored there would be a second source to keep in step. A pane without the brief is refused before anything is stamped. `--concierge` on retire/restart/move is refused as before.
 
