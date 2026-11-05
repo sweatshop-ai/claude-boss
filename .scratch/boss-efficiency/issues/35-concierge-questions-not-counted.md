@@ -10,7 +10,7 @@ Fix to decide after reading `Index`: the concierge reaches a track by name (the 
 
 **Claimed by:** Tove 2026-11-05 05:16
 
-**Status:** in-progress
+**Status:** done (PR 65, 2dd5c82)
 
 - [ ] Test first: a track whose boss asks nothing and whose concierge asks 3 counts 3; a boss that asks 2 and a concierge that asks 3 count 5
 - [ ] Show on a real concierge transcript, by path, that attribution reaches the track
