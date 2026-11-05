@@ -23,8 +23,8 @@ Why (the owner, 2026-11-05): a question arrived from a pane called Fatima and th
 
 **Claimed by:** Vikram 2026-11-05
 
-**Status:** PRs open, awaiting merge order
+**Status:** done
 
-**PRs:** sweatshop-ai/claude-boss 75 (e2d7f56), sweatshop-ai/cc-agent-names 19 (1f4175a), thinkingtoo/agentview 2 (ee750a8).
+**Merged:** 2026-11-05. claude-boss PR 75, merge commit c41e005 (head e2d7f56); cc-agent-names PR 19, merge commit 14f63c6 (head 1f4175a); agentview PR 2, merge commit 6f59209 (head ee750a8). Full suites on t-compute: cc-agent-names all pass; agentview 2354 tests, one failure (`test_turn_hook` instruction length 2310 over 2150) that fails the same on dev, not from this work. Live checkouts fast-forwarded, agentview restarted. Codex owed until 2026-11-11.
 
 Codex owed: out until 2026-11-11 08:36; reviewed by a fresh Opus agent meanwhile.
