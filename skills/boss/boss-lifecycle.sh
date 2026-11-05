@@ -513,6 +513,7 @@ cmd_retire() {
     printf 'killed %s\n' "$pane"
   else
     tmux set-option -pu -t "$pane" @worker_role 2>/dev/null || true
+    tmux set-option -pu -t "$pane" @custom_title 2>/dev/null || true   # the "[concierge]" label goes with the role
     printf 'retired %s (pane kept)\n' "$pane"
   fi
 }

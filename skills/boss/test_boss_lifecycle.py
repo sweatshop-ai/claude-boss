@@ -706,6 +706,7 @@ class RestartKeepsName(unittest.TestCase):
         r = self.run_lifecycle("retire", "%5", row="w-sid\tidle\tpin1")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("set-option -pu -t %5 @worker_role", (self.tmp / "calls").read_text())
+        self.assertIn("set-option -pu -t %5 @custom_title", (self.tmp / "calls").read_text())
 
     def test_the_concierge_flag_means_spawn_only(self):
         r = self.run_lifecycle("restart", "%5", "--concierge", row="w-sid\tidle\tpin1")
