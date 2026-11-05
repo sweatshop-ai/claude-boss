@@ -1,0 +1,40 @@
+
+ ▐▛███▛█   Claude Code v2.1.311
+▝▜██████▀  Haiku 5.5 · Claude Ultra
+ ▝▝   ▝▝   /tmp/s32b.UXjo/demo
+
+
+❯ Call the AskUserQuestion tool once. Question text: Do you want to
+  proceed with the release? Option one label: Yes, and always use sonnet.
+  Option two label: No, wait. Omit the description of each option. Then
+  stop.
+
+  Ran 1 shell command
+──────────────────────────────────────────────────────────────────────────
+ ☐ Release
+
+Do you want to proceed with the release?
+
+❯ 1. Yes, and always use sonnet
+  2. No, wait
+  3. Type something.
+──────────────────────────────────────────────────────────────────────────
+  4. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

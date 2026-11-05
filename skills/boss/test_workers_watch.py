@@ -132,6 +132,21 @@ class WatchCase(unittest.TestCase):
             with self.subTest(width=width):
                 self.assertEqual("".join(self.run_watch(self.fixture("ask", width), role="concierge", runs=3)), "")
 
+    def test_a_real_question_without_option_descriptions_raises_no_alert(self):
+        # Captured as the others are, with the descriptions omitted: the "Yes, and
+        # always" option then sits 6 non-blank rows from the bottom and the header 7.
+        self.assertEqual("".join(self.run_watch(self.fixture("askplain", 74), role="concierge", runs=3)), "")
+
+    def test_a_permission_dialog_below_an_answered_question_still_alerts(self):
+        # The question's footer is in the scrollback, not at the bottom.
+        _, second = self.run_watch(self.fixture("askplain", 74) + PERMISSION_FULL, role="concierge")
+        self.assertIn("permission-prompt", second)
+
+    def test_a_permission_dialog_whose_option_quotes_the_question_footer_still_alerts(self):
+        screen = PERMISSION_FULL.replace("Esc to cancel", "Enter to select the file\n Esc to cancel")
+        _, second = self.run_watch(screen, role="concierge")
+        self.assertIn("permission-prompt", second)
+
     def test_a_real_questions_footer_carries_no_tab_to_amend(self):
         for width in (74, 31, 25):
             with self.subTest(width=width):
