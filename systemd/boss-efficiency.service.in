@@ -11,6 +11,7 @@ Documentation=file://@ROOT@/routines/boss-efficiency.md
 # a change to this template does, and boss-link says so.
 Type=oneshot
 ExecStart=@ROOT@/routines/boss-efficiency.sh
+Environment=CLAUDE_CONFIG_DIR=@CFG@
 # A scan of the transcripts takes minutes at nice 19; it can also wait up to 2 h
 # for the transcripts lock, and the body caps the scan at 1 h; 4 h leaves the body room to log. The backstop is for a wedged interpreter.
 TimeoutStartSec=4h
