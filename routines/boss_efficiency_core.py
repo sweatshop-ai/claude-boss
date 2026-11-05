@@ -696,7 +696,7 @@ def owner_reports(cfg, start, end):
     inside, total = {}, collections.Counter()
     for r in unask.read(cfg):
         try:
-            t = dt.datetime.fromisoformat(r["date"]).timestamp()
+            t = dt.datetime.fromisoformat(r["date"].replace("Z", "+00:00")).timestamp()
         except ValueError:
             continue
         if t >= end: continue
@@ -724,7 +724,7 @@ def coverage_note(m):
 
 # ------------------------------------------------------------------ report
 def proposal(track, kind, n):
-    return ("**Proposal:** %s: %s, reported %d times by the owner as not theirs to answer. "
+    return ("Proposal: %s: %s, reported %d times by the owner as not theirs to answer. "
             "Draft a rule for the skill and put it through the normal review; nothing is filtered by this routine." % (track, kind, n))
 
 
@@ -743,7 +743,7 @@ def render(week, label, fails, flags, reports=None, props=()):
     if reports:
         out.append("**Owner reports** (questions that should not have reached them): "
                    + "; ".join("%s: %s" % (tr, ", ".join("%s %d" % kv for kv in sorted(k.items()))) for tr, k in sorted(reports.items())))
-    for tr, kind, n in props: out.append(proposal(tr, kind, n))
+    for tr, kind, n in props: out.append(proposal(tr, kind, n).replace("Proposal:", "**Proposal:**", 1))
     out += ["", "| Track | Budget | Wall h | " + " | ".join(STATES) + " | " + " | ".join("tok " + p for p in PHASES)
             + " | Asks/day | CI waits | CI h | Outside |", "|" + "---|" * (len(STATES) + len(PHASES) + 7)]
     for tr, m in sorted(week["tracks"].items(), key=lambda kv: -kv[1]["total_tokens"]):
@@ -866,7 +866,7 @@ def run(cfg, end, weeks, dry):
             problems += 1
             failed += bool(fails)
             said = "boss-efficiency week ending %s: %s" % (
-                label, "; ".join(["FAILED " + f for f in fails] + flags + [proposal(*p).replace("**", "") for p in props]))
+                label, "; ".join(["FAILED " + f for f in fails] + flags + [proposal(*p) for p in props]))
             if not alert(said, dry) and not dry:
                 failed += 1
                 unsent = [u for u in unsent if u["label"] != label] + [dict(label=label, text=said)]
