@@ -88,7 +88,9 @@ lives. A marketplace upgrade lands in a new cache directory, and the
 SessionStart hook `bin/boss-link` moves the link there on the next session, so
 the units never point at a version that is gone. The same hook rewrites the unit
 files you already installed from the current templates (it never installs or
-enables one). `install.sh` runs once; it does not need re-running after an upgrade.
+enables one). The file it replaces is kept beside it as `<unit>.bak-<date-time>`,
+so a hand edit is not lost; a deliberate change belongs in a drop-in,
+`<unit>.d/override.conf`, which is left alone. `install.sh` runs once; it does not need re-running after an upgrade.
 
 Start a boss inside tmux:
 

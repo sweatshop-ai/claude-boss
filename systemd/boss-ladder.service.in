@@ -1,3 +1,6 @@
+# Generated from the plugin's template: bin/boss-link rewrites this file when the
+# template changes, keeping the replaced one as <unit>.bak-<date>. Put a deliberate
+# change in a drop-in, <unit>.d/override.conf, which is left alone.
 [Unit]
 Description=Post due boss escalation rungs from tracker marker lines
 Documentation=file://@ROOT@/routines/boss-ladder.md

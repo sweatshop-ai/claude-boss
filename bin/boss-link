@@ -23,7 +23,9 @@
 # version the link points at (MemoryMax reached fresh installs only, because
 # install.sh copies the units once). A unit is rewritten only where its file
 # already exists, so a machine that never ran install.sh gets nothing, and it
-# is never enabled or started; one `daemon-reload` follows a rewrite.
+# is never enabled or started; one `daemon-reload` follows a rewrite. The file it
+# replaces is copied to <unit>.bak-<date-time> first (systemd ignores that suffix;
+# uninstall.sh names the units one by one), because it may hold a hand edit.
 set -euo pipefail
 
 explicit="${1:-}"
@@ -47,8 +49,11 @@ refresh_units() {
     [[ -f $units/$u && -f $tdir/$u.in ]] || continue
     want="$(sed -e "s|@ROOT@|$link|g" -e "s|@CFG@|$cfg|g" "$tdir/$u.in"; echo x)"
     [[ "$(cat -- "$units/$u"; echo x)" == "$want" ]] && continue
+    # the file may hold an edit made by hand: keep the old content, never over an earlier copy
+    bak="$units/$u.bak-$(date +%Y-%m-%d-%H%M%S)"
+    cp -pn -- "$units/$u" "$bak"
     printf '%s' "${want%x}" > "$units/$u"
-    echo "boss-link: refreshed $units/$u"
+    echo "boss-link: refreshed $units/$u (previous kept as $bak)"
     changed=1
   done
   if [[ -n $changed ]] && command -v systemctl >/dev/null 2>&1; then

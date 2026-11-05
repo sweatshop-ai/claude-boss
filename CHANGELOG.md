@@ -28,7 +28,7 @@
   The P17 proof asks for the resolved path of what runs, not only an import. `bin/boss-link` rewrites
   the installed systemd units from the current templates (so `MemoryMax=1G` reaches installs that
   predate it), only where the unit file already exists, never enabling or starting anything; it
-  runs `systemctl --user daemon-reload` after a rewrite. A hand-edited unit is overwritten.
+  runs `systemctl --user daemon-reload` after a rewrite. A replaced unit is first copied to `<unit>.bak-<date-time>`; a deliberate edit belongs in a drop-in (`<unit>.d/override.conf`), which is left alone.
 
 - **The P17 dispatch text no longer asks for the database URL.** A URL can carry `user:pass@`, and the
   worker's report is copied into the boss's messages and transcripts. The worker now reports the
