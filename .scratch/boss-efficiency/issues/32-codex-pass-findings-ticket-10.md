@@ -22,3 +22,8 @@
 - [ ] b. PR 48, `routines/boss-workers-watch.sh:100`: `tail -n 15` of the capture takes blank rows when 15 or more empty rows sit below the dialog (reproduced with `tmux capture-pane -p -S -40` on a fresh pane). Take the last non-blank rows.
 - [x] b. PR 60, `skills/boss/SKILL.md:319-320` and `skills/team/SKILL.md:79`: a turn is defined as each tool call, while `routines/ctx_over_measure.py:82-97` counts one turn per assistant message id; batched calls make workers overcount against the 35-turn line. Fixed in PR 67 (part 1).
 - [x] d. PR 59, `skills/boss/SKILL.md:862-872`: the self-contained worker dispatch leaves out the rule that `code-review` runs once per PR (stated at line 616). Fixed in PR 67 (part 1).
+
+Not built (part 1, PR 67; each fails closed, a refusal costs one retry; Opus round 2, class c/d):
+- C1. PR 67, `retire_require_idle`: a pane this same boss claims while it waits is refused, because the owner-changed check runs before the own-boss rule.
+- C4. PR 67, `retire_require_idle`: the owner is read on every retry, so one failed `boss-panes.py get` during a long `--wait-idle` refuses the retire and says why.
+- No `restart` variant of the owner tests (`test_boss_lifecycle.py`), only `retire`.
