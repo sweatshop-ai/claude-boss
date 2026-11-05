@@ -10,7 +10,9 @@ No bar is set in advance. In his words: "I think we'll just look at the numbers 
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Claimed by:** Kaveh 2026-11-05 09:14
+
+**Status:** in-progress
 
 - [x] The graph chosen; no bar in advance, by the owner's choice
 - [ ] Both runs measured the same way and put in front of the owner
