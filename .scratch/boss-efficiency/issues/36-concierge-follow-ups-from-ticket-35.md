@@ -11,15 +11,23 @@
 7. **(d) The `find(">", f.end())` slice has no test.** Reverting that hunk alone keeps all 70 tests green. Fix: a test with text containing `>` before the tag.
 8. **(c) `ASK_MSG` misses a backticked `ASK q1:`, and the sender is never checked**, so any peer whose message starts `ASK x:` flags its receiver as a concierge (it adds nothing unless the receiver has the tool). Leave unless seen.
 
-**Blocked by:** None (can start immediately)
+**Blocked by:**
+- External: the weekly run of 2026-11-09 (Anton reads whether the questions alert fired on a track with a concierge)
 
 
-**Claimed by:** Birgit 2026-11-05 05:38
+**Status:** waiting
 
-**Status:** in-progress
+Decisions and findings (Rumi, 2026-11-05, PR with branch `rumi/ticket-36`):
 
-- [ ] Item 1: a test with one boss, two tracks and one concierge, each `ASK` on the track the boss was on at that time
-- [ ] Item 3: a test that a concierge question open time is in `states["ask"]`
-- [ ] Item 4: a decision, then a test
-- [ ] Items 5, 6, 7: the fix and the two tests, one PR
+- Item 1: built. An `ASK` message to a concierge is placed by where the boss that serves the voted track was at that moment (`Index._asked_on`); the rest of the concierge's messages keep the socket vote.
+- Item 3: did not reproduce on main. A concierge's `AskUserQuestion` is `ask_owner`, so `measure_track` already puts its open time in `states["ask"]` through the worker loop (the `ev` line for the `ask` group). The test is added as a guard and passes on main.
+- Item 4: the concierge's tokens stay in `build` (Anton's decision: 2.4% moves no conclusion).
+- Items 5, 6, 7: built. 5 needs `is_error` as well as the phrase; 6 is a test in `test_boss_guard.py` that runs the guard and looks for `GUARD_REFUSAL` in its reason; 7's test (text with `>` before the tag) was shown to fail when the hunk is reverted.
+- Item 8: class c, not built (Anton's decision).
+
+- [x] Item 1: a test with one boss, two tracks and one concierge, each `ASK` on the track the boss was on at that time
+- [x] Item 3: a test that a concierge question open time is in `states["ask"]` (did not reproduce; the test guards it)
+- [x] Item 4: a decision, then a test (the decision: stays in `build`; no test, nothing changes)
+- [x] Items 5, 6, 7: the fix and the two tests, one PR
+- [x] Item 8: (not built) class c
 - [ ] Item 2: nothing to build; after the run of 2026-11-09, say whether the alert fired
