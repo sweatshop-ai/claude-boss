@@ -6,12 +6,12 @@
 
 **Blocked by:** None (can start immediately)
 
-**Claimed by:** Pablo 2026-11-04 20:49
+**Claimed by:** Kaveh 2026-11-05
 
-**Status:** in-progress
+**Status:** done
 
 - [x] The repositories with a PR matrix are listed, each read from its workflow file (seven read; none has a PR matrix now, four lost theirs on 2026-10-25/26 by others' changes; seventh repo identified by elimination, see `ci-wait-2026-11-04.md`)
-- [ ] Each runs one version on PRs and the matrix nightly, with a green nightly run on record (amended 2026-11-04: render-doc and sheaf moved the matrix from main to nightly on 2026-10-25/26, on purpose, because three jobs held the pool for about 25 minutes per merge; that decision stands). Open because sheaf's nightly has been red on py3.14 since 2026-10-31 (`test_hub_lifecycle.py::test_a_hub_that_is_stopped_and_continued_keeps_running`); render-doc, mail-replies, tiroir-clients and tt-tiroir are green on 2026-11-04; owner being asked by Anton, not touched here
+- [x] Each runs one version on PRs and the matrix nightly, with a green nightly run on record (amended 2026-11-04: render-doc and sheaf moved the matrix from main to nightly on 2026-10-25/26, on purpose, because three jobs held the pool for about 25 minutes per merge; that decision stands). Open because sheaf's nightly has been red on py3.14 since 2026-10-31 (`test_hub_lifecycle.py::test_a_hub_that_is_stopped_and_continued_keeps_running`); render-doc, mail-replies, tiroir-clients and tt-tiroir are green on 2026-11-04; owner being asked by Anton, not touched here; closed 2026-11-05: sheaf run 41990051404 (07:50Z, ca80ef5, the merge of PR 196), py3.11, 3.13 and 3.14 all success after three failed nightlies on 47fba4d; render-doc run 41988406977 (07:36Z, cdae0f6), the same three all success
 - [x] Wait until the last job starts, before and after, per repository, with the sample size and the pool load; an after sample too small to read moves to ticket 13 (numbers in `ci-wait-2026-11-04.md`; pool load is a proxy, the API has no history; small after samples listed there go to ticket 13)
 - [x] The reason for the cancelled runs is counted: superseded by a push, cancelled by a worker, other (1,045 of 3,529 cancelled; the API cannot split superseded from worker-cancelled except in claude-boss, which has no concurrency group; see `ci-wait-2026-11-04.md`)
 
