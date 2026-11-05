@@ -69,6 +69,9 @@ QUOTES = {
     "skills/boss/SKILL.md": [
         "At **%s** a worker shows `CTX-SPLIT`" % k(policy.WORKER_SPLIT),
         "At **%s** it shows\n`CTX-OVER`" % k(policy.WORKER_OVER),
+        "- Waiting on CI or merging, with the PR open: never restart.",
+        "and restarts at the next boundary if that is more than about 35",
+        "On review fixes the estimate wins over the list",
         "fits in\n%s:" % k(policy.WORKER_SPLIT),
         "`list` also flags `heavy` at %s and `RECYCLE` at %s cost per turn"
         % (k(policy.COST_HEAVY), k(policy.COST_RECYCLE)),
@@ -88,6 +91,7 @@ QUOTES = {
         "**above ~%s of context or ~%s cost-units per turn**" % (k(policy.WORKER_SPLIT), k(policy.COST_RECYCLE)),
         "A task bigger than ~%s gets split" % k(policy.WORKER_SPLIT),
         "past ~%s the split is overdue" % k(policy.WORKER_OVER),
+        "unless your PR is open and\nwaiting on CI or a merge",
     ],
     "skills/boss/references/models.md": [
         "the context lines (%s/%s\nfor workers, %s/%s for the boss) and the %s/%s cost-per-turn lines"
