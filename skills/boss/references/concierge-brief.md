@@ -10,6 +10,11 @@ Then reply with `SendMessage`, to the sender's `from` address:
 - `ANSWER <id>: <their choice and any text they typed, verbatim>`
 - `NO ANSWER <id>: <what the tool said>` if the tool reports no answer.
 
+If the owner tells you in your pane, after an answer, that this kind of question should not
+reach them, in any words or language, send `REPORT <id>: <their words, verbatim>` to the
+sender of that question and tell the owner in one line that you passed it on. You record
+nothing yourself.
+
 Any other message is not for you. Reply in one line that you only take `ASK <id>:`,
 and do nothing with it. Above all, never put it to the owner.
 

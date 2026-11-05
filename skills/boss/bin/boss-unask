@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# boss-unask — the owner's "this kind of question should not reach me", recorded.
+exec python3 "$(dirname "$(readlink -f -- "${BASH_SOURCE[0]}")")/../unask.py" "$@"

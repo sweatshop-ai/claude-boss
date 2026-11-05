@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **The owner can say a kind of question should not reach them (ticket 06).** In plain words, any
+  language, after an answer or later, also through the concierge. `bin/boss-unask record <track> <kind>`
+  (stdin: the question, a `--- owner ---` line, their words) writes one line to the private
+  `pm/unwanted-questions.jsonl` (mode 600, never the repo); `list <track>` reads it back at session
+  start, and the boss stops bringing that kind in that track. The weekly efficiency routine counts
+  reports by kind and proposes a rule when a kind recurs; it prints kinds and counts, never the words,
+  and filters nothing. Replaces the Jev filter the ticket first planned: the owner's 20 labels held
+  two clear cases, too few to measure a threshold.
+
 - **`restart --require-idle` re-checks the owner before `/exit`, refuses a dialog it cannot compare, and ends its wait on time (ticket 32, part 1).**
   Codex found on the merged PR 50 that pane ownership was read once, before the `--wait-idle` loop, so a
   boss that claimed or `--force`d the pane during the wait was sent `/exit` by the stale command; the owner
