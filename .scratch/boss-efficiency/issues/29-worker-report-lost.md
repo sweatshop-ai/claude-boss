@@ -8,8 +8,8 @@ Find out why the name did not resolve for that worker, and make a failed report 
 
 **Claimed by:** Habib 2026-11-05 01:07
 
-**Status:** in-progress
+**Status:** done (PR 61, 3baea60)
 
-- [ ] The cause of the failed send, shown from a reproduction or the code, or written down as not found
-- [ ] The dispatch text carries the retry rule
-- [ ] The skill says how a boss tells a quiet worker from a finished one
+- [x] Name mismatch shown, why not found: the from-name (a session title) is not the registry name; a send to it fails, the registry name and the from socket address deliver. Why they differ is not shown
+- [x] The dispatch text carries the retry rule
+- [x] The skill says how a boss tells a quiet worker from a finished one
