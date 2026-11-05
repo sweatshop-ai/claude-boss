@@ -133,6 +133,10 @@ class Precision(GuardCase):
                     "/opt/whatever/claude-team/hooks/team-line abc --did x --n 0"):
             self.assertEqual(self.fire(cmd), "", "scolded for `%s`" % cmd)
 
+    def test_the_heredoc_form_the_skill_teaches_is_not_scolded(self):
+        cmd = "boss-unask record demo merge-go-ahead <<'EOF'\nMerge PR 5, shall I?\n---\nnot this kind\nEOF"
+        self.assertEqual(self.fire(cmd), "")
+
     def test_a_cd_prefix_does_not_hide_an_allowed_command(self):
         self.assertEqual(self.fire("cd ${CLAUDE_PLUGIN_ROOT}/skills/boss/bin && ./boss-tracker list"), "")
 

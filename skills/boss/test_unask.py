@@ -72,9 +72,10 @@ class Unask(unittest.TestCase):
             self.assertEqual(r.returncode, 1, (track, kind))
         self.assertFalse(self.file.exists())
 
-    def test_a_long_text_is_cut(self):
-        self.run_("record", "alpha-x", "k", stdin="q" * 5000 + "\n---\nw")
-        self.assertLessEqual(len(self.lines()[0]["question"]), 1000)
+    def test_a_long_question_is_cut_and_the_owners_words_keep_more_room(self):
+        self.run_("record", "alpha-x", "k", stdin="q" * 5000 + "\n---\n" + "w" * 5000)
+        rec = self.lines()[0]
+        self.assertEqual((len(rec["question"]), len(rec["words"])), (1000, 4000))
 
     def test_a_separator_inside_the_owners_words_stays_in_the_words(self):
         self.run_("record", "alpha-x", "k", stdin="q\n---\nfirst\n---\nsecond")

@@ -743,6 +743,10 @@ boss-unask record <track> <kind> <<'EOF'
 EOF
 ```
 
+You record it under your own track, whichever way it reached you, and before a question that
+looks like a reported kind you run `boss-unask list <track>` again: a report made since your
+start lives only in the file.
+
 `<kind>` is a short slug (`merge-go-ahead`); reuse one `boss-unask list <track>` shows.
 From then on decide that kind yourself and log it under Decisions in force. Two limits:
 an irreversible action, or what only their hand can do, still goes to them, and the line

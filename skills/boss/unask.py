@@ -19,7 +19,8 @@ from datetime import datetime, timezone
 import boss_store
 
 KIND_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,47}$")
-MAX_CHARS = 1000
+MAX_QUESTION = 1000        # the owner's words are the label: they get four times the room
+MAX_WORDS = 4000
 FILE = "unwanted-questions.jsonl"
 
 
@@ -27,8 +28,8 @@ def path(cfg=None):
     return boss_store.pm_dir(cfg) / FILE
 
 
-def _clean(s):
-    return " ".join(s.split())[:MAX_CHARS]
+def _clean(s, cap):
+    return " ".join(s.split())[:cap]
 
 
 def parse(text):
@@ -36,7 +37,7 @@ def parse(text):
     lines = text.splitlines()
     for i, l in enumerate(lines):
         if l.strip() == "---":
-            q, w = _clean(" ".join(lines[:i])), _clean(" ".join(lines[i + 1:]))
+            q, w = _clean(" ".join(lines[:i]), MAX_QUESTION), _clean(" ".join(lines[i + 1:]), MAX_WORDS)
             if q and w:
                 return q, w
             break
@@ -61,9 +62,11 @@ def record(track, kind, text, cfg=None, session=None, now=None):
         fd = os.open(p, os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW, 0o600)
         try:
             os.fchmod(fd, 0o600)
-            os.write(fd, (json.dumps(rec, ensure_ascii=False) + "\n").encode())
-        finally:
+            with os.fdopen(fd, "ab") as f:          # a file object finishes a short write
+                f.write((json.dumps(rec, ensure_ascii=False) + "\n").encode())
+        except BaseException:
             os.close(fd)
+            raise
     finally:
         os.close(lock)
     return rec
