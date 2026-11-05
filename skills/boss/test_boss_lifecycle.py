@@ -723,7 +723,8 @@ class RestartKeepsName(unittest.TestCase):
         """claim --concierge on a pane whose process tree is `argv` (a reboot-shaped case:
         no @worker_role on the pane, the session started with or without the brief)."""
         # pane_pid is the pane's shell and the session is its child, the normal shape
-        kid = subprocess.Popen(["bash", "-c", 'python3 -c "import time; time.sleep(30)" "$@"; true', "sh"] + argv)
+        kid = subprocess.Popen(["bash", "-c", 'python3 -c "import time; time.sleep(30)" "$@"; true', "sh"] + argv,
+                               start_new_session=True)
         try:
             (self.tmp / "panepid").write_text("%d\n" % kid.pid)
             env = dict(os.environ, PATH="%s:%s" % (self.tmp / "bin", os.environ["PATH"]), TMUX="stub",
@@ -731,7 +732,7 @@ class RestartKeepsName(unittest.TestCase):
             r = subprocess.run(["bash", str(self.tmp / "boss-lifecycle.sh"), "claim", "%5", "--concierge"],
                                env=env, capture_output=True, text=True, timeout=60)
         finally:
-            kid.kill()
+            os.killpg(kid.pid, 9)       # the shell and its child, not the shell alone
             kid.wait()
         return r, (self.tmp / "calls").read_text()
 

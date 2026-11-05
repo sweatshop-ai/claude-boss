@@ -325,7 +325,7 @@ pane_runs_concierge_brief() {
   for p in $(ps -eo pid=,ppid= | awk -v root="$pid" '
       { par[$1] = $2 }
       END { for (q in par) for (x = q; x != "" && x != 0; x = par[x]) if (x == root) { print q; break } }'); do
-    tr '\0' '\n' <"/proc/$p/cmdline" 2>/dev/null | awk '
+    { tr '\0' '\n' <"/proc/$p/cmdline"; } 2>/dev/null | awk '
       prev == "--append-system-prompt-file" && $0 ~ /\/references\/concierge-brief\.md$/ { found = 1 }
       { prev = $0 }
       END { exit !found }' && return 0
