@@ -68,7 +68,7 @@ def running(cfg=None):
     out = {}
     for mark in (boss_store.config_dir(cfg) / "plugins" / "cache").glob(
             f"*/{PLUGIN}/*/.in_use/*"):
-        if mark.name.isdigit() and _same_process(mark):
+        if mark.name.isdigit() and _same_process(mark, cfg):
             out.setdefault(mark.parent.parent.name, []).append(int(mark.name))
     return out
 
@@ -78,13 +78,22 @@ def proc_start(pid):
     return Path("/proc", str(pid), "stat").read_text().rpartition(")")[2].split()[19]
 
 
-def _same_process(mark):
+def _same_process(mark, cfg=None):
     """The file's pid is a live session: registry.is_live's rules, so a reused pid, a
-    zombie, an orphan and a marker with no start time all count as gone."""
+    zombie, an orphan with a session record and a marker with no start time count as gone.
+
+    The marker holds pid and procStart only, so the entrypoint, which decides whether a
+    controlling terminal is required, comes from sessions/<pid>.json. That record counts
+    only when its procStart is the marker's: a different one belongs to an earlier holder
+    of the pid. With no usable record the entrypoint is unknown and the terminal check
+    does not apply, so a headless process with the right start time still counts."""
     try:
         rec = json.loads(mark.read_text())
+        session = registry.by_pid(mark.name, cfg) or {}
+        same = str(session.get("procStart")) == str(rec.get("procStart"))
+        entry = session.get("entrypoint") if same else None
         return registry.is_live({"pid": mark.name, "procStart": rec.get("procStart"),
-                                 "entrypoint": rec.get("entrypoint")})
+                                 "entrypoint": entry})
     except (OSError, ValueError, AttributeError):
         return False
 

@@ -101,6 +101,59 @@ class Gap(unittest.TestCase):
         self.mark("0.19.2", child.pid)
         self.assertEqual(self.gaps("0.21.0"), [])
 
+    def headless_child(self):
+        """A live process with no controlling terminal (field 5 of /proc/<pid>/stat is 0)."""
+        child = subprocess.Popen(["sleep", "30"], start_new_session=True)
+        self.addCleanup(child.wait)
+        self.addCleanup(child.kill)
+        while True:
+            try:
+                version_gap.proc_start(child.pid)
+                break
+            except OSError:
+                time.sleep(0.01)
+        self.assertEqual(Path("/proc/%d/stat" % child.pid).read_text().rpartition(")")[2].split()[4], "0")
+        return child.pid
+
+    def session(self, pid, entrypoint, start="auto"):
+        d = self.cfg / "sessions"
+        d.mkdir(exist_ok=True)
+        start = version_gap.proc_start(pid) if start == "auto" else start
+        (d / ("%d.json" % pid)).write_text(json.dumps(
+            {"pid": pid, "procStart": start, "entrypoint": entrypoint}))
+
+    def test_an_orphaned_cli_session_is_not_a_session(self):
+        # The marker holds pid and procStart only; the entrypoint comes from the session record.
+        self.install("0.21.0")
+        pid = self.headless_child()
+        self.mark("0.19.2", pid)
+        self.session(pid, "cli")
+        self.assertEqual(self.gaps("0.21.0"), [])
+
+    def test_a_headless_session_that_is_not_the_cli_still_counts(self):
+        self.install("0.21.0")
+        pid = self.headless_child()
+        self.mark("0.19.2", pid)
+        self.session(pid, "sdk-cli")
+        self.assertIn("1 live session(s)", self.gaps("0.21.0")[0])
+
+    def test_a_marker_with_no_session_record_is_judged_on_pid_and_start_time_alone(self):
+        # Without the record the entrypoint is unknown, so the terminal check cannot apply: a
+        # live process whose start time matches counts. A missed orphan costs a warning line;
+        # dropping a real old session would cost the report.
+        self.install("0.21.0")
+        pid = self.headless_child()
+        self.mark("0.19.2", pid)
+        self.assertIn("1 live session(s)", self.gaps("0.21.0")[0])
+
+    def test_the_record_of_another_process_is_not_read(self):
+        # A record whose start time differs belongs to an earlier holder of the pid.
+        self.install("0.21.0")
+        pid = self.headless_child()
+        self.mark("0.19.2", pid)
+        self.session(pid, "cli", start="1")
+        self.assertIn("1 live session(s)", self.gaps("0.21.0")[0])
+
     def test_a_cache_dated_far_in_the_future_is_stale(self):
         # A clock set back once left `until` years ahead and froze the release check.
         self.install("0.19.1")
