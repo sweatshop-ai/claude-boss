@@ -309,15 +309,16 @@ dispatch the remainder with the handoff as its input. At **250k** it shows
 **A worker past 250k (the owner, 2026-11-05).** Two tests, both:
 
 - Waiting on CI or merging, with the PR open: never restart.
-- Anything else, fixing findings from a review round included: ask the worker how
-  much is left, and restart at the next boundary if that is more than about 35
+- Anything else, fixing findings from a review round included: the boss asks the
+  worker how much is left, and restart at the next boundary if that is more than about 35
   turns. On review fixes the estimate wins over the list; the new session picks up
   the findings from the handoff.
 
 A restart costs about 425k units of orientation and a turn above 250k costs 39k
 against 19k at 100–150k, so it pays after about 35 turns. The flag shows in `list`
-and nothing else acts on it: the boss has to ask. Measured over two weeks, 5 of 32
-workers past 250k were asked, and all 5 ended within 15 turns of the ask.
+and nothing else acts on it: the boss has to ask. A turn here is one model reply, tool
+calls included, the unit of the 35 and of the costs above. The measure is
+`routines/ctx_over_measure.py`.
 
 `list` also flags `heavy` at 60k and `RECYCLE` at 90k cost per turn; under this
 rule they mean a task that ran long, the same remedy as `CTX-SPLIT`.

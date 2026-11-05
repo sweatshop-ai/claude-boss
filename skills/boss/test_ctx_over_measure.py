@@ -49,6 +49,22 @@ class Measure(unittest.TestCase):
         self.assertTrue(r["ended_after_ask"])
         self.assertEqual(r["left_at_cross"], 7)
 
+    def test_ask_before_the_crossing_is_not_after(self):
+        recs = [DISPATCH] + [asst(i, 100_000 + i * 20_000) for i in range(8)]     # turn 7 is 240k, turn 8 would cross
+        recs += [user('<cross-session-message from="uds:/x.sock">stop at the next boundary')]
+        recs += [asst(8 + i, 260_000) for i in range(3)]
+        with tempfile.TemporaryDirectory() as d:
+            r = m.scan(write(d, recs))
+        self.assertEqual(r["over_at"], 8)
+        self.assertFalse(r["asked_after"])
+        self.assertTrue(r["asked_between"])
+
+    def test_ordinary_messages_are_not_asks(self):
+        for tx in ("what is the current status of CI", "stop at the first failure", "see CTX-SPLIT in the list"):
+            self.assertIsNone(m.ASK.search(tx), tx)
+        for tx in ("you are at 267k", "stop at the current state", "(CTX-OVER)"):
+            self.assertTrue(m.ASK.search(tx), tx)
+
     def test_never_asked(self):
         recs = [DISPATCH] + [asst(i, 260_000) for i in range(4)]
         with tempfile.TemporaryDirectory() as d:

@@ -9,7 +9,7 @@ is public. Stdout carries overall figures only.
 Run it under the transcript lock, never beside other readers:
 
     flock ~/.claude/pm/.boss-efficiency-transcripts.lock nice -n 19 ionice -c3 \\
-        python3 routines/ctx_over_measure.py --days 7
+        python3 routines/ctx_over_measure.py --days 14
 
 It stops when the load average passes 20. No LLM, no network.
 
@@ -41,7 +41,7 @@ MAX_LOAD = 20
 RESTART_TURNS = 35          # the owner's line: a restart pays when more than this is left
 ASK_WITHIN = 15             # a worker that ended this many turns after the ask reached its boundary
 CROSS = re.compile(r"<cross-session-message")
-ASK = re.compile(r"CTX-(?:OVER|SPLIT)|you are at \d+k|past the (?:150k|250k)|(?:next|current) (?:boundary|stat)|stop at the|write the hand-?off", re.I)
+ASK = re.compile(r"CTX-OVER|you are at \d+k|past the (?:150k|250k)|(?:next|current) boundary|stop at the (?:next|current) (?:boundary|state)\b|write the hand-?off", re.I)
 
 
 def is_worker(path):
@@ -114,8 +114,8 @@ def scan(path):
                split_at=split, over_at=over,
                cost_over=round(sum(c for x, c in zip(ctxs, costs) if x >= policy.WORKER_OVER)))
     if over is not None:
-        late = [a for a in asks if a >= over]
-        early = [a for a in asks if split is not None and split <= a < over]
+        late = [a for a in asks if a > over]
+        early = [a for a in asks if split is not None and split < a <= over]
         row["left_at_cross"] = len(order) - over
         row["asked_after"] = bool(late)
         row["asked_between"] = bool(early)
@@ -127,7 +127,7 @@ def scan(path):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--days", type=float, default=7)
+    ap.add_argument("--days", type=float, default=14)
     ap.add_argument("--out", help="rows file (default: <config>/pm/ctx-over-measure.jsonl)")
     a = ap.parse_args(argv)
     cfg = Path(boss_store.config_dir())

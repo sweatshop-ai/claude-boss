@@ -53,7 +53,7 @@ the pin are read from its last 4 MB by one module, `skills/boss/transcript.py`.
 transcript. A worker that took input after the boss looked has a newer one.
 
 **Flag**: what the policy says about one session right now, by role.
-Worker: `CTX-SPLIT` (cut the task at its next boundary), `CTX-OVER` (overdue).
+Worker: `CTX-SPLIT` (cut the task at its next boundary), `CTX-OVER` (past 250k: the "Session age" rule applies).
 Boss: `CTX-EVAL`, `CTX-RESTART`. Either: `heavy`, `RECYCLE` (cost per turn).
 
 **Stamp**: the `@boss_pane` option on a tmux pane, naming the pane of the boss

@@ -14,8 +14,7 @@
   boundary now". The owner's two tests apply: never restart a worker waiting on CI or merging with its
   PR open; otherwise ask how many turns are left and restart at the next boundary if more than about
   35, review fixes included (the estimate wins over the list). Nothing enforces the flag, it only
-  shows in `list`; measured over two weeks, 5 of 32 workers past 250k were asked, all 5 ended within
-  15 turns of the ask. New `routines/ctx_over_measure.py` reads that, per worker, into a private file
+  shows in `list`, so the boss has to ask. New `routines/ctx_over_measure.py` reads that, per worker, into a private file
   under `<config>/pm/`.
 
 - **The P17 dispatch text no longer asks for the database URL.** A URL can carry `user:pass@`, and the
