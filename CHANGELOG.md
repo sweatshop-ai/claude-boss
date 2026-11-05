@@ -4,8 +4,8 @@
 
 - **A question through the concierge names its boss, and holds one question (ticket 39).** The boss opens
   each `ASK` with its own name and track, which the concierge cannot know; a question without them is still
-  asked, with `From the boss at <address>.` in front and the rest unchanged. One `ASK`, one question: if
-  several arrive, the concierge asks them one at a time and answers once, numbered.
+  asked, with `From <name>, the boss at <address>.` in front and the rest unchanged. One `ASK`, one question: if
+  several arrive, the concierge asks them one at a time and answers each, numbered `q7.1`, `q7.2`.
 
 - **`boss-unask` survives a torn record, and its example cannot end early (ticket 37).** `read` decodes per
   line, so an interrupted multi-byte append skips that line instead of failing `list` and the weekly

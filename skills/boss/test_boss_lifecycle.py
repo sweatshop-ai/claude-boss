@@ -701,21 +701,6 @@ class RestartKeepsName(unittest.TestCase):
         self.assertIn("--append-system-prompt-file", self.launches()[0])
         self.assertIn("concierge-brief.md", self.launches()[0])
 
-    def test_the_texts_make_a_question_name_its_boss_and_hold_one_question(self):
-        # The owner read a boss's question as a lesser worker's: nothing on it said who wrote it.
-        refs = Path(__file__).resolve().parent / "references"
-        brief = (refs / "concierge-brief.md").read_text()
-        guide = (refs / "concierge.md").read_text()
-        skill = (Path(__file__).resolve().parent / "SKILL.md").read_text()
-        self.assertIn("naming the boss that wrote it and its track", brief)
-        self.assertIn("From the boss at <the sender's\nfrom address>.", brief)   # missing: still asks
-        self.assertIn("ask them one at a time", brief)                           # several: none dropped
-        self.assertIn("never send the\nmessage back", brief)
-        self.assertIn("Open with who you are", guide)
-        self.assertIn("One question per `ASK`", guide)
-        self.assertIn("name and your track", skill)
-        self.assertIn("one question per `ASK`", (refs / "escalation.md").read_text())
-
     def test_a_retired_pane_is_no_concierge_any_more(self):
         (self.tmp / "role").write_text("concierge\n")
         r = self.run_lifecycle("retire", "%5", row="w-sid\tidle\tpin1")
@@ -892,6 +877,26 @@ class ListAndFields(unittest.TestCase):
         self.session("s-x", "%6", "Xavi", 1000)
         self.call("claim", "%6")
         self.assertIn("set-option -p -t %6 @boss_pane %1", (self.tmp / "calls").read_text())
+
+
+class ConciergeTexts(unittest.TestCase):
+    """The owner read a boss's question as a lesser worker's: nothing on it said who wrote it."""
+
+    def text(self, *rel):
+        return " ".join(Path(__file__).resolve().parent.joinpath(*rel).read_text().split())
+
+    def test_the_texts_make_a_question_name_its_boss_and_hold_one_question(self):
+        brief = self.text("references", "concierge-brief.md")
+        self.assertIn("naming the boss that wrote it and its track", brief)
+        self.assertIn("From <the sender's name>, the boss at <the sender's from address>.", brief)
+        self.assertIn("one question per call", brief)
+        self.assertIn("ask them one at a time", brief)
+        self.assertIn("ANSWER <id>.1:", brief)
+        self.assertIn("never send the message back", brief)
+        self.assertIn("Open with who you are", self.text("references", "concierge.md"))
+        self.assertIn("One question per `ASK`", self.text("references", "concierge.md"))
+        self.assertIn("name and your track", self.text("SKILL.md"))
+        self.assertIn("one question per `ASK`", self.text("references", "escalation.md"))
 
 
 if __name__ == "__main__":

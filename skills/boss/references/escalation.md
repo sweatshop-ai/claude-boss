@@ -53,9 +53,9 @@ reply supersedes the timer.
   owner ran them, then looked for them on the card and found nothing.
   With a concierge, put the command in the message after `$ `: it carries it on
   its own card, where the owner is answering.
-  Open the message with your name and your track, and send one question per `ASK`
-  (`references/concierge.md`): the owner reads the concierge's pane, where nothing else says
-  who is asking.
+- **Say who is asking.** Open the message with your name and your track, and send one
+  question per `ASK` (`references/concierge.md`): the owner reads the concierge's pane,
+  where nothing else says who is asking.
 - **State what it costs.** Idle workers and elapsed time are what make an
   interrupt worth it.
 - **Keep everything else moving.** Escalating is not waiting: dispatch every task

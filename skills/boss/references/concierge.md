@@ -57,16 +57,17 @@ SendMessage {to: "<concierge>", notify_when_idle: true,
 Self-contained, with options, your recommendation first, what waits on it, and any
 command for their hand after `$ `. **Open with who you are:** your own name and your
 track, as the first words of the text (`<your name>, boss of <track>: ...`). The
-concierge is a session with a name of its own and cannot know yours; without it the
-owner reads a question from a lesser worker and asks why it is not the boss asking.
-If you leave it out, the concierge still asks, with `From the boss at <your address>.`
-in front and your text unchanged.
+concierge sees your session name and address, not that you are the boss or which track;
+without it the owner reads a question from a lesser worker and asks why it is not the boss
+asking. If you leave it out, the concierge still asks, with `From <your name>, the boss
+at <your address>.` in front and your text unchanged.
 
 **One question per `ASK`.** Several decisions are several messages, the most urgent
 first. If one message does hold several, the concierge asks them one at a time and
-answers once, numbered `1.`, `2.`: your turn is not stopped for it, and none is lost.
-Then go on working and dispatch what does not
-depend on the answer. Never send a question twice: the pulse does not press you on a
+answers each as it comes, `ANSWER q7.1: …`, `ANSWER q7.2: …`; one left open reads
+`NO ANSWER q7.2: …` and so do the ones after it. None is lost.
+
+Then go on working and dispatch what does not depend on the answer. Never send a question twice: the pulse does not press you on a
 blocker while the concierge has work in hand, and the ladder's rungs go through
 `boss-alert`, not through a new question.
 
