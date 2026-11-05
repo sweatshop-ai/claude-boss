@@ -48,6 +48,6 @@ Haiku is about eight times cheaper per message and writes about half again more 
 
 **Claimed by:** Otilia 2026-11-05
 
-**Status:** done, no switch
+**Status:** done, no switch; merge cfa10f4, PR 76
 
 Codex owed: out until 2026-11-11 08:36. No code in this PR. A fresh Opus agent re-derived the claims from the tool-call data; its corrections (description count, header, token ratio, daily saving) are applied.
