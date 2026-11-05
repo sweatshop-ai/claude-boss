@@ -728,6 +728,8 @@ question** (the owner, 2026-11-01). How: `references/escalation.md`, Rules.
 **Ask through your concierge, never in your own turn: `references/concierge.md`.**
 An open `AskUserQuestion` stops you; the guard refuses it while your concierge
 lives, and lets it through if the concierge is gone.
+Each `ASK` opens with your own name and your track, and holds one question: the concierge
+cannot know who you are, and the owner reads a question with no name as a worker's.
 
 **When the owner says a kind of question should not reach them** (2026-11-05), after an
 answer or at any later moment, in any language, in your pane or typed to your concierge
