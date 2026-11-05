@@ -8,7 +8,8 @@
 - A PR under 100 added lines and not sensitive: is there an upper bound on the extra rounds a class a or b finding can buy, or does it run until clean?
 - A round that returns NO-GO with only class c or d findings and no earlier GO: does the PR merge with those findings as tickets, or does it get one more round to earn a GO?
 
-**Blocked by:** time. At least 10 PRs merged on the short path and 14 days after the last of them. Not before.
+**Blocked by:**
+- External: time. At least 10 PRs merged on the short path and 14 days after the last of them. Not before.
 
 **Claimed by:** nobody
 
