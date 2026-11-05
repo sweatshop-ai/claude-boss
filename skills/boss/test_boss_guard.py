@@ -223,6 +223,12 @@ class ClassifierGaps(GuardCase):
         self.fire(cmd)
         self.assertEqual(len(self.log_lines()), before + 1, "not logged: `%s`" % cmd)
 
+    def assertNotLogged(self, cmd):
+        # the warning speaks once per session, so silence alone proves nothing after a first firing
+        before = len(self.log_lines())
+        self.fire(cmd)
+        self.assertEqual(len(self.log_lines()), before, "logged: `%s`" % cmd)
+
     def assertQuiet(self, cmd):
         self.assertEqual(self.fire(cmd), "", "scolded for `%s`" % cmd)
 
@@ -258,6 +264,34 @@ class ClassifierGaps(GuardCase):
         self.assertLogged("cd ~/.claude/pm/missing; echo x > src/app.ts")
         self.assertQuiet("cd ~/.claude/pm; echo x > a.md")
         self.assertLogged("cd ~/.claude/pm/missing && true; echo x > src/app.ts")
+
+    def test_a_sed_program_that_hides_commands_behind_a_semicolon_is_work(self):
+        # the lazy groups used to take the delimiter and swallow the whole program
+        self.assertLogged("sed -i 's/a/b/;e touch /tmp/pwn;s/x/y/' ~/.claude/pm/a.md")
+        self.assertLogged("sed -i 's|a|b|;w /repo/src/app.ts;s|x|y|' ~/.claude/pm/a.md")
+        self.assertLogged("sed -i 's/a/b/\ne touch /tmp/pwn\ns/x/y/' ~/.claude/pm/a.md")
+        self.assertNotLogged("sed -i 's/a;b/c;d/g' ~/.claude/pm/a.md")      # a `;` inside the text is text
+        self.assertNotLogged("sed -i 's,a,b,' ~/.claude/pm/a.md")
+
+    def test_a_filter_with_a_long_option_is_work(self):
+        self.assertLogged("printf '/repo/src/app.ts\\0' | wc --files0-from=-")
+        self.assertLogged("echo x | wc --files0-from /repo/list")
+        self.assertLogged("echo x | head --lines=5 /repo/src/app.ts")
+        self.assertLogged("echo x | tail -f")
+        self.assertLogged("echo x | cut -z")
+        self.assertNotLogged("echo x | wc -l")
+        self.assertNotLogged("echo x | wc -lw")
+        self.assertNotLogged("echo x | head -5")
+        self.assertNotLogged("echo x | tail -n +2")
+        self.assertNotLogged("echo x | cut -d, -f2")
+
+    def test_a_cd_into_a_missing_dir_joined_by_and_does_not_own_what_follows_the_semicolon(self):
+        self.assertLogged("cd ~/.claude/pm/missing && echo skipped > a.md; echo x > src/app.ts")
+        self.assertLogged("cd ~/.claude/pm/missing && cd ~/.claude/pm; echo x > src/app.ts")
+        self.assertLogged("cd /definitely-missing && cd ~/.claude/pm; echo x > src/app.ts")
+        self.assertNotLogged("cd ~/.claude/pm && echo x > a.md; echo y > b.md")
+        self.assertNotLogged("cd ~/.claude/pm && echo x > a.md && echo y > b.md")
+        self.assertNotLogged("cd ~/.claude/pm && sed -i 's/a/b/' a.md && echo x | wc -l")
 
     def test_a_heredoc_with_the_redirect_after_the_marker_is_a_heredoc(self):
         self.assertQuiet("cat <<EOF >> ~/.claude/pm/a.md\n- rm -rf build; ok\nEOF")

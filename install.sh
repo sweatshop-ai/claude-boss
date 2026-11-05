@@ -10,7 +10,8 @@
 #      the worker watchdog and the weekly efficiency measure. They run through a stable link,
 #      $CLAUDE_CONFIG_DIR/routines/claude-boss -> this checkout, which the
 #      SessionStart hook (bin/boss-link) moves along when a plugin upgrade
-#      lands in a new cache directory, so the units never go stale
+#      lands in a new cache directory, so their paths never go stale (a
+#      changed unit template still needs install.sh again)
 #   3. optionally symlinks bin/ into ~/.local/bin so `boss-start` and friends
 #      are on PATH
 #
