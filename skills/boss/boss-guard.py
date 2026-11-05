@@ -106,7 +106,8 @@ SED_SUBSTITUTE = re.compile(r"s([/|#,:@])(?:(?!\1)[^\\\n])*\1(?:(?!\1)[^\\\n])*\
 VALUE_FLAGS = {"head": {"-n", "-c"}, "tail": {"-n", "-c"}, "cut": {"-d", "-f", "-c", "-b"}, "wc": set()}
 # the other flags a filter may carry, short ones only: a long option can open a file
 # (`wc --files0-from`), and `tail -f` never ends. `-5`, `-n5` and `-d,` are attached forms.
-PLAIN_FLAGS = {"head": re.compile(r"-(?:\d+|[nc]\d+)"), "tail": re.compile(r"-(?:\d+|[nc]\d+)"),
+COUNT_FLAG = re.compile(r"-(?:\d+|[nc]\d+)")
+PLAIN_FLAGS = {"head": COUNT_FLAG, "tail": COUNT_FLAG,
                "cut": re.compile(r"-(?:[dfcb].+|s)"), "wc": re.compile(r"-[lwcm]+")}
 DATE = re.compile(r"\$\(date(?:[ \t]+[^()`;&|<>\n]*)?\)")
 SEPARATORS = {";", "&&", "|"}
@@ -207,7 +208,7 @@ def is_coordination(cmd):
         tokens = list(lexer)
     except ValueError:
         return False
-    cwd_own, words, piped, used, cd_checks = False, [], False, False, []
+    cwd_own, words, piped, used, cd_dirs = False, [], False, False, []
     for token in tokens + [";"]:
         if token not in SEPARATORS:
             if not token.strip("();<>|&") and token not in REDIRECTS:
@@ -218,7 +219,7 @@ def is_coordination(cmd):
             if words[0] == "cd" and len(words) == 2:
                 cwd_own = own_state(words[1].rstrip("/") + "/")
                 if cwd_own:
-                    cd_checks.append(os.path.expanduser(words[1]))
+                    cd_dirs.append(os.path.expanduser(words[1]))
             elif piped and words[0] in FILTERS:
                 if not filter_is_plain(words):
                     return False
@@ -229,9 +230,9 @@ def is_coordination(cmd):
         words, piped = [], token == "|"
         if token != "&&":
             # after `;` the next statement runs even when a cd of the chain failed
-            if not all(os.path.isdir(d) for d in cd_checks):
+            if not all(os.path.isdir(d) for d in cd_dirs):
                 cwd_own = False
-            cd_checks = []
+            cd_dirs = []
     return used
 
 
