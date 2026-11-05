@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Claimed by:** Solveig (part 1: PR 50, PR 60, PR 59 lines), Birgit (part 3: PR 49 lines)
+**Claimed by:** Solveig (part 1: PR 50, PR 60, PR 59 lines), Birgit (part 3: PR 49 lines), Suraya (part 2: PR 48 lines)
 
 **Status:** ready
 
@@ -17,9 +17,9 @@
 - [x] b. PR 50, `skills/boss/boss-lifecycle.sh:344-348`: pane ownership is checked once, by `resolve_pane`, before the `--wait-idle` loop; another boss can claim or `--force` the pane during the wait and the stale command then sends `/exit` to it. Re-read `@boss_pane` after the last status poll. Fixed in PR 67 (part 1).
 - [x] b. PR 50, `skills/boss/boss-lifecycle.sh:370-373`: with a missing or unreadable transcript `--state` prints `-` for both pins, `$past2 == $past` holds, and a turn started in the gap is not seen before "Exit and stop tasks" is confirmed. Require a real past pin, as the `--expect-last` check at line 360 does. Fixed in PR 67 (part 1).
 - [x] d. PR 50, `skills/boss/boss-lifecycle.sh:344-346`: the sleep is the full 20 s interval; `--wait-idle N` with N under 20 or not a multiple of 20 overshoots. Sleep the smaller of the interval and the time left. Fixed in PR 67 (part 1).
-- [ ] b. PR 48, `routines/boss-workers-watch.sh:111`: a concierge answer option such as `Yes, and always use sonnet` matches `Yes, and (always|don.t ask)` in the last 15 lines and raises the permission alert the change meant to prevent.
-- [ ] b. PR 48, `routines/boss-workers-watch.sh:111`: on a narrow pane a real prompt wraps (`Do you want to make` / `this edit`, a split `Tab to amend`); grep matches per line and the `❯ 1. Yes` fallback is off for concierges, so the prompt is never seen.
-- [ ] b. PR 48, `routines/boss-workers-watch.sh:100`: `tail -n 15` of the capture takes blank rows when 15 or more empty rows sit below the dialog (reproduced with `tmux capture-pane -p -S -40` on a fresh pane). Take the last non-blank rows.
+- [ ] b. PR 48, `routines/boss-workers-watch.sh:111`: a concierge answer option such as `Yes, and always use sonnet` matches `Yes, and (always|don.t ask)` in the last 15 lines and raises the permission alert the change meant to prevent. Fixed in PR 68 (reproduced with a real capture of a question without option descriptions, where the Yes option falls in the 7-row window; a question's `Enter to select` footer now empties the window).
+- [ ] b. PR 48, `routines/boss-workers-watch.sh:111`: on a narrow pane a real prompt wraps (`Do you want to make` / `this edit`, a split `Tab to amend`); grep matches per line and the `❯ 1. Yes` fallback is off for concierges, so the prompt is never seen. Not reproduced on main: ticket 15 (29c18a2) joins each window into one line; real prompts alert at 74, 31, 25 columns (tests) and synthetic wraps at 20, 16, 12. Codex reviewed the merge of PR 48, which ticket 15 had already fixed.
+- [ ] b. PR 48, `routines/boss-workers-watch.sh:100`: `tail -n 15` of the capture takes blank rows when 15 or more empty rows sit below the dialog (reproduced with `tmux capture-pane -p -S -40` on a fresh pane). Take the last non-blank rows. Not reproduced on main: since 29c18a2 the window is the last non-blank rows (`test_a_real_permission_dialog_after_blank_rows_alerts`).
 - [x] b. PR 60, `skills/boss/SKILL.md:319-320` and `skills/team/SKILL.md:79`: a turn is defined as each tool call, while `routines/ctx_over_measure.py:82-97` counts one turn per assistant message id; batched calls make workers overcount against the 35-turn line. Fixed in PR 67 (part 1).
 - [x] d. PR 59, `skills/boss/SKILL.md:862-872`: the self-contained worker dispatch leaves out the rule that `code-review` runs once per PR (stated at line 616). Fixed in PR 67 (part 1).
 
