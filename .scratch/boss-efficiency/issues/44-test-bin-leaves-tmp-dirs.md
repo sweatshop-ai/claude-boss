@@ -10,7 +10,7 @@
 
 **Claimed by:** Andres (2026-11-05)
 
-**Status:** in-review
+**Status:** done (merge d027e05, PR 78; Codex owed until 2026-11-11)
 
 - [x] Test or check first: a run of `test_bin` with a private `TMPDIR` leaves no `boss-bin-*` directory
 - [x] The count after the fix is 0, stated here: 0 `boss-bin-*` directories (and 0 entries of any kind) left in an empty private `TMPDIR` after `python3 -m unittest test_bin` (53 tests OK).
