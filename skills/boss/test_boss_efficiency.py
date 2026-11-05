@@ -89,7 +89,7 @@ class Cfg:
             recs.append(dict(type="assistant", timestamp=iso(t), message=dict(id="a%d%s" % (i, sid), usage={}, content=[
                 dict(type="tool_use", id="q%d%s" % (i, sid), name="AskUserQuestion", input={})])))
             recs.append(dict(type="user", timestamp=iso(t + 30), message=dict(content=[
-                dict(type="tool_result", tool_use_id="q%d%s" % (i, sid), content="ok" if i < asks else "denied",
+                dict(type="tool_result", tool_use_id="q%d%s" % (i, sid), content="ok" if i < asks else "An open question stops your turn. Send it to your concierge Pia",
                      is_error=i >= asks)])))
         if bash:
             t += 60
@@ -525,6 +525,20 @@ class ConciergeQuestions(unittest.TestCase):
         c.goal("alpha-x")
         c.worker(NOW - DAY, [(NOW - DAY + 20, "uds:/run/cc-socks/boss.sock", "ASK q1: which?")], name="Pia", asks=1, until=NOW - DAY + 3600)
         c.boss("alpha-x", [], NOW - DAY, refused=1, sends=[(NOW - DAY + 30, "Pia")], until=NOW - DAY + 3600)
+        idx, _, _ = week(c.dir)
+        self.assertEqual(core.measure_track(idx, "alpha-x", NOW - 7 * DAY, NOW)["asks"], 1)
+
+    def test_a_question_the_owner_dismissed_still_counts(self):
+        c = Cfg()
+        c.goal("alpha-x")
+        c.boss("alpha-x", [], NOW - DAY, asks=1, until=NOW - DAY + 3600)
+        p = c.dir / "projects" / "p"
+        f = next(p.glob("boss*.jsonl"))
+        lines = [json.loads(l) for l in f.read_text().splitlines()]
+        for r in lines:
+            for b in (r.get("message") or {}).get("content") or []:
+                if isinstance(b, dict) and b.get("type") == "tool_result": b["is_error"] = True; b["content"] = "rejected"
+        f.write_text("".join(json.dumps(r) + "\n" for r in lines))
         idx, _, _ = week(c.dir)
         self.assertEqual(core.measure_track(idx, "alpha-x", NOW - 7 * DAY, NOW)["asks"], 1)
 
