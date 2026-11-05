@@ -2,7 +2,8 @@
 
 **What to build:** PR 45 merged on three Opus rounds, Codex being out of tokens. Run Codex on the merge, 6761f01; its findings become tickets, not a revert. Check first whether the follow-ups owed on PRs 43 and 44 have run, and do them in the same pass if not.
 
-**Blocked by:** None (can start immediately)
+**Blocked by:**
+- External: Codex's usage limit resets 2026-11-11 08:36, then library-mcp 227
 
 **Claimed by:** none
 

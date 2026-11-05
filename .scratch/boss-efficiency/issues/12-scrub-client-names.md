@@ -12,7 +12,8 @@ The dry run answers, with the commands and what came back:
 
 **Why:** names and source paths of clients are in the public history, from before this track.
 
-**Blocked by:** None (the dry run can start immediately; the force-push waits on the owner's consent and on every open PR of this track being merged)
+**Blocked by:**
+- External: the owner's GitHub Support request for the refs/pull refs. Its plugin part is ticket 21
 
 **Claimed by:**
 
