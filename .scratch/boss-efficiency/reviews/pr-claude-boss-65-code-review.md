@@ -1,6 +1,6 @@
 # PR 65 (ticket 35): reviews
 
-Heads: 89376bb (round 0), 7dde8cd (after Opus round 1), 3e98205 (after Opus round 2). Codex was out of tokens until 09:41 (runner exit 7); a fresh Opus stood in for it. **Codex owed.** No transcript text went to any reviewer: code and numbers only. Name grep on the diff (client-a, acme, client-b, client-c, example-course, client-d, client-e, client-f, example-fund, client-g, client-h): no hit.
+Heads: 89376bb (round 0), 7dde8cd (after Opus round 1), 3e98205 (after Opus round 2). Codex was out of tokens until 09:41 (runner exit 7); a fresh Opus stood in for it. **Codex owed.** No transcript text went to any reviewer: code and numbers only. Name grep of the diff: no hit.
 
 ## Standards (Matt's code-review, fresh agent, on 89376bb)
 

@@ -1,6 +1,6 @@
 # Review, claude-boss PR 68 (ticket 32 part 2), round 1
 
-Heads: reviewed 7b4e922; fixes in c46ea72 (final head). Codex owed (out until 09:41): a fresh Opus agent attacked missed real prompts first, then false alerts. Matt's code-review ran once (Standards, Spec). Name grep of the diff (client-a, acme, client-b, client-c, example-course, client-d, client-e, client-f, example-fund, client-g, client-h): no hit.
+Heads: reviewed 7b4e922; fixes in c46ea72 (final head). Codex owed (out until 09:41): a fresh Opus agent attacked missed real prompts first, then false alerts. Matt's code-review ran once (Standards, Spec). Name grep of the diff: no hit.
 
 Verdict: GO after the fixes below. Round 1 of 3, no class a or b finding, so no second round.
 
