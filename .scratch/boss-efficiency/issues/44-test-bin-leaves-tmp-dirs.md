@@ -8,9 +8,9 @@
 
 **Blocked by:** None (can start immediately)
 
-**Claimed by:**
+**Claimed by:** Andres (2026-11-05)
 
-**Status:** ready-for-agent
+**Status:** in-review
 
-- [ ] Test or check first: a run of `test_bin` with a private `TMPDIR` leaves no `boss-bin-*` directory
-- [ ] The count after the fix is 0, stated here
+- [x] Test or check first: a run of `test_bin` with a private `TMPDIR` leaves no `boss-bin-*` directory
+- [x] The count after the fix is 0, stated here: 0 `boss-bin-*` directories (and 0 entries of any kind) left in an empty private `TMPDIR` after `python3 -m unittest test_bin` (53 tests OK).

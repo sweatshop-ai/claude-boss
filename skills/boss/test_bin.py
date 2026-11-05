@@ -120,6 +120,8 @@ class Tools(unittest.TestCase):
     def setUp(self):
         self.cfg = Path(tempfile.mkdtemp(prefix="boss-bin-cfg-"))
         self.home = Path(tempfile.mkdtemp(prefix="boss-bin-home-"))
+        for d in (self.cfg, self.home):
+            self.addCleanup(lambda d=d: subprocess.run(["rm", "-rf", str(d)]))
         self.env = dict(os.environ, CLAUDE_CONFIG_DIR=str(self.cfg), HOME=str(self.home))
 
     def run_tool(self, tool, *args, stdin="", timeout=20):
