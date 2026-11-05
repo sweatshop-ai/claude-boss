@@ -4,7 +4,7 @@
 
 - **The owner can say a kind of question should not reach them (ticket 06).** In plain words, any
   language, after an answer or later, also through the concierge. `bin/boss-unask record <track> <kind>`
-  (stdin: the question, a `---` line, their words) writes one line to the private
+  (stdin: the question, a `--- owner ---` line, their words) writes one line to the private
   `pm/unwanted-questions.jsonl` (mode 600, never the repo); `list <track>` reads it back at session
   start, and the boss stops bringing that kind in that track. The weekly efficiency routine counts
   reports by kind and proposes a rule when a kind recurs; it prints kinds and counts, never the words,

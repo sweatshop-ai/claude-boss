@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """boss-unask: the owner's report that a kind of question should not reach them.
 
-    boss-unask record <track> <kind>   stdin: the question, a line `---`, the owner's words
+    boss-unask record <track> <kind>   stdin: the question, a line `--- owner ---`, the owner's words
     boss-unask list <track>            the kinds reported on this track, with counts
 
 One line per report goes to `$CLAUDE_CONFIG_DIR/pm/unwanted-questions.jsonl`, mode 600.
@@ -22,6 +22,7 @@ KIND_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,47}$")
 MAX_QUESTION = 1000        # the owner's words are the label: they get four times the room
 MAX_WORDS = 4000
 FILE = "unwanted-questions.jsonl"
+SEP = "--- owner ---"
 
 
 def path(cfg=None):
@@ -33,15 +34,18 @@ def _clean(s, cap):
 
 
 def parse(text):
-    """(question, words) from stdin: the first `---` line splits them; both must be non-empty."""
+    """(question, words) from stdin: the first `--- owner ---` line splits them; both must be non-empty.
+
+    A plain `---` is a markdown rule a question may hold, so it is not the separator.
+    """
     lines = text.splitlines()
     for i, l in enumerate(lines):
-        if l.strip() == "---":
+        if l.strip() == SEP:
             q, w = _clean(" ".join(lines[:i]), MAX_QUESTION), _clean(" ".join(lines[i + 1:]), MAX_WORDS)
             if q and w:
                 return q, w
             break
-    raise ValueError("stdin must be the question, a line '---', then the owner's words")
+    raise ValueError("stdin must be the question, a line '%s', then the owner's words" % SEP)
 
 
 def record(track, kind, text, cfg=None, session=None, now=None):
@@ -59,14 +63,12 @@ def record(track, kind, text, cfg=None, session=None, now=None):
     lock = os.open(p.parent / ".unwanted-questions.lock", os.O_CREAT | os.O_RDWR, 0o600)
     try:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        fd = os.open(p, os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW, 0o600)
-        try:
+        fd = os.open(p, os.O_RDWR | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(fd, "r+b") as f:             # owns the fd; a file object finishes a short write
             os.fchmod(fd, 0o600)
-            with os.fdopen(fd, "ab") as f:          # a file object finishes a short write
-                f.write((json.dumps(rec, ensure_ascii=False) + "\n").encode())
-        except BaseException:
-            os.close(fd)
-            raise
+            size = os.fstat(fd).st_size
+            lead = b"\n" if size and os.pread(fd, 1, size - 1) != b"\n" else b""   # a torn last line stays alone
+            f.write(lead + (json.dumps(rec, ensure_ascii=False) + "\n").encode())
     finally:
         os.close(lock)
     return rec
@@ -84,7 +86,8 @@ def read(cfg=None):
             r = json.loads(l)
         except ValueError:
             continue
-        if isinstance(r, dict) and all(isinstance(r.get(k), str) for k in ("date", "track", "kind")):
+        if (isinstance(r, dict) and all(isinstance(r.get(k), str) for k in ("date", "track", "kind"))
+                and boss_store.valid_track(r["track"]) and KIND_RE.match(r["kind"])):
             out.append(r)
     return out
 

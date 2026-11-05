@@ -738,7 +738,7 @@ that kind in this track:
 ```bash
 boss-unask record <track> <kind> <<'EOF'
 <the question>
----
+--- owner ---
 <their words>
 EOF
 ```
