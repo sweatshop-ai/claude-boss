@@ -8,11 +8,12 @@
 
 No bar is set in advance. In his words: "I think we'll just look at the numbers and then decide." The runs report tokens, merged PRs, reverts and serious post-merge defects, duration and his minutes, side by side, with no verdict; the decision is his, after he has seen them. Both replays start with all 22 tickets known, while the original started with 13 and found the rest, so neither replay compares directly with the 142M.
 
-**Blocked by:** None (can start immediately)
+**Blocked by:**
+- External: the owner starts arm A, after deciding when. Setup is done (see the setup report below)
 
-**Claimed by:** Kaveh 2026-11-05 09:14
+**Claimed by:**
 
-**Status:** in-progress
+**Status:** waits for the owner (starts arm A)
 
 - [x] The graph chosen; no bar in advance, by the owner's choice
 - [ ] Both runs measured the same way and put in front of the owner

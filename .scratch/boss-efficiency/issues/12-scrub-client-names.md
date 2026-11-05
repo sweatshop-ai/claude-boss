@@ -13,17 +13,17 @@ The dry run answers, with the commands and what came back:
 **Why:** names and source paths of clients are in the public history, from before this track.
 
 **Blocked by:**
-- External: the owner's GitHub Support request for the refs/pull refs. Its plugin part is ticket 21
+- External: the owner's GitHub Support request for the refs/pull refs
 
 **Claimed by:**
 
-**Status:** waits for the owner (GitHub Support request for the 69 refs/pull refs; plugin update in ticket 21)
+**Status:** waits for the owner (GitHub Support request for the 69 refs/pull refs)
 
 - [x] The dry-run report exists under `~/.claude/pm/`, outside the repo, with the commands and results above (reports: `~/.claude/pm/boss-efficiency.scrub-dryrun.md`, `~/.claude/pm/boss-efficiency.scrub-dryrun-2.md`)
 - [x] The owner has given consent in the boss's own question, on that report (the owner ran the force-push themselves on 2026-11-05)
 - [x] A fresh clone returns no hit for any name in the list, across all branches and tags, in contents, paths and messages (also for the personal and work addresses and the gateway IP; the only match left is a common word the list flags as ambiguous). The 69 `refs/pull/*` refs still carry the old history: see the next item
 - [ ] What git cannot reach is listed, each item done or handed to the owner. Done: PR 10 and issue 10 body edited, PRs 12, 13, 14 closed, comments and releases without hit. **Owner's:** the GitHub Support request for the 69 `refs/pull/*` refs (repo `sweatshop-ai/claude-boss`, first changed commit `33a28d2b3dedc77981a36e4cab7aafa992a59cbc`); the Paste is on the boss's card
-- [ ] The plugin still installs and updates from its marketplace source after the rewrite. Install proven from the rewritten repo in a temporary config (0.21.3 at the new main); the update on this machine is the owner's, ticket 21
+- [x] The plugin still installs and updates from its marketplace source after the rewrite. Install proven from the rewritten repo in a temporary config (0.21.3 at the new main); the update on this machine was done by the owner on 2026-11-05, from 0.21.0 to 0.22.0 from the marketplace
 
 **Result (2026-11-05):** all 6 branches and both tags rewritten (482 commits, 80 refs); main `ca83c5e`, v0.4.0 `a2a7c6a`, v0.5.0 `5f9394f`. CI on `ca83c5e`: 1 check, `pytest`, success. Backup (mirror and bundle) and old tips are under `~/.claude/pm/scrub3/`.
 
