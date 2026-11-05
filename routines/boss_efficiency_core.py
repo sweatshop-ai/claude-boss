@@ -436,7 +436,7 @@ class Index:
                     for tr, a, b in windows[s["sid"]]:
                         if a <= T <= b: self.worker_msgs[tr].append(T)
                 continue
-            ev = [(T, self._asked_on(windows, s, T, socks.get(sock)) if T in s["ask_msgs"] else socks.get(sock) or trk)
+            ev = [(T, self._asked_on(windows, s, T, socks[sock]) if T in s["ask_msgs"] and sock in socks else socks.get(sock) or trk)
                   for T, sock, trk, _ in s["xmsgs"] if socks.get(sock) or trk]
             for i, (T, tr) in enumerate(ev):
                 end = ev[i + 1][0] if i + 1 < len(ev) else session_end(s)
@@ -450,14 +450,13 @@ class Index:
         """The track a concierge was asked on: where the boss that serves the voted track was at T.
 
         The socket vote gives one track per boss; a boss that moves to another
-        track keeps its socket. With no vote, or no such boss window at T, the vote stands.
+        track keeps its socket. Which boss owns the socket is not recorded, so
+        the vote stands unless every boss that ever served the voted track and
+        is on a track at T agrees on one.
         """
-        if voted is None: return None
-        for sid, wins in windows.items():
-            if sid == concierge["sid"] or not any(tr == voted for tr, _, _ in wins): continue
-            for tr, a, b in wins:
-                if a <= T <= b: return tr
-        return voted
+        at = {tr for sid, wins in windows.items() if sid != concierge["sid"]
+              and any(tr == voted for tr, _, _ in wins) for tr, a, b in wins if a <= T <= b}
+        return at.pop() if len(at) == 1 else voted
 
     def _attribute_by_name(self, sessions, boss_sids, windows, taken):
         """A worker the boss sent to or heard from by name counts in the boss's window.
