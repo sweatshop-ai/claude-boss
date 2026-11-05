@@ -439,6 +439,13 @@ class RequireIdle(unittest.TestCase):
         self.assertIn("changed owner", r.stderr)
         self.assertEqual(keys, [])
 
+    def test_a_claim_between_resolve_pane_and_the_first_owner_read_is_still_refused(self):
+        (self.tmp / "owners").write_text("%1\n%9\n")
+        r, keys = self.run_retire("w-sid\tidle\tpin1\tpin1")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("belongs to another boss", r.stderr)
+        self.assertEqual(keys, [])
+
     def test_a_pane_that_keeps_its_owner_through_the_wait_is_retired(self):
         (self.tmp / "owners").write_text("%1\n")
         r, keys = self.run_waiting(["w-sid\tbusy\tp1\tp1", "w-sid\tidle\tp2\tp2"], wait=self.ROOM)
