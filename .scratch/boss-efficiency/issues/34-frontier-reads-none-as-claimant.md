@@ -12,8 +12,13 @@ Fix to decide: treat an empty value, `none`, `nobody` and `-` (any case) as uncl
 
 **Claimed by:**
 
-**Status:** ready
+**Status:** done (PR 66, 337dbf5)
 
 - [ ] Test first: a ticket with `Claimed by: none` and one with `nobody`, otherwise ready, are listed under Ready and `claim` takes them
 - [ ] A ticket with a real name and a date is still Claimed
 - [ ] Re-run the listing on `.scratch/boss-efficiency/issues`: 27 and 28 no longer appear under Claimed
+
+Not built (class c, left on purpose, no ticket):
+- `**Claimed by :**` with a space before the colon survives `claim` (parse strips the key, `claim` does not).
+- `claim` replaces the first Status line while `parse` reads the last.
+- `claim` rewrites fields inside a code fence (same on main).
