@@ -736,11 +736,11 @@ recognise the meaning. Record it, then say in one line that you will no longer b
 that kind in this track:
 
 ```bash
-boss-unask record <track> <kind> <<'EOF'
+boss-unask record <track> <kind> <<'END_OF_OWNER_REPORT_8c41f7'
 <the question>
 --- owner ---
 <their words>
-EOF
+END_OF_OWNER_REPORT_8c41f7
 ```
 
 You record it under your own track, whichever way it reached you, and before a question that
