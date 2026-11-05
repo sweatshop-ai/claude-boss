@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **The efficiency scan takes a worker's own session ref only from a `ListAgents` result (ticket 38).** A worker that
+  read a file holding a "This session is NAME [ref]" line no longer records that ref as its own, so a send to
+  its real ref keeps its attribution.
 - **A question through the concierge names its boss, and holds one question (ticket 39).** The boss opens
   each `ASK` with its own name and track, which the concierge cannot know; a question without them is still
   asked, with `From <name>, the boss that sent this question.` in front and the rest unchanged. One `ASK`, one question: if

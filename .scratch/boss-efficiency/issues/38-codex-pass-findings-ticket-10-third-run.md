@@ -4,8 +4,8 @@
 
 **Blocked by:** None (can start immediately)
 
-**Claimed by:** none
+**Claimed by:** Yusuf
 
-**Status:** ready
+**Status:** in progress
 
 - [ ] b. PR 57, `routines/boss_efficiency_core.py:231-233` (main 236): the own-ref extraction takes any raw record containing "This session is ", not only a ListAgents result; a worker named like the one in the test fixture that reads that file records a false ref, and later ref-qualified sends to its real ref lose attribution. Associate the line with a preceding ListAgents tool use before recording the ref.
