@@ -1,6 +1,6 @@
-# Generated from the plugin's template: bin/boss-link rewrites this file when the
-# template changes, keeping the replaced one as <unit>.bak-<YYYY-MM-DD-HHMMSS>. Put a deliberate
-# change in a drop-in, <unit>.d/override.conf, which is left alone.
+# Written by install.sh from the plugin's template, which keeps the file it replaces as
+# <unit>.bak-<YYYY-MM-DD-HHMMSS>. bin/boss-link says at session start when this file is
+# out of date. Put a deliberate change in a drop-in, <unit>.d/override.conf, which is left alone.
 [Unit]
 Description=Weekly measure of where the boss tracks spend time and tokens
 Documentation=file://@ROOT@/routines/boss-efficiency.md

@@ -86,11 +86,12 @@ The timers run the plugin through one stable path,
 `$CLAUDE_CONFIG_DIR/routines/claude-boss`, a symlink to wherever the plugin
 lives. A marketplace upgrade lands in a new cache directory, and the
 SessionStart hook `bin/boss-link` moves the link there on the next session, so
-the units never point at a version that is gone. The same hook rewrites the unit
-files you already installed from the current templates (it never installs or
-enables one). The file it replaces is kept beside it as `<unit>.bak-<date-time>`,
-so a hand edit is not lost; a deliberate change belongs in a drop-in,
-`<unit>.d/override.conf`, which is left alone. Old copies are not pruned. `install.sh` keeps a replaced unit the same way; it does not need re-running after an upgrade.
+the units never point at a version that is gone. The same hook compares the
+installed units with the new templates and, when one differs, prints one line
+naming it; it writes nothing. Re-run `install.sh` to bring the units up to date:
+it keeps the file it replaces beside it as `<unit>.bak-<YYYY-MM-DD-HHMMSS>` and
+prints the path, so a hand edit is not lost. A deliberate change belongs in a
+drop-in, `<unit>.d/override.conf`, which is left alone. Old copies are not pruned.
 
 Start a boss inside tmux:
 

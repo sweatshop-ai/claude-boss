@@ -25,10 +25,14 @@
   certainty the call counts as work: the guard warns and logs, it is no boundary. `spawn --concierge`
   finds a concierge waiting on a permission prompt and starts no second one. The update-gap check
   counts a session live by `registry.is_live`'s rules and treats a cache dated far ahead as stale.
-  The P17 proof asks for the resolved path of what runs, not only an import. `bin/boss-link` rewrites
-  the installed systemd units from the current templates (so `MemoryMax=1G` reaches installs that
-  predate it), only where the unit file already exists, never enabling or starting anything; it
-  runs `systemctl --user daemon-reload` after a rewrite. A replaced unit is first copied to `<unit>.bak-<YYYY-MM-DD-HHMMSS>`, here and in `install.sh` (one helper, `bin/boss-unit-lib.sh`, which locks against parallel session starts, never overwrites an earlier copy and leaves a unit alone when no copy can be made); old copies are not pruned. A deliberate edit belongs in a drop-in (`<unit>.d/override.conf`), which is left alone.
+  The P17 proof asks for the resolved path of what runs, not only an import. `bin/boss-link` compares the
+  installed systemd units with the current templates (taking `@ROOT@` and `@CFG@` from the installed unit's
+  own lines) and prints one line naming a unit that differs and the command `install.sh`; it writes
+  nothing and never fails a session start. `install.sh` is the one upgrade path (so `MemoryMax=1G` reaches
+  installs that predate it): it copies a differing unit to `<unit>.bak-<YYYY-MM-DD-HHMMSS>` first and
+  prints the path, and a template that does not render writes no unit. Old copies are not pruned. The
+  first run after this release replaces each service unit once, because its header changed. A deliberate
+  edit belongs in a drop-in (`<unit>.d/override.conf`), which is left alone.
 
 - **A rule for a worker past 250k (ticket 03).** `CTX-OVER` no longer reads "overdue, ask for the
   boundary now". The owner's two tests apply: never restart a worker waiting on CI or merging with its
