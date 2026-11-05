@@ -13,6 +13,7 @@ from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parents[2] / "routines" / "boss-workers-watch.sh"
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "watch"
+LIFECYCLE = Path(__file__).resolve().parent / "boss-lifecycle.sh"
 
 # A concierge's AskUserQuestion dialog: the options belong to the sender.
 QUESTION = "Merge PR 46 now?\n❯ 1. Yes, merge\n  2. No, wait\n  3. Type something.\nEnter to select · ↑/↓ to navigate · Esc to cancel\n"
@@ -144,9 +145,6 @@ class WatchCase(unittest.TestCase):
         self.assertIn("permission-prompt", second)
 
 
-LIFECYCLE = Path(__file__).resolve().parent / "boss-lifecycle.sh"
-
-
 @unittest.skipUnless(shutil.which("tmux"), "tmux is not installed")
 class ConciergeMarkCase(unittest.TestCase):
     """The pane mark itself: boss-lifecycle.sh sets @worker_role, the watchdog's own
@@ -167,20 +165,22 @@ class ConciergeMarkCase(unittest.TestCase):
         self.env.update(TMUX_TMPDIR=str(self.tmp), CLAUDE_CONFIG_DIR=str(self.tmp / "cfg"),
                         BOSS_CLAUDE_CMD=str(stub), WATCH_STATE_DIR=str(self.tmp / "state"), DRY_RUN="1")
         self.addCleanup(subprocess.run, ["tmux", "kill-server"], env=self.env, capture_output=True)
-        self.boss = self.tmux("new-session", "-d", "-x", "100", "-y", "30", "-P", "-F", "#{pane_id}")
+        self.boss_pane = self.tmux("new-session", "-d", "-x", "100", "-y", "30", "-P", "-F", "#{pane_id}")
         self.tmux("set-option", "-g", "default-command", "bash --norc --noprofile")
         self.env["TMUX"] = self.tmux("display-message", "-p", "#{socket_path},#{pid},0")
-        self.env["TMUX_PANE"] = self.boss
+        self.env["TMUX_PANE"] = self.boss_pane
+
+    def bare_env(self):
+        # A client of the private server by TMUX_TMPDIR alone, as the watchdog's timer runs.
+        return {k: v for k, v in self.env.items() if k not in ("TMUX", "TMUX_PANE")}
 
     def tmux(self, *args):
-        env = {k: v for k, v in self.env.items() if k not in ("TMUX", "TMUX_PANE")}
-        r = subprocess.run(["tmux", "-f", "/dev/null", *args], env=env, capture_output=True, text=True)
+        r = subprocess.run(["tmux", "-f", "/dev/null", *args], env=self.bare_env(), capture_output=True, text=True)
         self.assertEqual(r.returncode, 0, r.stderr)
         return r.stdout.strip()
 
     def watch(self):
-        env = {k: v for k, v in self.env.items() if k not in ("TMUX", "TMUX_PANE")}
-        r = subprocess.run(["bash", str(SCRIPT)], env=env, capture_output=True, text=True)
+        r = subprocess.run(["bash", str(SCRIPT)], env=self.bare_env(), capture_output=True, text=True)
         self.assertEqual(r.returncode, 0, r.stderr)
         return r.stdout
 
