@@ -212,8 +212,8 @@ class Timeouts(Base):
         return int((self.sb.root / "child.pid").read_text())
 
     def child_is_gone(self):
-        # SIGKILL is delivered at once but the child leaves the process table a moment later, and
-        # _stop reaps only the reviewer; so ask until it is gone, and only a child still there after
+        # SIGKILL is queued at once but the child dies only when it is next scheduled, and _stop
+        # waits for the reviewer alone; so ask until it is gone, and only a child still there after
         # the deadline is a kill that never came.
         pid = self.child_pid()
         deadline = time.monotonic() + 10
