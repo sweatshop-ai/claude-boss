@@ -87,6 +87,50 @@ class FrontierCase(unittest.TestCase):
         self.assertEqual(self.by_num(out)["01"]["state"], "claimed")
         self.assertEqual(self.by_num(out)["01"]["claimed_by"], "Mei 2026-09-29 10:00")
 
+    def test_placeholder_claimant_counts_as_unclaimed(self):
+        for i, word in enumerate(["none", "None", "NOBODY", "nobody", "-", ""], 1):
+            self.put("%02d-t.md" % i, ticket("%02d" % i, "T", "None", claimed=word or None) if word
+                     else ticket("%02d" % i, "T", "None").replace("**Status:**", "**Claimed by:**\n\n**Status:**"))
+        code, out, _ = self.run_json()
+        self.assertEqual(out["ready"], ["01", "02", "03", "04", "05", "06"])
+        for t in out["tickets"]:
+            self.assertEqual(t["state"], "ready")
+            self.assertEqual(t["claimed_by"], "")
+
+    def test_claim_takes_a_placeholder_and_replaces_the_line(self):
+        self.put("01-a.md", ticket("01", "A", "None", claimed="none"))
+        r = self.claim("1", "Mei")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        text = (self.dir / "01-a.md").read_text()
+        self.assertEqual(text.lower().count("claimed by"), 1)
+        self.assertRegex(text, r"\*\*Claimed by:\*\* Mei \d{4}-\d\d-\d\d \d\d:\d\d\n\n\*\*Status:\*\* in-progress")
+        self.assertEqual(self.claim("1", "Ada").returncode, 3)
+
+    def test_claim_with_two_claimed_by_lines_leaves_one_and_blocks_a_second_claim(self):
+        text = ticket("01", "A", "None").replace("**Status:**", "**Claimed by:**\n\n**Claimed by:** none\n\n**Status:**")
+        self.put("01-a.md", text)
+        self.assertEqual(self.claim("1", "Ann").returncode, 0)
+        self.assertEqual((self.dir / "01-a.md").read_text().lower().count("claimed by"), 1)
+        self.assertEqual(self.claim("1", "Bob").returncode, 3)
+
+    def test_a_real_claimant_beats_a_placeholder_in_either_order(self):
+        before = ticket("01", "A", "None").replace(
+            "**Status:**", "**Claimed by:** Ann 2026-11-05 10:00\n\n**Claimed by:** none\n\n**Status:**")
+        after = ticket("02", "B", "None", claimed="Ann 2026-11-05 10:00") + "\n**Claimed by:** nobody\n"
+        empty = ticket("03", "C", "None", claimed="Ann 2026-11-05 10:00") + "\n**Claimed by:**\n"
+        self.put("01-a.md", before)
+        self.put("02-b.md", after)
+        self.put("03-c.md", empty)
+        code, out, _ = self.run_json()
+        for n in ("01", "02", "03"):
+            self.assertEqual(self.by_num(out)[n]["state"], "claimed")
+            self.assertEqual(self.claim(n, "Bob").returncode, 3)
+
+    def test_a_name_that_starts_with_a_placeholder_word_is_a_claimant(self):
+        self.put("01-a.md", ticket("01", "A", "None", claimed="Nobody-Special 2026-11-05 10:00"))
+        code, out, _ = self.run_json()
+        self.assertEqual(self.by_num(out)["01"]["state"], "claimed")
+
     def test_missing_blocked_by_fails_the_input_check(self):
         self.put("01-a.md", ticket("01", "A", None))
         code, out, err = self.run_json()

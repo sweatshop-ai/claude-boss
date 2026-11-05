@@ -63,10 +63,12 @@ python3 {{plugin root}}/skills/hand-to-boss/frontier.py claim {{issues dir}} <NN
 git -C {{repo holding the tickets}} commit -m "Claim <NN> for <worker>" -- <ticket file>
 ```
 
-`claim` writes `**Claimed by:** <worker> <date time>` above the Status line and
+`claim` writes `**Claimed by:** <worker> <date time>` (replacing an existing
+`Claimed by` line) and
 sets `**Status:** in-progress`, under a lock, in the shared ticket file. It
 refuses (exit 3, naming the claimant) a ticket that is already claimed, done or
-still blocked; then nothing is dispatched. The commit names that one file by
+still blocked; then nothing is dispatched. A ticket may carry `**Claimed by:**`
+empty or with `none`, `nobody` or `-` (any case): all mean unclaimed. The commit names that one file by
 path, so it carries nothing else in a tree other sessions share, and no edit is
 left uncommitted. Both are coordination, not implementation: if the guard
 remarks on them, say so in one line and carry on.
