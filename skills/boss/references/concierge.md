@@ -97,6 +97,6 @@ the owner sees the next when the first is answered. So send the most urgent firs
 ## It is not a worker
 
 - No ticket, no closing round at wrap-up, no handoff, no idle-worker response.
-- `restart` and `retire` refuse while it holds a question.
+- `restart` and `retire` refuse while it holds a question; wrap-up closes it anyway with `retire <pane> --kill --force`.
 - Close it at wrap-up, with the rest of the team, even with a question open: SKILL.md Phase E writes
   that question into the tracker first, and the recap tells the owner it no longer rings.
