@@ -969,5 +969,19 @@ class ConciergeTexts(unittest.TestCase):
         self.assertIn("one question per `ASK`", self.text("references", "escalation.md"))
 
 
+    def test_wrap_up_saves_the_state_before_it_closes_a_pane(self):
+        skill = self.text("SKILL.md")
+        phase = skill[skill.index("## Phase E: Wrap-up"):skill.index("## Safety rules")]
+        self.assertIn("the state line before closing", phase)
+        self.assertLess(phase.index("Write the state line"), phase.index("Close the panes"))
+        self.assertLess(phase.index("boss-goal verify <track> --tick"), phase.index("Close the panes"))
+        self.assertIn("boss-marker is-boss", phase)
+        self.assertIn("even with a question open", phase)
+        self.assertIn("is not closed", phase)                   # uncommitted or unpushed work stops the wrap-up
+        self.assertIn("Never your own pane", phase)
+        self.assertNotIn("Retire your concierge once no question is open", skill)
+        self.assertNotIn("Retire it at wrap-up", self.text("references", "concierge.md"))
+
+
 if __name__ == "__main__":
     unittest.main()

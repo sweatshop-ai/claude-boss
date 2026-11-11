@@ -1033,19 +1033,46 @@ With `voice: ON`, every response to the owner also gets TTS; silent otherwise.
 
 ## Phase E: Wrap-up
 
-1. `boss-lifecycle.sh list --mine` + a final `SendMessage` round: closing state
-   from every worker, your concierge excepted —
-   what's done, in flight, uncommitted, unpushed, open branches.
-2. Run the P8 wrap-up checklist against each answer. Nothing passes silently.
-3. Present the recap per `references/reports.md`, sourced from tracker and board.
-4. Archive what is now history: `boss-tracker archive <track>`, leaving live state
-   under the cap. Then settle the objective: `boss-goal verify <track> --tick`,
-   and `boss-goal status <track> met "<evidence>"` if every criterion is met, `paused "<why>"` if the owner is parking
-   it. An objective left OPEN over a track nobody is working is what makes the
-   pulse noise instead of signal.
-5. Retire your concierge once no question is open:
-   `boss-lifecycle.sh retire <pane> --kill`.
-6. Speak the recap: what got done, what's left, what to pick up next time.
+Refuse outside a boss session: if `boss-marker is-boss` exits non-zero you are not a
+registered boss, so say so in one line and stop. Order matters: **the state line
+before closing**, and the closing after both the state line and the objective.
+
+1. `boss-lifecycle.sh list --mine`, plain `list` for the rest of your tmux window, and a
+   `SendMessage` round: closing state from every worker, your concierge excepted —
+   what's done, in flight, uncommitted, unpushed, open branches and PRs.
+2. Do not wait on the answers; check git yourself. For each worktree of the project:
+   `git status --porcelain`, `git log origin/main..HEAD` and whether the branch exists
+   on the remote. An untracked handoff note is not work at risk; uncommitted code and a
+   commit that exists on no remote are. Run the P8 wrap-up checklist against both the
+   answers and what git shows. Nothing passes silently.
+3. Trim: `boss-tracker archive <track>` so the live state is under its cap, and the
+   objective file under 4 KB with its Next list refreshed.
+4. **Write the state line, before anything is closed.** One bullet under `## Open blockers`
+   in the live tracker, edited in place, with no `[ladder …]` marker (a marker starts the
+   escalation clock). It names every open item:
+   - an owner question still unanswered, with its options, marked as to be asked again by
+     the next boss;
+   - each open PR and what it waits on;
+   - each CI run nobody watches any more;
+   - the brief file to resume each piece from.
+
+   Then settle the objective: `boss-goal verify <track> --tick`, and `boss-goal status <track> met "<evidence>"`
+   when every criterion is met, otherwise `boss-goal status <track> paused "<reason pointing to the state line>"`.
+   Either switches the pulse off; an objective left OPEN over a track nobody is working is what makes it noise.
+5. **Close the panes, after step 4 and never before.** Every pane you own, your concierge
+   included even with a question open: the question lives in the state line now, and the recap
+   says it no longer rings. When the owner says to ("close all the panes of this window"),
+   also the unowned leftover panes of your tmux window. Never your own pane: it stays for
+   the owner to close.
+   - Per worker: `boss-lifecycle.sh retire <pane> --require-idle --kill`.
+   - A worker waiting on CI or holding a merge shows busy or shell, and `--require-idle`
+     refuses it. Close it anyway only when step 2 shows nothing at risk for it; then
+     `tmux kill-pane -t <pane>` (or `retire --kill --force`).
+   - **A worker with uncommitted code, or commits on no remote, is not closed.** Name it,
+     name what is at risk, and stop for it: the owner or the worker saves the work first.
+6. Present the recap per `references/reports.md`, sourced from tracker and board: what got
+   done (PR and merge ids), each open item from the state line, what the next boss picks up
+   first. The team-line goes to n=0, because nothing rings any more. With `voice: ON`, speak it.
 
 ---
 
