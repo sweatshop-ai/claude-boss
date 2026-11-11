@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **`/boss wrap-up` saves the state, then closes every pane the boss owns (ticket 01).** Phase E checks git itself
+  for each worktree, writes one line under `## Open blockers` naming every open item (unanswered owner question,
+  open PRs, unwatched CI runs, the brief to resume from), sets the objective to `paused` or `met`, and only then closes
+  the panes, the concierge included even with a question open. A worker waiting on CI is closed anyway when git shows
+  nothing at risk; one with uncommitted code or a commit on no remote is named and left open. The boss's own pane stays
+  for the owner to close.
 - **A concierge keeps its role through a reboot (ticket 43).** `claim <pane> --concierge` puts
   `@worker_role` back on a pane, and so the `[concierge]` label and the guard that protects a held question, but only
   when a process in the pane's tree started with `--append-system-prompt-file .../references/concierge-brief.md`, the

@@ -26,11 +26,26 @@ skill at all but `/boss wrap-up` (the boss skill's `argument-hint` already lists
 mid-turn while it runs this. Candidates: a detached `sleep 2; boss-lifecycle.sh retire
 <own pane>` after the last message, or `tmux kill-pane` on its own pane.
 
+## Settled (owner, 2026-11-11)
+
+- It is `/boss wrap-up` (Phase E), not a separate skill.
+- "Save the state" = one line under "Open blockers" in the live tracker, written before anything is closed, naming
+  every open item: an owner question still unanswered (with its options, and that it must be asked again by the next
+  boss), each open PR and what it waits on, CI runs nobody is watching any more, the brief file to resume each piece
+  from. Plus the objective set to `paused` with a reason that points to that line (or `met` after
+  `boss-goal verify --tick` proves it).
+- Closing covers every pane the boss owns, the concierge included even with a question open. Also, on the owner's
+  word, the unowned leftover panes in the boss's tmux window. Not the boss's own pane: it stays for the owner to
+  close ("close itself last" stays an open box).
+- A worker waiting on CI or holding a merge shows busy/shell and `retire --require-idle` refuses it. Closing it
+  anyway is allowed only when its git state shows nothing at risk (`tmux kill-pane` or `retire --kill --force`). A
+  worker with uncommitted code or commits on no remote is not closed: the wrap-up names it and stops for it.
+
 **Blocked by:** None (can start immediately)
 
-**Status:** needs-grilling
+**Status:** in review
 
-- [ ] Grilling round settled: separate skill or `/boss wrap-up`; what "save the state" writes
-- [ ] A worker with uncommitted or unpushed work is never retired; the wrap-up says which and stops
-- [ ] Every worker the boss owns is retired, then the boss pane ends; `boss-lifecycle.sh list --mine` is empty afterwards
-- [ ] Outside a boss session it refuses with one line
+- [x] Grilling round settled: separate skill or `/boss wrap-up`; what "save the state" writes
+- [x] A worker with uncommitted or unpushed work is never retired; the wrap-up says which and stops
+- [x] Every pane the boss owns is closed, the boss pane stays (written check: `test_wrap_up_saves_the_state_before_it_closes_a_pane`); the boss's own pane closing itself is left open
+- [x] Outside a boss session it refuses with one line
