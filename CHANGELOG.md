@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.23.0 — 2026-11-11
 
 - **`/boss wrap-up` saves the state, then closes every pane the boss owns (ticket 01).** Phase E checks git itself
   for each worktree, writes one line under `## Open blockers` naming every open item (unanswered owner question,
