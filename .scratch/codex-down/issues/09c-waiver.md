@@ -6,7 +6,7 @@
 
 **Blocked by:** 09b (the record and `codex_blocker.choice`), 08 (merged)
 
-**Status:** done (Rosalie built it, PR PRNUM)
+**Status:** done (Rosalie built it, PR 116)
 
 The consent (finding 1; enforcement added after Codex round 3, 2026-11-12):
 
