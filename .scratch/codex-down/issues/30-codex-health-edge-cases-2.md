@@ -2,7 +2,7 @@
 
 **Blocked by:** 18
 
-**Status:** done (Otilia built it, PR PRN)
+**Status:** done (Otilia built it, PR 130)
 
 Found by the fallback review of PR 109 (`18-reviews/round-1.md`, GO). No round blocked on them.
 
