@@ -6,10 +6,10 @@
 
 **Blocked by:** None for the interim text; the switch to `boss_review.py` after 02 and 08.
 
-**Status:** ready-for-agent
+**Status:** done (this PR, except box 3: the version bump and marketplace release are the owner's release step and stay unticked)
 
 - [x] SKILL.md's Codex routine says, in one or two sentences: on a usage limit or an outage, run the labelled fallback review in the same turn; never wait for the reset, never schedule a wakeup or loop for it (4e12c0b)
-- [ ] After 02 and 08 merge to `main`: the routine names `boss_review.py`, and no line of SKILL.md tells a worker to run `codex exec` by hand for a PR review (`grep -n 'codex exec' skills/boss/SKILL.md` shows none in the review routine)
+- [x] After 02 and 08 merge to `main`: the routine names `boss_review.py`, and no line of SKILL.md tells a worker to run `codex exec` by hand for a PR review (the one `codex exec` left is the plan review, which stays by hand). `boss_review.py`'s `main()` calls `review(args.repo, args.pr, args.checkout, args.author)` with `allow_fallback` at its default False (`skills/boss/boss_review.py:1015`, the call in `main()`), so the routine keeps, beside the command, the labelled Opus fallback by hand under "Fallback review N (Opus, Codex unavailable: <reason>; run by <name>)", and says 06 makes it automatic
 - [ ] The plugin version is bumped and the change is in the marketplace release, so the installed boss skill carries it
 
 Box 2 waits on tickets 02 and 08, not on main yet, so it stays unticked. Box 3 (version bump, release) is not in this PR: the next release PR carries it.

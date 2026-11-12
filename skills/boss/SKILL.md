@@ -627,7 +627,10 @@ verdict, 6 the head or base moved (nothing posted), 2 usage or wrong checkout, 7
 infrastructure. A plan is reviewed by hand: `codex exec -s read-only ... < /dev/null`,
 briefed to read and not execute, output checked in the first minute. On a usage limit or an outage, the same turn runs the labelled
 fallback review (Opus, read-only), with the reset time Codex gave in the review file's header; the
-review is never held for that time, and no wakeup or loop is scheduled for it. Posted on the PR
+review is never held for that time, and no wakeup or loop is scheduled for it. `boss_review.py` does not run that
+fallback from its command line yet (it ends 4 or 7 when Codex does not answer), so you run the Opus review by hand beside
+it, under the exact heading "Fallback review N (Opus, Codex unavailable: <reason>; run by <name>)"; ticket 06 makes it
+automatic and removes this sentence. Posted on the PR
 (or the plan's PR) as "Codex review N (run by <name>)" for a Codex answer and as "Fallback review N
 (<model id>, Codex unavailable: <reason>; run by <name>)" for the fallback, never the second under the
 first's heading, with every citation marked VERIFIED or NOT FOUND; the

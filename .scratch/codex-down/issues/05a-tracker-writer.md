@@ -8,7 +8,7 @@
 
 **Claimed by:** Rumi 2026-11-12 13:10
 
-**Status:** in-progress
+**Status:** done (merged, PR 92)
 
 The tracker writer (R23, finding 5):
 
