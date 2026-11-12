@@ -299,6 +299,9 @@ def read_compare(repo: str, since: str, head: str, io_timeout: float) -> Compare
         return Compare("compare-failed", note="gh api compare listed no files")
     if data.get("status") not in ("ahead", "identical"):
         return Compare("compare-not-ahead", note="the compare says %r" % (data.get("status"),))
+    ahead_by = data.get("ahead_by")
+    if not files and type(ahead_by) is int and ahead_by > 0:       # commits ahead and no file listed: not trusted
+        return Compare("compare-no-files", note="%d commits ahead and no file listed" % ahead_by)
     if len(files) >= COMPARE_FILES:
         return Compare("compare-truncated", note="%d files is the API's limit, there may be more" % len(files))
     names = []

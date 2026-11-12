@@ -1021,6 +1021,12 @@ class TestOnlySince(Base):
         self.old_go()
         self.assertEqual(self.since({"raw": compare_answer("tests/a.py", status="identical")}), 0, self.err)
 
+    def test_commits_ahead_with_no_file_listed_refuses_and_none_ahead_does_not(self):
+        self.old_go()
+        self.refused("compare-no-files", {"raw": compare_answer(ahead_by=2, total_commits=2)})
+        self.assertEqual(self.since({"raw": compare_answer("tests/a.py", ahead_by=2)}, dry_run=True), 0, self.err)
+        self.assertEqual(self.since({"raw": compare_answer(status="identical", ahead_by=0)}, dry_run=True), 0, self.err)
+
     def test_a_page_of_300_files_is_not_known_to_be_all_of_them(self):
         self.old_go()
         tests = ["tests/f%d.py" % i for i in range(300)]

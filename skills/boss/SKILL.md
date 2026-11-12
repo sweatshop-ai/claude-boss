@@ -850,7 +850,7 @@ exists only in a message**, whoever produced it.
 
 **The merge is ordered through the gate.** The command is
 `python3 ${CLAUDE_PLUGIN_ROOT}/skills/boss/boss_merge.py --repo OWNER/REPO --pr N`; `--dry-run` decides without
-merging, and `--test-only-since SHA`, the head of the last GO, allows fixes after it that touch only the repo's test paths. Its exit
+merging, and `--test-only-since SHA`, the head of the last GO, allows fixes after it that touch only the repo's test paths (`test_paths` in `.boss/deploy.json`; `*` crosses `/`, so anchor a pattern to a directory: `tests/*`, not `*test_*.py`). Its exit
 codes: 0 merged, 3 and 4 refused, 5 failed or unverified (the merge or the check after it), 7 a read failed. A
 refusal (3 or 4) is an instruction to get the right review, not to work around it. `boss-run` refuses a merge typed
 by hand under the hard rule `PR merge outside boss_merge`. The gate has three limits. A `gh pr merge` typed by hand
