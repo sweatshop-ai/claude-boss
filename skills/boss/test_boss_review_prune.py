@@ -171,7 +171,7 @@ class WhatKeepsTheEntry(PruneBase):
     def test_a_record_that_is_not_the_one_its_file_name_says_keeps_the_entry(self):
         """round02.json is a Codex GO but says it is round 1, or another PR, or has no round: no record of round 2."""
         for what, patch in {"another round": {"round": 1}, "no round": {"round": None}, "a round as text": {"round": "2"},
-                            "another PR": {"pr": 6}, "another repo": {"repo": "owner/other"}}.items():
+                            "another PR": {"pr": 6}, "a round as a float": {"round": 2.0}, "a pr as a float": {"pr": float(PR)}, "another repo": {"repo": "owner/other"}}.items():
             with self.subTest(what=what):
                 self.setUp_clean()
                 self.put(line())

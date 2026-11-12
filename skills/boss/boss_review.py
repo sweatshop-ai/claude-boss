@@ -1109,15 +1109,15 @@ def _codex_rounds(pr_dir: Path, entry: ProvEntry) -> list[_Round] | None:
     one, and what that round will say is not known, so the PR keeps its entries. A record whose own `repo`,
     `pr` and `round` are not its file's is no record of that round: the same."""
     try:
-        names = [(int(m.group(1)), e) for e in pr_dir.iterdir() if (m := re.fullmatch(r"round(\d+)\.json", e.name))]
+        names = [(int(m.group(1)), f) for f in pr_dir.iterdir() if (m := re.fullmatch(r"round(\d+)\.json", f.name))]
     except FileNotFoundError:
         return []
     except OSError:
         return None
     found = []
-    for number, entry in sorted(names):
+    for number, file in sorted(names):
         try:
-            data = json.loads(entry.read_text(encoding="utf-8"))
+            data = json.loads(file.read_text(encoding="utf-8"))
             status, kind, head, verdict = (data[k] for k in ("status", "kind", "head_sha", "verdict"))
             own = (data["repo"], data["pr"], data["round"])
         except (OSError, ValueError, KeyError, TypeError):
