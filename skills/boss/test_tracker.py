@@ -355,6 +355,15 @@ class AddLine(unittest.TestCase):
         self.assertEqual(self.add(title="Pending"), "done")
         self.assertTrue(self.path.read_text().endswith("\n## Pending\n- two [x1]\n"))
 
+    def test_an_empty_tag_is_refused(self):
+        with self.assertRaises(ValueError):
+            self.add(tag="")
+
+    def test_a_file_that_is_not_utf8_is_a_failure_not_a_raise(self):
+        self.path.write_bytes(b"# T\n\xff\n")
+        self.assertEqual(self.add(), "failed: UnicodeDecodeError")
+        self.assertEqual(self.path.read_bytes(), b"# T\n\xff\n")
+
     def test_failures_come_back_as_text(self):
         self.assertEqual(tracker.add_line(self.dir / "no.md", "T", "- l", "t", time.monotonic() + 1),
                          "failed: FileNotFoundError")

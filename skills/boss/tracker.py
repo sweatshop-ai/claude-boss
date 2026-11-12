@@ -305,7 +305,7 @@ def update(path: Path, fn: Callable[[str], Optional[str]], deadline: float) -> s
     Takes the sibling lock until `deadline` (a time.monotonic() value), polling
     with LOCK_NB so a held lock is a return value and not a hang. `fn` gets the
     text and returns the new text, or None for no change. The boss's Edit tool
-    takes no lock, so the file's (st_mtime_ns, st_size) is checked between the
+    takes no lock, so the file's (st_ino, st_mtime_ns, st_size) is checked between the
     read and the rename, and the pass is redone on the new text, 3 tries in all
     (the ladder's process_tracker makes the same check with the same limit).
 
@@ -337,7 +337,8 @@ def update(path: Path, fn: Callable[[str], Optional[str]], deadline: float) -> s
                         fh.write(new)
                     os.chmod(tmp, before.st_mode & 0o7777)
                     now = path.stat()
-                    if (now.st_mtime_ns, now.st_size) != (before.st_mtime_ns, before.st_size):
+                    if ((now.st_ino, now.st_mtime_ns, now.st_size)
+                            != (before.st_ino, before.st_mtime_ns, before.st_size)):
                         continue
                     os.replace(tmp, path)
                     return "done"
@@ -345,7 +346,7 @@ def update(path: Path, fn: Callable[[str], Optional[str]], deadline: float) -> s
                     if os.path.exists(tmp):
                         os.unlink(tmp)
             return "failed: file changed on all 3 tries"
-    except OSError as err:
+    except (OSError, UnicodeDecodeError) as err:
         return f"failed: {type(err).__name__}"
 
 
@@ -353,8 +354,11 @@ def add_line(path: Path, title: str, line: str, tag: str, deadline: float) -> st
     """`line` at the end of section `title` unless `tag` is already in the file.
 
     One locked step, so eight callers with one tag leave one line. Returns
-    "done", "done (already there)" or "failed: ...".
+    "done", "done (already there)" or "failed: ...". An empty `tag` is a ValueError:
+    it would match every file.
     """
+    if not tag:
+        raise ValueError("tag is empty")
     def fn(text: str) -> Optional[str]:
         return None if tag in text else insert_in_section(text, title, line)
 
