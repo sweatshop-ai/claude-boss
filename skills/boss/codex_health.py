@@ -27,7 +27,9 @@ a row make it `up` again.
 A line is skipped and counted when it is not one JSON object with a usable shape: a blank or whitespace-only
 line (the writer never writes one, so it is a hand edit), a torn or unparseable line, and a line that names a
 key twice (json would keep the last value, so a hand-edited line could change its reviewer). A skipped line is
-never a failure and never an answer.
+never a failure and never an answer. The duplicate-key check applies at any depth, so a writer that dumped
+a dict with keys `1` and `"1"` would have every such line skipped; today's writer (boss_review.append_attempts)
+has no such field, and the skip count is in the command's output, so it is left (ticket 30).
 
 Accepted: a write that tears without its newline (a full disk) is followed by the next append on the same
 line. The merged line is not parseable, so it is skipped and the one real attempt after the tear goes
