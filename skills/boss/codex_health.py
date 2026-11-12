@@ -10,7 +10,9 @@ blocker from it.
     health(path=None) -> dict    state, failures, answers, skipped, and for the
                                  blocker text: last_repo, last_pr, last_reason
                                  and prs (distinct repo#pr among the failures of
-                                 the current streak)
+                                 the current streak); last_ts is the `ts` of the
+                                 newest failure in file order, as an aware
+                                 datetime, or None when it has no usable `ts`
 
     python3 codex_health.py      prints {"state", "failures", "answers", "skipped"}
 
@@ -24,6 +26,7 @@ a row make it `up` again.
 """
 import json
 import sys
+from datetime import datetime
 from pathlib import Path
 
 import boss_store
@@ -51,6 +54,18 @@ def _entry(raw):
     if not (isinstance(e.get("reviewer"), str) and isinstance(e.get("reason"), str)):
         return None
     return e
+
+
+def _ts(e):
+    """The entry's `ts` as an aware datetime (UTC `Z` or an offset), else None."""
+    raw = e.get("ts")
+    if not isinstance(raw, str):
+        return None
+    try:
+        dt = datetime.fromisoformat(raw[:-1] + "+00:00" if raw.endswith("Z") else raw)
+    except ValueError:
+        return None
+    return dt if dt.tzinfo is not None else None
 
 
 def health(path=None):
@@ -85,7 +100,8 @@ def health(path=None):
                 state = "down"
     return {"state": state, "failures": failures, "answers": answers, "skipped": skipped,
             "last_repo": last["repo"] if last else None, "last_pr": last["pr"] if last else None,
-            "last_reason": last["reason"] if last else None, "prs": len(set(streak))}
+            "last_reason": last["reason"] if last else None,
+            "last_ts": _ts(last) if last else None, "prs": len(set(streak))}
 
 
 def main():
