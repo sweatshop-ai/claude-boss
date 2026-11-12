@@ -197,6 +197,15 @@ class MarkCleared(unittest.TestCase):
         with self.assertRaises(ValueError):
             tracker.mark_cleared(LINE, datetime(2026, 9, 18, 12, 7))
 
+    def test_an_empty_cleared_is_not_cleared_and_gets_the_time(self):
+        for empty in ('cleared=', 'cleared=""'):
+            with self.subTest(empty):
+                line = LINE.replace(' ask=', ' %s ask=' % empty)
+                self.assertEqual(validate(scan_marker(line)[1])["cleared"], "")
+                out = tracker.mark_cleared(line, WHEN)
+                self.assertEqual(out, LINE.replace(' ask=', ' cleared=2026-09-18T12:07+02:00 ask='))
+                self.assertEqual(validate(scan_marker(out)[1])["cleared"], "2026-09-18T12:07+02:00")
+
 
 def held_lock(path):
     """A child process that holds the tracker's lock until its stdin closes."""
@@ -332,6 +341,49 @@ class Update(unittest.TestCase):
         self.assertEqual(tracker.update(self.path, lambda t: None, time.monotonic() + 0.2),
                          "done (no change)")
 
+    def test_an_oserror_or_decode_error_from_fn_propagates_and_changes_nothing(self):
+        before = self.path.read_bytes()
+        for exc in (OSError("from fn"), UnicodeDecodeError("utf-8", b"\xff", 0, 1, "from fn")):
+            def fn(text, exc=exc):
+                raise exc
+            with self.subTest(type(exc).__name__):
+                with self.assertRaises(type(exc)):
+                    tracker.update(self.path, fn, self.far())
+                self.assertEqual(self.path.read_bytes(), before)
+                self.assertEqual(self.temps(), [])
+                self.assertEqual(tracker.update(self.path, lambda t: None, time.monotonic() + 0.2),
+                                 "done (no change)")
+
+    def test_a_change_of_inode_alone_is_noticed(self):
+        calls = []
+
+        def fn(text):
+            calls.append(text)
+            if len(calls) == 1:
+                st = self.path.stat()
+                other = self.dir / "other.md"
+                other.write_bytes(self.path.read_bytes().replace(b"one", b"two"))
+                os.utime(other, ns=(st.st_atime_ns, st.st_mtime_ns))
+                os.replace(other, self.path)
+                new = self.path.stat()
+                assert (new.st_size, new.st_mtime_ns) == (st.st_size, st.st_mtime_ns)
+                assert new.st_ino != st.st_ino
+            return text + "- mine\n"
+        self.assertEqual(tracker.update(self.path, fn, self.far()), "done")
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(self.path.read_text(), "# T\n\n## Open blockers\n- two\n- mine\n")
+
+    def test_the_text_is_utf8_whatever_the_locale(self):
+        self.path.write_bytes("# T\n\n## Open blockers\n- caf\u00e9\n".encode())
+        code = ("import sys, time\nsys.path.insert(0, sys.argv[1])\nimport tracker\n"
+                "print(tracker.update(sys.argv[2], lambda t: t + '- na\\u00efve\\n', time.monotonic() + 5))\n")
+        env = {"PATH": os.environ["PATH"], "LC_ALL": "C", "PYTHONCOERCECLOCALE": "0", "PYTHONUTF8": "0"}
+        out = subprocess.run([sys.executable, "-c", code, str(HERE), str(self.path)], env=env,
+                             cwd=str(self.dir), capture_output=True, text=True, timeout=60)
+        self.assertEqual(out.stdout.strip(), "done", out.stderr)
+        self.assertEqual(self.path.read_bytes(),
+                         "# T\n\n## Open blockers\n- caf\u00e9\n- na\u00efve\n".encode())
+
     def test_a_naive_when_through_update_leaves_the_file_untouched(self):
         self.path.write_text("## Open blockers\n" + LINE + "\n")
         before = self.path.read_bytes()
@@ -378,6 +430,41 @@ class AddLine(unittest.TestCase):
         self.assertEqual(self.add(), "failed: UnicodeDecodeError")
         self.assertEqual(self.path.read_bytes(), b"# T\n\xff\n")
 
+    def test_a_tag_that_is_the_prefix_of_a_longer_id_is_not_there(self):
+        self.assertEqual(self.add("- a id=ab12cd345", "id=ab12cd345"), "done")
+        self.assertEqual(self.add("- b id=ab12cd34", "id=ab12cd34"), "done")
+        self.assertEqual(self.add("- b again id=ab12cd34", "id=ab12cd34"), "done (already there)")
+        self.assertEqual(self.path.read_text().count("id=ab12cd34\n"), 1)
+
+    def test_a_tag_in_prose_or_another_section_is_not_there(self):
+        self.path.write_text("# T\n\nnote: [x1] is how a blocker is tagged\n\n## Open blockers\n- one\n\n"
+                             "## Decisions in force\n- d [x1]\n")
+        self.assertEqual(self.add(), "done")
+        self.assertIn("- one\n- two [x1]\n\n## Decisions", self.path.read_text())
+        self.assertEqual(self.add(), "done (already there)")
+
+    def test_a_cleared_marker_does_not_count_as_there(self):
+        tracker_line = ('- b [ladder id=ab12cd34 t0=2026-09-18T10:53+02:00 last=0 '
+                        'next=2026-09-18T10:58+02:00 %sask="x"]')
+        tag = tracker.marker_tag("ab12cd34")
+        cleared = tracker_line % "cleared=2026-09-18T11:00+02:00 "
+        self.path.write_text("## Open blockers\n%s\n" % cleared)
+        self.assertEqual(self.add(tracker_line % "", tag), "done")
+        self.assertEqual(self.add(tracker_line % "", tag), "done (already there)")
+        self.assertEqual(self.path.read_text().count("id=ab12cd34 "), 2)
+        # an empty cleared= is not cleared (validate says so too)
+        self.path.write_text("## Open blockers\n%s\n" % (tracker_line % "cleared= "))
+        self.assertEqual(self.add(tracker_line % "", tag), "done (already there)")
+
+    def test_a_crlf_tracker_gets_a_crlf_line(self):
+        self.path.write_bytes(b"# T\r\n\r\n## Open blockers\r\n- one\r\n\r\n## Decisions in force\r\n- d\r\n")
+        self.assertEqual(self.add(), "done")
+        self.assertEqual(self.path.read_bytes(), b"# T\r\n\r\n## Open blockers\r\n- one\r\n- two [x1]\r\n"
+                         b"\r\n## Decisions in force\r\n- d\r\n")
+        self.assertEqual(self.add(title="Pending", line="- p [p1]", tag="[p1]"), "done")
+        self.assertTrue(self.path.read_bytes().endswith(b"- d\r\n\r\n## Pending\r\n- p [p1]\r\n"))
+        self.assertNotIn(b"\n", self.path.read_bytes().replace(b"\r\n", b""))
+
     def test_failures_come_back_as_text(self):
         self.assertEqual(tracker.add_line(self.dir / "no.md", "T", "- l", "t", time.monotonic() + 1),
                          "failed: FileNotFoundError")
@@ -387,13 +474,14 @@ ADD_ONE = """
 import sys, time
 sys.path.insert(0, sys.argv[1])
 import tracker
-print(tracker.add_line(sys.argv[2], "Open blockers", "- the one [ladder id=ab12cd34]",
-                       "id=ab12cd34", time.monotonic() + 60))
+tag = sys.argv[3] if len(sys.argv) > 3 else "ab12cd34"
+print(tracker.add_line(sys.argv[2], "Open blockers", "- the one [ladder id=%s]" % tag,
+                       "id=%s]" % tag, time.monotonic() + 60))
 """
 
 
 class Concurrent(unittest.TestCase):
-    """Eight processes add one tag while boss-tracker append writers run beside them."""
+    """Eight processes add one tag, then twelve add a tag each, while boss-tracker append writers run beside them."""
 
     def setUp(self):
         self.sb = Sandbox(extra_tools=("flock", "stat"))
@@ -409,10 +497,22 @@ class Concurrent(unittest.TestCase):
     def tearDown(self):
         self.sb.cleanup()
 
+    def adders(self, tags):
+        return [subprocess.Popen(["python3", "-I", "-c", ADD_ONE, str(HERE), str(self.path), tag],
+                                 env=self.sb.env, stdout=subprocess.PIPE, text=True)
+                for tag in tags]
+
+    def test_every_adder_with_its_own_tag_keeps_its_line(self):
+        # Every adder renames, so without the lock the last rename would drop the others' lines.
+        tags = ["ab12cd%02d" % i for i in range(12)]
+        results = [p.communicate(timeout=60)[0].strip() for p in self.adders(tags)]
+        self.assertEqual(results, ["done"] * 12)
+        text = self.path.read_text()
+        for tag in tags:
+            self.assertEqual(text.count("id=%s]" % tag), 1, tag)
+
     def test_one_line_and_no_append_lost(self):
-        adders = [subprocess.Popen(["python3", "-I", "-c", ADD_ONE, str(HERE), str(self.path)],
-                                   env=self.sb.env, stdout=subprocess.PIPE, text=True)
-                  for _ in range(8)]
+        adders = self.adders(["ab12cd34"] * 8)
         appenders = []
         for i in range(12):
             p = subprocess.Popen([str(BIN / "boss-tracker"), "append", "demo"], env=self.sb.env,
