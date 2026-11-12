@@ -8,8 +8,10 @@ out, a `**Claimed by:**` line.
 
 A blocker is either another ticket (`- 03: title`, or `03, 05` inline; only
 the leading id of each item counts) or something outside the team
-(`- External: who does what`). Ids are compared in one form, two digits
-(`1`, `01` and `001` are the same ticket). A ticket is:
+(`- External: who does what`). Ids are compared in one form, at least two digits
+(`1`, `01` and `001` are the same ticket). A ticket split into parts has
+lettered ids: `05a-slug.md` is ticket `05a`, distinct from `05`, and a lettered
+id sorts after its number (05, 05a, 05b, 06). A ticket is:
 
   done      Status starts with the word done
   claimed   a Claimed by line is present and it is not done
@@ -48,13 +50,22 @@ from datetime import datetime
 from pathlib import Path
 
 FIELD = re.compile(r"^\*\*([A-Za-z ]+):\*\*\s*(.*)$")
-TICKET_FILE = re.compile(r"^(\d{1,3})-.*\.md$")
-LEADING_ID = re.compile(r"^\s*#?(\d{1,3})\b(?![.:/-]\d)")
+TICKET_FILE = re.compile(r"^(\d{1,3}[a-z]?)-.*\.md$")
+LEADING_ID = re.compile(r"^\s*#?(\d{1,3}[a-z]?)\b(?![.:/-]\d)")
+ID = re.compile(r"^(\d+)([a-z]?)$")
 
 
 def tid(raw):
-    """The one form a ticket id takes everywhere: at least two digits."""
-    return str(int(raw)).zfill(2)
+    """The one form a ticket id takes everywhere: at least two digits, then the
+    part letter if there is one."""
+    number, letter = ID.match(raw).groups()
+    return str(int(number)).zfill(2) + letter
+
+
+def id_order(num):
+    """Sort key: by number, then letter (05 < 05a < 05b < 06)."""
+    number, letter = ID.match(num).groups()
+    return int(number), letter
 
 
 class BadInput(Exception):
@@ -246,7 +257,8 @@ def load(folder):
     gh = GH_SOURCE.match(str(folder))
     if gh:
         return load_github(*gh.groups())
-    files = sorted(p for p in Path(folder).glob("*.md") if TICKET_FILE.match(p.name))
+    files = sorted((p for p in Path(folder).glob("*.md") if TICKET_FILE.match(p.name)),
+                   key=lambda p: (id_order(tid(TICKET_FILE.match(p.name).group(1))), p.name))
     if not files:
         return None, ["no ticket files (NN-slug.md) in %s" % folder]
     tickets, errors = [], []
