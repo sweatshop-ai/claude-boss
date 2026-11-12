@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **A dead Codex becomes an open blocker (ticket 05c).** `boss_review.py` takes `--track T` (and `review(..., track=)`): once its attempts are logged it calls `skills/boss/codex_blocker.py`, which, inside one tracker lock, adds a `Codex down` line with a ladder marker after 3 failed Codex attempts in a row (`boss-alert 0`; the ladder escalates it from rung 5 without a boss turn) and sets `cleared=` on it after 2 answered ones (`boss-alert clear`, once). A track name that is not plain is exit 2; a tracker that is not a regular file of yours, or a sync that fails, is said on stderr and the review's exit code stands. Without `--track` nothing is written to a tracker.
 - **Codex health is derived from the attempts log (ticket 05b).** `skills/boss/codex_health.py` reads `pm/reviews/attempts.jsonl` in one scan and says `down` after `policy.CODEX_DOWN_AFTER` (3) failed Codex attempts in a row, `up` again after `policy.CODEX_UP_AFTER` (2) answered ones. It stores no counter and writes nothing; the blocker that uses it is ticket 05c.
 - **A Done when line names its local tickets as `<feature>/<NN>`, or a range `<feature>/<NN> to <MM>`.** SKILL.md,
   `references/objective.md` and the hand-to-boss brief template say so. FleetView (agentview PR 33) shows each Done when
