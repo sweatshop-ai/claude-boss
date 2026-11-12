@@ -92,6 +92,10 @@ REVIEW_FALLBACK_ENV_UNSET = (
 REVIEW_CODEX_TIMEOUT = 600
 REVIEW_FALLBACK_TIMEOUT = 600
 REVIEW_IO_TIMEOUT = 60
+
+# The waiver (ticket 09c): how long the owner's command may run, and how long a consent token lives.
+WAIVE_TEST_TIMEOUT = 900         # seconds; a timeout counts as failed tests
+CONSENT_TTL = 600                # seconds a token written after the owner's "yes" can be used
 REVIEW_CHAIN_SLACK = 30
 
 # What a PR review publishes of the reviewer's findings: at most this many `FINDING:` lines, each cut to

@@ -1,0 +1,61 @@
+{
+ "cwd": "CWD",
+ "duration_ms": 1,
+ "effort": {
+  "level": "medium"
+ },
+ "hook_event_name": "PostToolUse",
+ "permission_mode": "auto",
+ "prompt_id": "PROMPT-ID",
+ "scratchpad_dir": "SCRATCHPAD-DIR",
+ "session_id": "SESSION-ID",
+ "tool_input": {
+  "annotations": {},
+  "answers": {
+   "CONSENT: proceed with the third test?": "maybe later, ask someone else"
+  },
+  "questions": [
+   {
+    "header": "Consent",
+    "multiSelect": false,
+    "options": [
+     {
+      "description": "Run the third test now.",
+      "label": "Yes, proceed"
+     },
+     {
+      "description": "Do not run the third test.",
+      "label": "No, stop"
+     }
+    ],
+    "question": "CONSENT: proceed with the third test?"
+   }
+  ]
+ },
+ "tool_name": "AskUserQuestion",
+ "tool_response": {
+  "annotations": {},
+  "answers": {
+   "CONSENT: proceed with the third test?": "maybe later, ask someone else"
+  },
+  "questions": [
+   {
+    "header": "Consent",
+    "multiSelect": false,
+    "options": [
+     {
+      "description": "Run the third test now.",
+      "label": "Yes, proceed"
+     },
+     {
+      "description": "Do not run the third test.",
+      "label": "No, stop"
+     }
+    ],
+    "question": "CONSENT: proceed with the third test?"
+   }
+  ]
+ },
+ "tool_use_id": "toolu_TOOL-USE-ID",
+ "transcript_path": "TRANSCRIPT-PATH"
+}
