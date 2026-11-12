@@ -2,7 +2,7 @@
 
 **Blocked by:** 05
 
-**Status:** done (Amelie built it, PR PRNUM)
+**Status:** done (Amelie built it, PR 119)
 
 Found by the Codex re-review of PR 90 (class b, real on main). `codex_blocker.py` cleared an open `Codex down`
 blocker when `codex_health` said `up`, and `codex_health` starts at `up` for a log that is missing or empty.

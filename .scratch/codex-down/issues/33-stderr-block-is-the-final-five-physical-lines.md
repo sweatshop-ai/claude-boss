@@ -2,7 +2,7 @@
 
 **Blocked by:** 08
 
-**Status:** done (Amelie built it, PR PRNUM)
+**Status:** done (Amelie built it, PR 119)
 
 Found by the Codex re-review of PR 91 (class b, real on main; privacy). `boss_review.stderr_block` took the
 last five non-blank lines of the tail. The text goes into a public PR comment, and redaction knows only the
