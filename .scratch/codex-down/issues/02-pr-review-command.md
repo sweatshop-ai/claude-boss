@@ -10,6 +10,8 @@
 
 **Status:** done
 
+Rebased after the 2026-11-05 scrub: sweatshop-ai/claude-boss PR #84, settled on head 1b6fda49288f5ca4db775ce1544e57df6e469cb6 (CI run 43195829740 green; Opus fallback review, Codex stalled; follow-up ticket 13). Zara, 2026-11-12.
+
 Command and function:
 
 - [x] `boss_review.py --repo OWNER/REPO --pr N --checkout DIR --author NAME`. Exit codes: 0 GO posted, 2 usage, identity mismatch or an invalid name, 3 NO-GO posted, 4 no verdict (Codex `absent`, `timeout`, `error` or `noverdict`), 6 head or base moved, 7 infrastructure failure (the cases below). Exit 5 is 09's (`--waive` refused) and is never used here. `--repo` is required and never inferred from the working directory; `<owner>`, `<repo>` and `--author` match `^[A-Za-z0-9._-]+$`, and `<owner>` and `<repo>` are neither `.` nor `..` (the pattern alone lets `..` through), else exit 2 with nothing claimed or posted; tests: `../x`, `x/..`, `./x`, `a/b/c` [R7, R9]. GitHub treats owner and repo names case-insensitively, so one function, `repo_key(repo)` (`<owner>/<repo>` lowercased), gives the key used for the directory name, the per-PR lock, the `repo` value of `round<NN>.json`, `attempts.jsonl` and 04's `merges.jsonl`, and the tag of 06's entry; the `gh` calls carry the spelling given. 04, 06 and 10 call `repo_key` and never build a path from `--repo` as typed
