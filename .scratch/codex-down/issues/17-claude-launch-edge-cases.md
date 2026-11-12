@@ -1,4 +1,4 @@
-# 16: claude_launch edge cases left by review of PR 93
+# 17: claude_launch edge cases left by review of PR 93
 
 **What to build:** in `reviewer_chain.claude_launch` (from the Opus fallback review of PR 93, findings 1, 2, 4, 5):
 - [ ] `cwd=None` with a deleted working directory records an "absent"/"error" attempt instead of raising `FileNotFoundError` from `os.getcwd()`
