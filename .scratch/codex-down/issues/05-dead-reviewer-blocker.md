@@ -12,4 +12,6 @@ What to build, in one line: after N failed Codex attempts in a row the boss's tr
 
 **Where other tickets point:** 06 and 10 call `tracker.update` and `tracker.add_line` (05a) and 06's and 10's `track` rule and health sync are 05c's `review()` box; 09 reuses `mark_cleared` (05a), extends `codex_health.py` (05b) and needs the blocker and its id (05c); 04 and 13 name `BOSS_ALERT` and the attempts counter (05c, 05b).
 
+**Blocked by:** 05a, 05b, 05c (this file is an index; the work is in the three)
+
 **Status:** ready-for-agent (the three tickets).
