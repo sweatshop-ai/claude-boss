@@ -123,7 +123,10 @@ the child does not inherit (`env_unset`), extra `claude` flags
 of values and `-p` ends them), and which Codex reasons let it run. Optional;
 without one the chain is Codex only. Callers name one by **preset**
 (`opus` = `claude-opus-5-5`, `fable` = `claude-fable-5-1`), so the model ids are
-written in `reviewer_chain.py` alone. `claude_argv` builds its call, the one
+written in `reviewer_chain.py` alone. A preset's `claude` is looked up on our PATH
+without empty, relative and checkout-local entries and started by absolute path; its child
+gets our PATH minus the empty and relative entries only. With no `--cwd` a preset keeps nothing out for being
+under the current directory (the confined spec still does). `claude_argv` builds its call, the one
 place, and `fallback_flags` renders a whole spec as command-line flags for a
 caller that starts the chain as a child process.
 
