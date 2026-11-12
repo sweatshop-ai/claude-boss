@@ -407,6 +407,38 @@ if [ -n "$CLAUDE_CODE_PLUGIN_DIRS" ]; then echo %s; else echo %s; fi
         self.assertEqual([n for n in names if n in seen], [])
         self.assertEqual(seen.get("KEPT_BY_THE_TEST"), "yes")
 
+    def planted_claude(self, where):
+        """An executable `claude` in `where`, inside the checkout, that leaves a mark when it runs."""
+        where.mkdir(parents=True, exist_ok=True)
+        planted = where / "claude"
+        planted.write_text("#!/bin/sh\ntouch %s\n" % (self.sb.root / "planted-ran"))
+        planted.chmod(0o755)
+
+    def test_a_claude_planted_in_the_checkout_is_not_the_one_started(self):
+        # the PR's own `claude`, reachable by PATH=.:... or a checkout-local bin dir, ahead of the real one
+        self.planted_claude(self.checkout)
+        self.planted_claude(self.checkout / ".venv" / "bin")
+        self.sb.stub("claude", answer=GO)
+        self.expect["claude"] = 2
+        stubs = os.environ["PATH"]
+        path = os.pathsep.join([".", "", "relative/bin", str(self.checkout), str(self.checkout / ".venv" / "bin"), stubs])
+        with mock.patch.dict(os.environ, {"PATH": path}):
+            result = rc.run_chain("p", words=rc.GO_NOGO, fallback=br.fallback_spec(), cwd=str(self.checkout))
+            problems = br.check_fallback(str(self.checkout))
+        self.assertEqual(result.reviewer, "opus")
+        self.assertEqual(len(self.claude_calls()), 2)      # the review's call and the check's, both the stub
+        self.assertFalse((self.sb.root / "planted-ran").exists(), "the checkout's claude ran")
+        self.assertTrue(problems)       # the stub answers GO, not an init event: the check is not what is under test
+
+    def test_when_the_only_claude_is_in_the_checkout_the_fallback_is_absent(self):
+        self.planted_claude(self.checkout)
+        with mock.patch.dict(os.environ, {"PATH": os.pathsep.join([str(self.checkout), os.environ["PATH"]])}):
+            result = rc.run_chain("p", words=rc.GO_NOGO, fallback=br.fallback_spec(), cwd=str(self.checkout))
+            problems = br.check_fallback(str(self.checkout))
+        self.assertEqual([a.reason for a in result.attempts if a.reviewer == "opus"], ["absent"])
+        self.assertTrue(any("could not be started" in p for p in problems), problems)
+        self.assertFalse((self.sb.root / "planted-ran").exists())
+
     def test_the_call_runs_in_the_checkout_it_was_given(self):
         self.check()
         (call,) = self.claude_calls()

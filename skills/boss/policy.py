@@ -58,7 +58,8 @@ STOP_MIN = 24 * 60
 # The fallback reviewer, `claude` in read-only mode (boss_review.fallback_spec). The model is passed by
 # its exact id, so no CLI default is ever accepted; the tools are the built-in set it may use, and
 # `--strict-mcp-config` (with no `--mcp-config`) keeps every MCP server out, which `--tools` alone does not.
-# `--restricted` (no constant: it takes no value) keeps the settings files, so hooks and plugins, out.
+# `--restricted` (no constant: it takes no value) keeps the user, project and local settings files out;
+# managed and remote settings still apply, hence the variables below.
 REVIEW_FALLBACK_MODEL = "claude-opus-5-5"
 REVIEW_FALLBACK_TOOLS = ("Read", "Grep", "Glob")
 REVIEW_FALLBACK_PERMISSION_MODE = "dontAsk"

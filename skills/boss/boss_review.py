@@ -53,7 +53,7 @@ from typing import NamedTuple
 import boss_store
 import policy
 from reviewer_chain import (CODEX_FAILURES, GO_NOGO, STDERR_TAIL, TERM_GRACE, Fallback, _parse, _snapshot,
-                            _stop, child_env, claude_argv)
+                            _stop, claude_launch)
 
 HERE = Path(__file__).resolve().parent
 CHAIN = HERE / "reviewer_chain.py"
@@ -946,8 +946,9 @@ def fallback_spec(timeout: int = policy.REVIEW_FALLBACK_TIMEOUT) -> Fallback:
     """The PR gate's fallback reviewer: `claude` on the policy's model, limited to the built-in tools
     Read, Grep and Glob, with every MCP server and every slash command off, and any permission it was
     not given denied rather than asked for. `--tools` alone leaves the MCP tools in (checked with
-    `claude` 2.1.288 and 2.1.289), hence `--strict-mcp-config`. `--restricted` keeps every settings file
-    out: `claude -p` skips the workspace trust dialog, so without it the checkout's `.claude/settings.json`
+    `claude` 2.1.288 and 2.1.289), hence `--strict-mcp-config`. `--restricted` keeps the user, project and
+    local settings files out (managed and remote settings still apply: `env_unset` removes the variables
+    that name them): `claude -p` skips the workspace trust dialog, so without it the checkout's `.claude/settings.json`
     runs its hooks (a `SessionStart` hook ran a command there, checked with 2.1.289), as do the owner's
     own hooks and plugins, and the owner's CLAUDE.md and auto-memory reach the model; it also confines
     the file tools to the working directory. `--safe-mode` also turns off what is not a settings file:
@@ -1044,7 +1045,10 @@ def check_fallback(checkout: str, timeout: int = policy.REVIEW_FALLBACK_TIMEOUT)
     that is stopped, cannot be started or exits non-zero is not a pass, whatever it printed first."""
     spec = fallback_spec(timeout)
     probe = dataclasses.replace(spec, extra_args=spec.extra_args + CHECK_FLAGS)
-    run = _spawn(claude_argv(probe, CHECK_PROMPT), timeout, cwd=checkout, env=child_env(probe))
+    launch = claude_launch(probe, CHECK_PROMPT, checkout)
+    if launch is None:
+        return ["claude could not be started: not found on a PATH without the checkout's entries"]
+    run = _spawn(launch[0], timeout, cwd=checkout, env=launch[1])
     if run.timed_out:
         return ["claude ran past %ss and was stopped" % timeout]
     if run.code is None:

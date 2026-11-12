@@ -132,7 +132,7 @@ caller that starts the chain as a child process.
 `--strict-mcp-config` (without it `--tools` alone leaves every MCP tool in),
 `--disable-slash-commands`, `--restricted`, `--safe-mode` and
 `--permission-mode dontAsk`.
-`--restricted` keeps every settings file out (`claude -p` skips the workspace
+`--restricted` keeps the user, project and local settings files out (`claude -p` skips the workspace
 trust dialog, so without it a hook in the PR checkout's `.claude/settings.json`
 runs, and so do the owner's own hooks and plugins) and confines the file tools
 to the working directory. `--safe-mode` also turns off the checkout's agents,
