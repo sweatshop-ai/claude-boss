@@ -94,3 +94,17 @@ Codex round 2 was run at head 2af4ba6 (`codex-review.sh exec`, brief on the diff
 | N9 | b | **Fixed** in 09b: own-turn `AskUserQuestion` when the boss has no concierge. |
 | N10 | d | **Fixed**: three tests added to 09c. |
 | stale pointers | d | 04's scope says 09c; 05's index says 09a, 09b and 09c. |
+
+## Round 3 (Malin, 2026-11-12): real Codex, enforcement of the consent
+
+Brief: can `boss-guard` gate `--choose tests-alone` and `--waive` on the session's own `CONSENT:` yes. Raw: `/home/tiroir/Projects/boss-plugin-wt/09-spec-reviews/round-3.md`. Codex answered: **feasible as a fail-closed guardrail** against a session that runs the command without asking (PostToolUse token on the Ask, checked inside the commands, defence-in-depth deny in the guard); **infeasible as strict enforcement** against an agent that deliberately forges it (same OS user). Written into 09c (consent token box); R26 cut to the deliberate-forgery residue. The guard today reads only `session_id`, `tool_name`, `tool_input` (`boss-guard.py:299-327`) and runs for registered boss sessions only; the PostToolUse payload is not characterised in the repo, so the build captures it first.
+
+| # | Class | Disposition |
+|---|---|---|
+| 1 | a | **Accepted**: the token box in 09c. Residue (deliberate forgery) in R26. |
+| 2 | b | **Accepted**: 09a ignores a future `cleared=` beyond `now` + 60 s as invalid, not capped; boundary tests. |
+| 3 | b | **Accepted**: 09b's revocation test uses `accept-fallback`; 09c repeats it with `tests-alone`. |
+| 4 | d | **Accepted**: capturing the real PostToolUse payload is the first step of 09c's build. |
+| 5 | d | **Accepted**: dirty-after-tests is exit 6, a `head-moved` round with `GO`, nothing posted. |
+
+Codex verdict NO-GO on the text as read; findings 1 to 5 are fixed in the spec.
