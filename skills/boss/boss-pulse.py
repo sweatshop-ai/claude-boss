@@ -173,8 +173,8 @@ def open_blockers(body):
     """
     if body is None:
         return []
-    return [b[:160] for b in tracker.open_blockers(body)
-            if (b not in _decided_entries(body))]
+    decided = _decided_entries(body)
+    return [b[:160] for b in tracker.open_blockers(body) if b not in decided]
 
 
 def _decided_entries(body):
@@ -183,24 +183,31 @@ def _decided_entries(body):
     The answer is `codex_blocker`'s: `_state` says whether the one open Codex down
     blocker has a valid recorded choice, and an entry counts only when its own marker
     carries that blocker's id. A malformed choice, one for another id, and a tracker
-    with several open Codex down lines decide nothing.
+    with several open Codex down lines decide nothing. The lines are split as `_state`
+    split them, and a marker that does not parse (a line closed by hand) is skipped.
     """
-    status, id_, choice = codex_blocker._state(body.split("\n"))
+    lines = body.split("\n")
+    status, id_, choice = codex_blocker._state(lines)
     if status != "chosen":
         return {}
+    lo, hi = tracker.blockers_range(lines)
     out = {}
-    for line in tracker.blocker_lines(body):
-        found = codex_blocker._is_cd(line) and tracker.scan_marker(line)
+    for line in lines[lo:hi]:
+        try:
+            found = codex_blocker._is_cd(line) and tracker.scan_marker(line)
+        except tracker.MarkerError:
+            continue
         if found and found[1].get("id") == id_:
             out[line.strip().lstrip("-* ").strip()] = choice
     return out
 
 
 def decided_blockers(body):
-    """The blockers the owner has answered, as `ask (owner chose X)` lines, for the text."""
+    """The blockers the owner has answered, as `entry (owner chose X)` lines, for the text."""
     if body is None:
         return []
-    return ["%s (owner chose %s)" % (e[:120], c) for e, c in _decided_entries(body).items()]
+    return ["%s (owner chose %s)" % (e.split(tracker.TOKEN)[0].strip()[:120], c)
+            for e, c in _decided_entries(body).items()]
 
 
 def question_pending(sid):

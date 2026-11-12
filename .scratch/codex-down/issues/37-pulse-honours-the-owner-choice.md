@@ -11,7 +11,8 @@
 - [x] A blocker with a valid recorded choice is not listed as BLOCKED and adds no `ask` action; it is shown as decided with its choice (`skills/boss/test_pulse_choice.py`)
 - [x] A malformed choice, one for another blocker id, one outside Decisions in force: the blocker stays BLOCKED
 - [x] The last recorded choice is the one shown
-- [x] A decided blocker presses no escalation rung
+- [x] A decided blocker presses no rung of the pulse's own (a marked line never did; boss-ladder.timer owns the cd line's rungs and this ticket does not touch it)
+- [x] A cd line closed by hand with a marker that does not parse, a line separator inside a marker, two open cd lines and a CRLF tracker do not crash the hook
 - [x] The choice is read with `codex_blocker`'s reader, not a second parser
 - [x] Tests use `hermetic.Sandbox`, install the `codex`, `claude`, `gh` and `tmux` stubs and read their call logs (`expect_unused`, and tmux only ever `list-panes`)
 - [x] CHANGELOG.md has the entry

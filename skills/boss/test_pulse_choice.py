@@ -100,8 +100,42 @@ class Hook(Base):
         self.assertNotIn("rung", out.lower().replace("run the due rung", ""))
 
     def test_a_decided_blocker_with_an_old_t0_presses_no_rung(self):
+        # Pins the pulse's own rungs only: due_rungs skips every ladder-marked line, decided or not
+        # (boss-ladder.timer owns the cd line's rungs).
         self.tracker(cd_line() + "\n" + OTHER, choice_line())
         self.assertNotIn("OVERDUE", self.stop())
+
+    def test_a_cd_line_closed_by_hand_with_a_broken_marker_beside_a_decided_one_does_not_crash(self):
+        broken = ('- old Codex down [ladder id=cd261101090000 t0=2026-11-01T09:00+01:00 last=0 '
+                  'next=2026-11-01T09:30+01:00 cleared=2026-11-01T12:00+01:00 ask="Codex is down"')
+        self.tracker(broken + "\n" + cd_line() + "\n" + OTHER, choice_line())
+        out = self.stop()
+        self.assertIn("(owner chose wait)", out)
+        self.assertIn("pick the org", out)
+
+    def test_a_line_separator_inside_a_marker_does_not_crash(self):
+        line = cd_line().replace('ask="Codex is down"', 'ask="Codex\u2028is down"')
+        self.tracker(line + "\n" + OTHER, choice_line())
+        self.assertIn("pick the org", self.stop())
+
+    def test_two_open_codex_down_lines_and_a_choice_leave_both_blocked(self):
+        self.tracker(cd_line() + "\n" + cd_line(OTHER_CD), choice_line())
+        out = self.stop()
+        self.assertIn("BLOCKED", out)
+        self.assertNotIn("DECIDED", out)
+
+    def test_a_crlf_tracker_still_reads_the_choice(self):
+        self.tracker(cd_line() + "\n" + OTHER, choice_line())
+        path = self.sb.cfg / "pm" / (TRACK + ".md")
+        path.write_bytes(path.read_bytes().replace(b"\n", b"\r\n"))
+        out = self.stop()
+        self.assertIn("(owner chose wait)", out)
+        self.assertIn("pick the org", out)
+
+    def test_the_decided_text_stops_before_the_marker(self):
+        self.tracker(cd_line() + "\n" + OTHER, choice_line())
+        out = self.stop()
+        self.assertNotIn("[ladder", out)
 
     def test_a_choice_for_another_blocker_does_not_count(self):
         self.tracker(cd_line(), choice_line(OTHER_CD))
