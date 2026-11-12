@@ -781,7 +781,7 @@ class ReviewBrief(base.Base):
 
 class SkillText(unittest.TestCase):
     PARAGRAPH_START = "**Codex is the external reviewer, twice"
-    NEXT_PARAGRAPH = "**Close every dispatch with the reporting contract"
+    NEXT_PARAGRAPH = "**How many rounds: graded by risk and size"
 
     def paragraph(self):
         text = (HERE / "SKILL.md").read_text(encoding="utf-8")
