@@ -9,10 +9,13 @@ stub that serves the PR's state and head, the round records are written by hand 
 writes, the tracker is pm/t.md in the temp config dir, and each test asserts the `gh` calls it expected. The
 codex and claude stubs are never called by a prune. Nothing is posted and no real tracker is touched.
 """
+import contextlib
 import fcntl
+import io
 import json
 import os
 import sys
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -87,6 +90,8 @@ class RemovalRows(PruneBase):
          "OPEN", B, line(round=2), [(1, B, "GO")], False),
         ("a merged PR whose merged head has a GO older than the entry's round: merged is final", "MERGED", B,
          line(round=2), [(1, B, "GO")], True),
+        ("an open PR whose live head has a GO at the entry's own round, not above it", "OPEN", B, line(round=2),
+         [(2, B, "GO")], False),
         ("an open PR whose live head has a Codex NO-GO", "OPEN", B, line(), [(2, B, "NO-GO")], False),
         ("an open PR whose live head has a GO and then a NO-GO", "OPEN", B, line(),
          [(2, B, "GO"), (3, B, "NO-GO")], False),
@@ -135,6 +140,30 @@ class RemovalRows(PruneBase):
         self.assertEqual(self.prune(), [TAG])
         self.assertEqual(self.text(), TRACKER + "\n## Provisional GO\n" + other + "\n- hand note\n\n## Done\n- x\n")
 
+    def test_a_tracker_with_crlf_line_endings_is_pruned_and_keeps_its_endings(self):
+        other = line(pr=9, repo="owner/other", round=3)
+        crlf = (TRACKER + "\n## Provisional GO\n" + line() + "\n" + other + "\n- hand note\n").replace("\n", "\r\n")
+        self.tracker.write_bytes(crlf.encode("utf-8"))
+        self.pr_is("OPEN")
+        self.rounds((2, A, "GO"))
+        self.assertEqual(self.prune(), [TAG])
+        self.assertEqual(self.tracker.read_bytes().decode("utf-8"),
+                         crlf.replace(line() + "\r\n", "", 1))
+
+    def test_two_identical_lines_of_one_entry_both_go_and_each_is_returned(self):
+        self.put(line(), line())
+        self.pr_is("OPEN")
+        self.rounds((2, A, "GO"))
+        self.assertEqual(self.prune(), [TAG, TAG])
+        self.assertEqual(self.entries(), [])
+        self.assertEqual(len(self.views()), 2)        # each line is its own entry: read, and judged, on its own
+
+    def test_two_identical_lines_of_one_entry_stay_both_while_the_pr_is_not_cleared(self):
+        self.put(line(), line())
+        self.pr_is("OPEN")
+        self.assertEqual(self.prune(), [])
+        self.assertEqual([e.line for e in self.entries()], [line(), line()])
+
 
 class WhatKeepsTheEntry(PruneBase):
     def test_an_unreadable_pr_state_keeps_the_entry_even_with_a_codex_go_above_its_round(self):
@@ -153,11 +182,23 @@ class WhatKeepsTheEntry(PruneBase):
                 self.assertEqual([c.argv[1] for c in self.sb.calls_of("gh")], ["view"])
 
     def test_a_gh_that_outlasts_the_io_timeout_keeps_the_entry(self):
+        """The timeout is seen to fire on the `gh pr view` itself (a slow machine alone cannot pass this)."""
         self.put(line())
         self.pr_is("OPEN")
         self.rounds((2, A, "GO"))
         self.gh.configure(view=[{"sleep": 30}])
-        self.assertEqual(br.prune_provisional("t", REPO, io_timeout=1), [])
+        real, seen = br._spawn, []
+
+        def spawn(argv, timeout, *rest, **kw):
+            run = real(argv, timeout, *rest, **kw)
+            seen.append((argv[:3], run.timed_out))
+            return run
+
+        err = io.StringIO()
+        with mock.patch.object(br, "_spawn", spawn), contextlib.redirect_stderr(err):
+            self.assertEqual(br.prune_provisional("t", REPO, io_timeout=1), [])
+        self.assertEqual(seen, [(["gh", "pr", "view"], True)])
+        self.assertEqual(err.getvalue(), "")        # an unreadable PR state keeps the entry without a word
         self.assertEqual([e.line for e in self.entries()], [line()])
 
     def test_a_round_file_that_cannot_be_read_keeps_the_entry_even_when_another_round_is_a_go(self):
@@ -171,6 +212,56 @@ class WhatKeepsTheEntry(PruneBase):
                 (self.pr_dir / "round03.json").write_text(body, encoding="utf-8")
                 self.assertEqual(self.prune(), [])
                 self.assertEqual([e.line for e in self.entries()], [line()])
+
+    def test_an_empty_round_below_a_later_round_is_a_dead_claim_and_does_not_keep_the_entry(self):
+        """A round is claimed under the PR's lock, so a later round exists only once the earlier review ended: an
+        empty file below it is a write that failed (`round 2 is left empty`), and the later review clears it."""
+        self.put(line())
+        self.pr_is("OPEN")
+        self.rounds((3, A, "GO"))
+        (self.pr_dir / "round02.json").write_text("", encoding="utf-8")
+        self.assertEqual(self.prune(), [TAG])
+        self.assertEqual(self.entries(), [])
+
+    def test_an_empty_round_below_a_later_round_clears_nothing_that_is_not_there(self):
+        self.put(line())
+        self.pr_is("OPEN")
+        self.rounds((3, A, "NO-GO"))
+        (self.pr_dir / "round02.json").write_text("", encoding="utf-8")
+        self.assertEqual(self.prune(), [])
+        self.assertEqual([e.line for e in self.entries()], [line()])
+
+    def test_a_round_below_a_later_one_that_is_not_empty_but_unreadable_still_keeps_the_entry(self):
+        self.put(line())
+        self.pr_is("OPEN")
+        self.rounds((3, A, "GO"))
+        (self.pr_dir / "round02.json").write_text("{", encoding="utf-8")
+        self.assertEqual(self.prune(), [])
+        self.assertEqual([e.line for e in self.entries()], [line()])
+
+    def test_a_round_file_nested_too_deep_for_the_json_parser_keeps_the_entry(self):
+        """json.loads raises RecursionError, which is no ValueError: it must not stop the prune of the repo."""
+        second = line(pr=6)
+        self.put(line(), second)
+        self.pr_is("OPEN")
+        self.rounds((2, A, "GO"))
+        self.rounds((2, A, "GO"), pr=6)
+        (self.pr_dir / "round03.json").write_text("[" * 200000, encoding="utf-8")
+        self.assertEqual(self.prune(), ["[prov owner/repo#6]"])        # the next PR is pruned all the same
+        self.assertEqual([e.line for e in self.entries()], [line()])
+
+    def test_a_round_file_name_too_long_to_exist_cannot_reach_the_parser(self):
+        """The ticket feared int() on a name of over 4300 digits. A file name is at most 255 bytes on Linux."""
+        digits = "1" * (4300 + 1)
+        with self.assertRaises(OSError):
+            (self.pr_dir / ("round%s.json" % digits)).write_text("{}", encoding="utf-8")
+        self.put(line())
+        self.pr_is("OPEN")
+        self.rounds((2, A, "GO"))
+        longest = "1" * (255 - len("round.json"))                        # the longest name there can be
+        (self.pr_dir / ("round%s.json" % longest)).write_text("{}", encoding="utf-8")
+        self.assertEqual(self.prune(), [])
+        self.assertEqual([e.line for e in self.entries()], [line()])
 
     def test_a_record_that_is_not_the_one_its_file_name_says_keeps_the_entry(self):
         """round02.json is a Codex GO but says it is round 1, or another PR, or has no round: no record of round 2."""
@@ -290,17 +381,27 @@ class WhenTheTrackerChangesUnderIt(PruneBase):
         self.pr_is("OPEN")
         self.rounds((2, A, "GO"))
         fd = br.open_lock(self.reviews, self.pr_dir, 5)       # a review of this PR holds the PR's lock
-        self.addCleanup(lambda: fcntl.flock(fd, fcntl.LOCK_UN))
+        self.addCleanup(os.close, fd)                         # closing the descriptor lets the lock go
         self.assertEqual(self.prune(), [TAG])
         self.assertEqual(self.entries(), [])
 
     def test_a_held_tracker_lock_leaves_the_entry_and_says_so(self):
+        """gh has the full time; only the tracker's own wait is cut to one second."""
         self.put(line())
         self.pr_is("OPEN")
         self.rounds((2, A, "GO"))
+        real = tracker.update
+
+        def update(path, fn, deadline):
+            return real(path, fn, time.monotonic() + 1)
+
+        err = io.StringIO()
         with open(tracker.lock_path(self.tracker), "a") as lf:
             fcntl.flock(lf, fcntl.LOCK_EX)
-            self.assertEqual(br.prune_provisional("t", REPO, io_timeout=1), [])
+            with mock.patch.object(tracker, "update", update), contextlib.redirect_stderr(err):
+                self.assertEqual(br.prune_provisional("t", REPO, io_timeout=30), [])
+        self.assertEqual([c.argv[1] for c in self.sb.calls_of("gh")], ["view"])        # it got as far as the lock
+        self.assertRegex(err.getvalue(), r"boss_review: the list of \S+ was not pruned \(")
         self.assertEqual([e.line for e in self.entries()], [line()])
 
     def test_an_exception_from_the_update_reaches_the_caller_and_the_file_is_as_it_was(self):
