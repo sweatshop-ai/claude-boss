@@ -436,6 +436,31 @@ class Clear(Base):
         self.sync(NOW + timedelta(minutes=2))
         self.assertEqual(len(self.alerts("clear")), 1)
 
+    def test_a_missing_or_truncated_log_is_not_a_recovery(self):
+        """Ticket 32: with no log, `codex_health` says `up` with no answers; that is no evidence."""
+        self.add(F, F, F)
+        self.sync()
+        self.assertEqual(len(self.cd_lines()), 1)
+        for rewrite in (lambda: self.log.unlink(), lambda: self.log.write_text("", encoding="utf-8"),
+                        lambda: self.log.write_text(json.dumps(entry(F)) + "\n", encoding="utf-8")):
+            rewrite()
+            self.sync(NOW + timedelta(minutes=1))
+            self.assertEqual(self.alerts("clear"), [])
+            self.assertNotIn(" cleared=", self.text())
+        self.log.write_text(json.dumps(entry(OK)) + "\n" + json.dumps(entry(OK)) + "\n", encoding="utf-8")
+        self.sync(NOW + timedelta(minutes=2))
+        self.assertEqual(len(self.alerts("clear")), 1)
+
+    def test_a_recovery_read_in_the_log_still_clears_after_one_later_failure(self):
+        """Review of PR 119: the log is shared by tracks, so a failure may land between the two answers
+        and this track's next sync. The streak was read; it clears."""
+        self.add(F, F, F)
+        self.sync()
+        self.add(OK, OK, F)
+        self.sync(NOW + timedelta(minutes=1))
+        self.assertEqual(len(self.alerts("clear")), 1)
+        self.assertIn(" cleared=", self.text())
+
     def test_codex_up_with_only_a_broken_cd_line_posts_no_clear(self):
         for broken in ('[ladder id=cd261112090000 t0=2026-11-12T09:00+01:00 last=0',
                        '[ladder id=cd261112090000 t0=yesterday last=0 next=x ask="a"]'):

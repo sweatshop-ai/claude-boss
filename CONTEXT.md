@@ -167,7 +167,10 @@ names, read from the base branch through `gh api`, never from the PR's head). It
 provisional or waived GO that any later round supersedes, a missing or invalid deploy file (every branch then deploys) all
 refuse. Exit 0 merged, 2 usage or not open, 3 no usable GO, 4 a weak GO on a deploying branch, 5 the merge or the check
 after it failed, 7 a `gh` read failed; every decision is one line in `pm/reviews/merges.jsonl`. It does not stop a merge
-typed by hand in a shell; ticket 11 closes `boss-run`'s door and only branch protection closes the rest.
+typed by hand in a shell: `boss-run` refuses one under the hard rule `PR merge outside boss_merge` (ticket 11a: `gh pr merge` with a repo
+option on either side of `pr`, a path to `gh`, the REST `PUT .../pulls/N/merge` and the `mergePullRequest` mutation; the
+default-GET "is it merged?" call is not refused), and only branch protection closes the rest. SKILL.md states that and
+two more limits (a base retargeted in the window, a listed branch that later deploys).
 
 **Review round**: one run of `skills/boss/boss_review.py` on one PR head. The
 review runs first (Codex only, in a child process told `--cwd` the checkout, as

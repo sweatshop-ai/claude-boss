@@ -848,6 +848,17 @@ every review round writes its output to a file and leaves it there, the verdict
 goes on the PR before the merge, and **no merge order is given on a GO that
 exists only in a message**, whoever produced it.
 
+**The merge is ordered through the gate.** The command is
+`python3 ${CLAUDE_PLUGIN_ROOT}/skills/boss/boss_merge.py --repo OWNER/REPO --pr N`; `--dry-run` decides without
+merging, and `--test-only-since SHA` (arrives with ticket 11b) allows fixes after the last GO that touch only the repo's test paths. Its exit
+codes: 0 merged, 3 and 4 refused, 5 failed or unverified (the merge or the check after it), 7 a read failed. A
+refusal (3 or 4) is an instruction to get the right review, not to work around it. `boss-run` refuses a merge typed
+by hand under the hard rule `PR merge outside boss_merge`. The gate has three limits. A `gh pr merge` typed by hand
+in a worker's or the owner's own shell is outside the gate, and only branch protection on the repo closes that, which
+the plugin cannot set. A base retargeted between the check and the merge is detected after the fact (exit 5,
+`base-changed`) and not prevented. The gate trusts the repo's `.boss/deploy.json`, so a listed branch that later
+starts to deploy is outside what the gate can see.
+
 ### P15. The full test suite runs on the CI, not on the shared workstation
 
 Measured 2026-10-17: a suite of about 4,900 tests was at 66% after 40 minutes on

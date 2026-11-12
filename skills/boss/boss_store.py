@@ -31,8 +31,8 @@ import sys
 import tempfile
 from pathlib import Path
 
-SID_RE = re.compile(r"^[\w-]{1,80}$")
-TRACK_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
+SID_RE = re.compile(r"[\w-]{1,80}\Z")   # `$` would let a trailing newline through
+TRACK_RE = re.compile(r"[a-z0-9][a-z0-9._-]{0,63}\Z")
 UUID = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}"
                   r"-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
 
@@ -82,7 +82,7 @@ def version_gap_cache(cfg=None):
 
 
 def valid_track(track):
-    return bool(track) and bool(TRACK_RE.match(track)) and ".." not in track
+    return bool(track) and bool(TRACK_RE.fullmatch(track)) and ".." not in track
 
 
 def objective_path(track, cfg=None):
@@ -145,7 +145,7 @@ def open_tracks(cfg=None, pm=None):
 
 
 def _marker(sid, cfg):
-    if not sid or not SID_RE.match(sid):
+    if not sid or not SID_RE.fullmatch(sid):
         return None
     return markers_dir(cfg) / sid
 
@@ -190,7 +190,7 @@ def register(sid, track="", cfg=None):
 
 def state_path(sid, kind, cfg=None):
     """Where this session's state of this kind lives: `pm/.pulse/<sid><suffix>`."""
-    if not sid or not SID_RE.match(sid):
+    if not sid or not SID_RE.fullmatch(sid):
         raise ValueError("not a session id: %r" % sid)
     if kind not in STATE_KINDS:
         raise ValueError("not a state kind: %r (%s)" % (kind, ", ".join(sorted(STATE_KINDS))))
