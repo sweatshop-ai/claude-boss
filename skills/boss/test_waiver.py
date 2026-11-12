@@ -642,6 +642,17 @@ class Hook(unittest.TestCase):
                         "git commit -m 'boss_review.py --waive'"):
             self.assertNotEqual(self.pre_bash(command).get("permissionDecision"), "deny", command)
 
+    def test_a_huge_command_costs_the_consent_check_nothing(self):
+        """CI found the check splitting 1 MB of quoted text before the guard's own size limit applied."""
+        big = "x" * 1_000_000
+        for command, denied in (('echo "%s" >> ~/.claude/pm/a.md' % big, False),
+                                ('python3 boss_review.py --waive --track t --test-cmd x "%s"' % big, True)):
+            started = time.monotonic()
+            out = self.pre_bash(command)
+            self.assertLess(time.monotonic() - started, 4)
+            self.assertEqual(out.get("permissionDecision") == "deny" and "consent" in out.get("permissionDecisionReason", ""),
+                             denied)
+
     def test_an_unregistered_session_is_not_guarded_and_the_command_still_denies(self):
         other = "99999999-2222-3333-4444-555555555555"
         self.assertEqual(self.pre_bash("python3 boss_review.py --waive --track t --test-cmd x", sid=other), {})

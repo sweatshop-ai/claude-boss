@@ -307,8 +307,10 @@ def consent_use(cmd):
     """(track, command or None) when the Bash command names a use of the consent, else None: `codex_blocker.py
     --choose TRACK tests-alone` (the command from --test-cmd), `boss_review.py --waive` (from --track and
     --test-cmd). Read from the shlex words only; a line that does not split is split on blanks."""
+    if "codex_blocker.py" not in cmd and "boss_review.py" not in cmd:
+        return None                   # nearly every command: no split, and a 1 MB one costs nothing
     try:
-        words = shlex.split(cmd)
+        words = cmd.split() if len(cmd) > MAX_PARSED else shlex.split(cmd)
     except ValueError:
         words = cmd.split()
     names = {os.path.basename(w) for w in words}
