@@ -14,15 +14,17 @@ Exit codes:
     3 refused: no usable GO on the live head (none, a NO-GO, a record that cannot be read, or a provisional
       or waived GO that a later round supersedes)
     4 refused: a provisional or waived GO on a branch not listed as non-deploying
-    5 `gh pr merge` failed, or the check after it did (not merged, base changed, unverified)
-    7 a `gh` read failed
+    5 `gh pr merge` failed, or the check after it did (not merged, base changed, unverified), or the line that
+      announces the merge could not be written (nothing merged then)
+    7 a `gh` read failed, or the PR's lock could not be taken
 
 The rounds are the files `boss_review.py` keeps under $CLAUDE_CONFIG_DIR/pm/reviews/<owner>/<repo>/pr<N>/. They
 are walked from the highest number down and the first one that decides, decides: anything the walk meets and cannot
 read refuses (it is never skipped), so a crash leftover is replaced by the next round and not before. The list of
 branches that do not deploy is `.boss/deploy.json` as committed on the PR's base branch, read through `gh api`, never
 from the PR's head; a file that is missing or invalid means every branch deploys. Every decision appends one line to
-pm/reviews/merges.jsonl. Standard library only (and boss_review, which owns the record).
+pm/reviews/merges.jsonl, and a merge writes a `merging` line before it runs `gh pr merge`. The PR's lock (the one a
+review takes to claim a round) is held from the read of the rounds to the return of `gh pr merge`. Standard library only (and boss_review, which owns the record).
 """
 from __future__ import annotations
 
@@ -185,7 +187,8 @@ def parse_deploy(answer: bytes) -> Deploy:
         content = data.get("content") if isinstance(data, dict) else None
         if not isinstance(content, str):            # absent, or a directory listing
             return invalid("bad-content")
-        text = base64.b64decode(content).decode("utf-8")
+        # GitHub breaks the encoding into lines; any other character that is not base64 is not a file we wrote
+        text = base64.b64decode(content.replace("\n", ""), validate=True).decode("utf-8")
     except (ValueError, RecursionError, binascii.Error):
         return invalid("bad-content")
     try:
@@ -268,8 +271,8 @@ def _alert(text: str) -> None:
         _say("boss-alert 0 failed (%s): %s" % (run.returncode, run.stderr.strip()[-200:]))
 
 
-def _log(fields: dict) -> None:
-    """One line to pm/reviews/merges.jsonl, in a single O_APPEND write."""
+def _log(fields: dict) -> bool:
+    """One line to pm/reviews/merges.jsonl, in a single O_APPEND write. False, said on stderr, when it was not written."""
     reviews = boss_review._reviews_dir()
     try:
         os.makedirs(reviews, mode=0o700, exist_ok=True)
@@ -277,6 +280,8 @@ def _log(fields: dict) -> None:
         boss_review.append_attempts(reviews / "merges.jsonl", [fields])
     except OSError as exc:
         _say("merges.jsonl was not written: %s" % exc)
+        return False
+    return True
 
 
 def merge(repo: str, pr: int, *, dry_run: bool = False, io_timeout: float = policy.REVIEW_IO_TIMEOUT) -> int:
@@ -309,17 +314,29 @@ def merge(repo: str, pr: int, *, dry_run: bool = False, io_timeout: float = poli
 
     deploy = read_deploy(repo, seen.base, io_timeout)
     line["config"] = deploy.state
-    pr_dir = boss_review._reviews_dir() / key / ("pr%d" % pr)
-    got = decide(read_rounds(pr_dir), seen.head, seen.base, deploy.non_deploying, (key, pr))
-    line.update(round=got.round, kind=got.kind)
-    if got.exit != EXIT_MERGED:
-        return finish(got.exit, got.reason, "refused",
-                      "deploy list " + deploy.state if got.exit == EXIT_DEPLOYING else "")
-    if dry_run:
-        return finish(EXIT_MERGED, got.reason, "allowed")
-
-    run = boss_review._spawn(["gh", "pr", "merge", str(pr), "--repo", repo, "--merge",
-                              "--match-head-commit", seen.head], io_timeout)
+    reviews = boss_review._reviews_dir()
+    pr_dir = reviews / key / ("pr%d" % pr)
+    # the PR's lock, as a review takes it to claim a round: no round is claimed between this read of the rounds and the
+    # return of `gh pr merge`, so a later round cannot be missed by a merge that is already under way
+    try:
+        lock = boss_review.open_lock(reviews, pr_dir, io_timeout)
+    except OSError as exc:
+        return finish(EXIT_GH_READ, "lock-failed", "refused", "cannot take the lock of %s: %s" % (pr_dir, exc))
+    try:
+        got = decide(read_rounds(pr_dir), seen.head, seen.base, deploy.non_deploying, (key, pr))
+        line.update(round=got.round, kind=got.kind)
+        if got.exit != EXIT_MERGED:
+            return finish(got.exit, got.reason, "refused",
+                          "deploy list " + deploy.state if got.exit == EXIT_DEPLOYING else "")
+        if dry_run:
+            return finish(EXIT_MERGED, got.reason, "allowed")
+        # the intent first: a merge that GitHub accepted and a crash then hid would leave no line at all; no line, no merge
+        if not _log(dict(line, decision="merging", reason=got.reason)):
+            return finish(EXIT_MERGE_FAILED, "log-failed", "refused", "nothing merged")
+        run = boss_review._spawn(["gh", "pr", "merge", str(pr), "--repo", repo, "--merge",
+                                  "--match-head-commit", seen.head], io_timeout)
+    finally:
+        os.close(lock)
     if run.timed_out:
         _alert("boss_merge: gh pr merge of %s#%d ran past %ss; whether it merged is not known" % (key, pr, io_timeout))
         return finish(EXIT_MERGE_FAILED, "merge-timeout", "failed")

@@ -83,6 +83,15 @@ if argv[:2] == ["pr", "view"]:
     finish({"rc": e.get("rc", 0), "err": e.get("err", "")})
 if argv[:2] == ["pr", "merge"]:
     e = entry("merge")
+    if e.get("probe"):       # what the gate holds while it merges: the PR's lock, and a line saying it is about to
+        import fcntl
+        try:
+            fcntl.flock(open(e["probe"], "rb"), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            (side / "probe-lock").write_text("free")
+        except BlockingIOError:
+            (side / "probe-lock").write_text("held")
+        log = Path(e["log"])
+        (side / "probe-log").write_text(log.read_text() if log.exists() else "")
     patched(e, {"state": "MERGED"})
     finish(e)
 if argv[:2] == ["pr", "diff"]:
@@ -110,6 +119,7 @@ def deploy_answer(conf, **extra):
 
 
 GOOD_DEPLOY = {"version": 1, "non_deploying": ["main"], "test_paths": ["tests/*"]}
+VALID_B64 = base64.b64encode(json.dumps({"version": 1, "non_deploying": ["main"]}).encode()).decode()
 
 
 class MergeGh:
@@ -477,6 +487,12 @@ class DeployList(Base):
     def provisional(self):
         self.put(1, kind="provisional")
 
+    def test_the_line_breaks_github_puts_in_the_encoding_are_fine(self):
+        names = ["branch-%02d" % i for i in range(40)] + ["main"]
+        answer = deploy_answer({"version": 1, "non_deploying": names})
+        self.assertGreater(json.loads(answer)["content"].count("\n"), 3)
+        self.assertEqual(bm.parse_deploy(answer.encode()).non_deploying, frozenset(names))
+
     def test_a_good_file_lists_main(self):
         got = bm.parse_deploy(deploy_answer(GOOD_DEPLOY).encode())
         self.assertEqual((got.state, got.non_deploying, got.test_paths), ("ok", frozenset({"main"}), ("tests/*",)))
@@ -496,6 +512,11 @@ class DeployList(Base):
             ("bad-content", dict(raw=json.dumps({"content": 5}))),
             ("bad-content", dict(raw=json.dumps({"content": "!!!not base64!!!"}))),
             ("bad-content", dict(raw=json.dumps({"content": base64.b64encode(b"\xff\xfe").decode()}))),
+            # a corrupted answer that still holds a whole, valid file once its stray characters are dropped
+            ("bad-content", dict(raw=json.dumps({"content": VALID_B64[:12] + "!" + VALID_B64[12:]}))),
+            ("bad-content", dict(raw=json.dumps({"content": VALID_B64[:12] + " " + VALID_B64[12:]}))),
+            ("bad-content", dict(raw=json.dumps({"content": VALID_B64[:12] + "-_" + VALID_B64[12:]}))),
+            ("bad-content", dict(raw=json.dumps({"content": VALID_B64[:12] + "\r\n" + VALID_B64[12:]}))),
             ("not-json", dict(raw=deploy_answer("not json"))),
             ("not-json", dict(raw=deploy_answer("[" * 200000))),
             ("bad-version", dict(raw=deploy_answer(["main"]))),
@@ -789,9 +810,10 @@ class Command(Base):
         with mock.patch.object(br, "append_attempts", wraps=br.append_attempts) as append:
             self.run_gate(dry_run=True)
             self.run_gate()
-        self.assertEqual([len(c.args[1]) for c in append.call_args_list], [1, 1])      # one write, one line, each
-        first, second = self.log()
-        for line in (first, second):
+        self.assertEqual([len(c.args[1]) for c in append.call_args_list], [1, 1, 1])      # one write, one line, each
+        first, intent, second = self.log()
+        self.assertEqual((intent["decision"], intent["exit"], intent["reason"]), ("merging", None, "codex-go"))
+        for line in (first, intent, second):
             self.assertEqual(set(line), {"ts", "repo", "pr", "head", "base", "round", "kind", "decision", "exit",
                                          "reason", "config", "dry_run"})
         self.assertEqual((first["repo"], first["pr"], first["head"], first["base"], first["round"], first["kind"],
@@ -800,6 +822,40 @@ class Command(Base):
         self.assertEqual((second["decision"], second["dry_run"]), ("merged", False))
         self.assertEqual(stat.S_IMODE(os.stat(self.reviews / "merges.jsonl").st_mode), 0o600)
         self.assertEqual(stat.S_IMODE(os.stat(self.reviews).st_mode), 0o700)
+
+    def test_the_intent_line_is_on_disk_before_gh_pr_merge_runs_and_the_pr_lock_is_held_then(self):
+        lock = str(self.pr_dir / ".lock")
+        self.gh.configure(merge=[{"probe": lock, "log": str(self.reviews / "merges.jsonl")}],
+                          api=[{"raw": deploy_answer(GOOD_DEPLOY)}])
+        self.put(1)
+        self.assertEqual(self.run_gate(), 0, self.err)
+        self.assertEqual((self.sb.side / "probe-lock").read_text(), "held")
+        (seen,) = [json.loads(x) for x in (self.sb.side / "probe-log").read_text().splitlines()]
+        self.assertEqual((seen["decision"], seen["exit"], seen["round"], seen["head"]), ("merging", None, 1, HEAD))
+        self.assertEqual([x["decision"] for x in self.log()], ["merging", "merged"])
+        fd = br.open_lock(self.reviews, self.pr_dir, 0.5)      # and it is let go again
+        os.close(fd)
+
+    def test_no_line_no_merge(self):
+        self.put(1)
+        with mock.patch.object(br, "append_attempts", side_effect=OSError("disk full")):
+            self.assertEqual(self.run_gate(), 5)
+        self.assertEqual(self.merges(), [])
+        self.assertIn("merges.jsonl was not written: disk full", self.err)
+        self.assertIn("log-failed", self.err)
+
+    def test_a_pr_whose_lock_is_held_is_not_checked_and_not_merged(self):
+        # a review is claiming a round: whatever it writes, this read must not race it
+        self.put(1)
+        fd = br.open_lock(self.reviews, self.pr_dir, 0.5)
+        try:
+            for dry in (True, False):
+                self.assertEqual(self.run_gate(dry_run=dry, io_timeout=0.3), 7, self.err)
+                self.assertEqual(self.last()["reason"], "lock-failed")
+        finally:
+            os.close(fd)
+        self.assertEqual(self.merges(), [])
+        self.assertEqual(self.run_gate(), 0, self.err)
 
     def test_a_refusal_is_logged_too_and_a_write_that_fails_is_said_and_changes_no_exit(self):
         self.put(1, verdict="NO-GO")
