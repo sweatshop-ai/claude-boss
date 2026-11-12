@@ -6,7 +6,7 @@
 
 **Blocked by:** 06b, 10a (merged)
 
-**Status:** done (Otilia built it, PR PRNUM)
+**Status:** done (Otilia built it, PR 124)
 
 - [x] `_prunable` applies rule 1 to a `MERGED` PR only when `headRefOid` equals the entry's `head=`; otherwise rule 4 decides (a Codex GO on the merged head removes, a NO-GO or no round keeps). Test first: the scenario above keeps the entry on main's code and fails there; with a later Codex GO on A it removes; with a Codex NO-GO on A it keeps
 - [x] CONTEXT.md and CHANGELOG.md say it
