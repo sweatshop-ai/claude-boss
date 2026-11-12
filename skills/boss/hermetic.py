@@ -61,13 +61,13 @@ BASELINE = load_baseline()
 _open = {}      # test id -> [sandboxes not yet cleaned up, unread stubs found so far]
 
 
-def _running_test():
-    """The id of the TestCase whose code is building this Sandbox (None outside a test)."""
+def _running_case():
+    """The TestCase whose code is building this Sandbox (None outside a test)."""
     frame = sys._getframe(1)
     while frame is not None:
         case = frame.f_locals.get("self")
         if isinstance(case, unittest.TestCase):
-            return short_id(case)
+            return case
         frame = frame.f_back
     return None
 
@@ -112,7 +112,8 @@ class Sandbox:
         self._stubbed = set()       # forbidden tools a test has written a stub for
         self._read = set()          # of those, the ones whose call log the test looked at
         self._cleaned = False
-        self._test = _running_test()
+        case = _running_case()
+        self._test = short_id(case) if case else None
         _open.setdefault(self._test, [0, set()])[0] += 1
         for d in (self.stubs, self.tools, self.calls, self.cfg, self.home,
                   self.work, self.tmp, self.side):
@@ -136,6 +137,8 @@ class Sandbox:
         except BaseException:
             self.cleanup()
             raise
+        if case is not None:    # a test that forgets addCleanup(sb.cleanup) is checked all the same
+            case.addCleanup(self.cleanup)
 
     # ------------------------------------------------------------- the seal ----
     def guard(self):

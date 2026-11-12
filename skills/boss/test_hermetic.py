@@ -119,6 +119,19 @@ class Baseline(Fresh):
         for entry in hermetic.load_baseline():
             self.assertRegex(entry, r"^test_\w+\.\w+\.test_\w+$")
 
+    def test_a_test_that_forgets_to_clean_up_is_still_checked(self):
+        class Forgetful(unittest.TestCase):
+            def runTest(inner):
+                sb = Sandbox()
+                inner.addCleanup(sb.reap)       # reaps, but never calls sb.cleanup
+                sb.stub("codex")
+
+        with mock.patch.object(hermetic, "BASELINE", set()):
+            result = unittest.TestResult()
+            Forgetful().run(result)
+        self.assertEqual(len(result.errors) + len(result.failures), 1)
+        self.assertIn("codex", (result.errors + result.failures)[0][1])
+
 
 if __name__ == "__main__":
     unittest.main()
