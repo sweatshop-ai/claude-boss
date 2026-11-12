@@ -45,6 +45,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import boss_store  # noqa: E402
+import codex_blocker  # noqa: E402
 import fleet  # noqa: E402
 import objective  # noqa: E402
 import policy  # noqa: E402
@@ -172,7 +173,34 @@ def open_blockers(body):
     """
     if body is None:
         return []
-    return [b[:160] for b in tracker.open_blockers(body)]
+    return [b[:160] for b in tracker.open_blockers(body)
+            if (b not in _decided_entries(body))]
+
+
+def _decided_entries(body):
+    """{entry: choice} for the Open blockers entries the owner has already answered.
+
+    The answer is `codex_blocker`'s: `_state` says whether the one open Codex down
+    blocker has a valid recorded choice, and an entry counts only when its own marker
+    carries that blocker's id. A malformed choice, one for another id, and a tracker
+    with several open Codex down lines decide nothing.
+    """
+    status, id_, choice = codex_blocker._state(body.split("\n"))
+    if status != "chosen":
+        return {}
+    out = {}
+    for line in tracker.blocker_lines(body):
+        found = codex_blocker._is_cd(line) and tracker.scan_marker(line)
+        if found and found[1].get("id") == id_:
+            out[line.strip().lstrip("-* ").strip()] = choice
+    return out
+
+
+def decided_blockers(body):
+    """The blockers the owner has answered, as `ask (owner chose X)` lines, for the text."""
+    if body is None:
+        return []
+    return ["%s (owner chose %s)" % (e[:120], c) for e, c in _decided_entries(body).items()]
 
 
 def question_pending(sid):
@@ -330,11 +358,12 @@ def main():
     tracker_text = boss_store.read_tracker(track)  # once per Stop, both consumers share it
     rungs = due_rungs(track, fired, tracker_text)
     blockers = [] if concierge_holding(sid) else open_blockers(tracker_text)
+    decided = decided_blockers(tracker_text)
     source = objective.tickets_source(body)
     ready, broken = read_frontier(source, track) if source else ([], None)
     facts = pulse.Facts(
         track=track, idle=idle, size=size, rungs=rungs, fired=fired,
-        blockers=blockers, source=source, ready=ready, broken=broken,
+        blockers=blockers, decided=decided, source=source, ready=ready, broken=broken,
         outcome=objective.section(body, "Outcome"), unmet=objective.unmet(body),
         next_items=objective.next_items(body))
     decision = pulse.decide(facts)

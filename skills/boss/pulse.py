@@ -31,10 +31,11 @@ FRONTIER_PY = Path(__file__).resolve().parent.parent / "hand-to-boss" / "frontie
 # rungs: the Rungs due now; fired: key -> rung already said.
 # source: the ticket graph, "" for none; ready: "NN title"; broken: its error.
 # outcome, unmet, next_items: from the objective, for the text only.
+# decided: blockers the owner has answered; shown, never asked again.
 Facts = namedtuple(
     "Facts",
-    "track idle size rungs fired blockers source ready broken outcome unmet next_items",
-    defaults=((), 0, (), {}, (), "", (), None, "", (), ()))
+    "track idle size rungs fired blockers source ready broken outcome unmet next_items decided",
+    defaults=((), 0, (), {}, (), "", (), None, "", (), (), ()))
 # A blocker line whose rung has come due: key into `fired`, the rung, minutes
 # since its T+0, the line.
 Rung = namedtuple("Rung", "key rung minutes line")
@@ -145,6 +146,8 @@ def render(facts, decision):
                      + ", ".join("%s (%s)" % (n, c) for n, c in facts.idle[:policy.BOSS_SPAN]))
     for r in decision.overdue:
         lines.append("OVERDUE: blocker open %d min, rung %d due - %s" % (r.minutes, r.rung, r.line))
+    if facts.decided:
+        lines.append("DECIDED by the owner, do not ask again: " + "; ".join(facts.decided[:3]))
     if facts.blockers:
         lines.append("BLOCKED, and you are ending your turn without asking: "
                      + "; ".join(facts.blockers[:3]))
