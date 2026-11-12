@@ -189,11 +189,11 @@ def _state(lines: list[str]):
 def choice(track: str):
     """(status, id, choice) for `track`'s open Codex down blocker. status: `no-blocker`; `none` (open, no line
     carries its id); `chosen` (choice is the last one recorded); `malformed` (the only `cd` lines cannot be read,
-    or more than one is open; the third item is the reason). A bad `track` is a ValueError; a tracker that is not
-    a regular file of yours is `no-blocker`, said on stderr."""
+    or more than one is open, or the tracker is not a regular file of yours; the third item is the reason). A bad
+    `track` is a ValueError (the command prints `malformed` for it too)."""
     path = usable_tracker(track)
     if path is None:
-        return "no-blocker", None, None
+        return "malformed", None, "pm/%s.md is not a regular file of yours" % track
     try:
         with open(path, encoding="utf-8", newline="") as fh:
             text = fh.read()
@@ -324,6 +324,8 @@ def main() -> int:
             sync(argv[0])
             return 0
     except ValueError as exc:
+        if argv[:1] == ["--choice"]:
+            print("malformed")
         _say(str(exc))
         return 2
     print("usage: codex_blocker.py TRACK | --choose TRACK wait|accept-fallback | --choice TRACK", file=sys.stderr)

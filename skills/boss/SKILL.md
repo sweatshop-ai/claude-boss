@@ -631,7 +631,7 @@ Pass `--track T` (the track from your dispatch header) and the same command rais
 **When a `Codex down` blocker is open, ask the owner once what to do** (ticket 09b). Run
 `python3 skills/boss/codex_blocker.py --choice T`: `none` means nobody has chosen yet; `wait` or
 `accept-fallback` is the owner's recorded choice and you ask nothing; `no-blocker` (exit 2) means there
-is nothing to ask; `malformed` (exit 2) means the blocker's line cannot be read, so you report it and ask nothing.
+is nothing to ask; `malformed` (exit 2) means the blocker's line cannot be read, more than one is open, or the tracker is unusable, so you report it and ask nothing.
 On `none`, ask through your concierge (`SendMessage` with `ASK q<n>:`, the blocker's id written on its
 line first; `references/concierge.md`), or with `AskUserQuestion` in your own turn only when you have no
 concierge, never in prose. One self-contained question, your name and your track first, your

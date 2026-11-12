@@ -484,6 +484,12 @@ class Choice(Base):
     def lines_of(self, id_):
         return [ln for ln in self.text().split("\n") if ln.startswith("- [codex-choice %s]" % id_)]
 
+    def same_blockers(self, before):
+        """Open blockers hold the same entries as `before` (the Codex down entry's ask= is rewritten by
+        --choose, so compare the count) and none of them is a choice line."""
+        now = tracker.open_blockers(self.text())
+        return len(now) == len(before) and not any(e.startswith("[codex-choice") for e in now)
+
     def decisions(self):
         lines = self.text().split("\n")
         head = next(i for i, ln in enumerate(lines) if ln.startswith("## Decisions in force"))
@@ -531,7 +537,7 @@ class Choice(Base):
         lines = self.text().split("\n")
         lo, hi = tracker.blockers_range(lines)
         self.assertNotIn(self.lines_of(id_)[0], lines[lo:hi])
-        self.assertEqual(tracker.open_blockers(self.text()), blockers_before)
+        self.assertEqual(self.same_blockers(blockers_before), True)
 
     def test_with_open_blockers_as_the_last_section_the_line_still_lands_in_decisions(self):
         for tail in ("# t\n\n## Decisions in force\n\n## Notes\nx\n\n## Open blockers\n",
@@ -544,7 +550,7 @@ class Choice(Base):
                 self.assertEqual(self.cli("--choose", "t", "accept-fallback").returncode, 0)
                 (ln,) = self.lines_of(id_)
                 self.assertIn(ln, self.decisions())
-                self.assertEqual(tracker.open_blockers(self.text()), before)
+                self.assertTrue(self.same_blockers(before))
                 self.assertEqual(codex_blocker.choice("t")[2], "accept-fallback")
 
     def test_choosing_the_same_twice_writes_one_line_and_changes_nothing_the_second_time(self):
@@ -599,6 +605,8 @@ class Choice(Base):
             run = self.cli(*args)
             self.assertEqual(run.returncode, 2, args)
             self.assertTrue(run.stderr.strip(), args)
+            if args[0] == "--choice":
+                self.assertEqual(run.stdout.strip(), "malformed", args)
         with self.assertRaises(ValueError):
             codex_blocker.choice("../x")
 
@@ -663,12 +671,15 @@ class Choice(Base):
         self.assertEqual(self.cli("--choose", "t", "wait").returncode, 2)
         self.assertEqual(self.text(), before)
 
-    def test_a_tracker_that_is_not_a_regular_file_of_the_user_is_no_blocker(self):
+    def test_a_tracker_that_is_not_a_regular_file_of_the_user_is_malformed(self):
         self.path.unlink()
         err = io.StringIO()
         with contextlib.redirect_stderr(err):
-            self.assertEqual(codex_blocker.choice("t"), ("no-blocker", None, None))
-        self.assertTrue(err.getvalue().strip())
+            status, id_, why = codex_blocker.choice("t")
+        self.assertEqual((status, id_), ("malformed", None))
+        self.assertTrue(why and err.getvalue().strip())
+        run = self.cli("--choice", "t")
+        self.assertEqual((run.stdout.strip(), run.returncode), ("malformed", 2))
         self.assertEqual(self.cli("--choose", "t", "wait").returncode, 2)
 
     def test_a_held_lock_is_exit_1_with_nothing_written(self):
