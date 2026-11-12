@@ -365,7 +365,8 @@ def update(path: Path, fn: Callable[[str], Optional[str]], deadline: float) -> s
 
     A symlink in place of the tracker is never followed: the file is opened once with O_NOFOLLOW and read,
     and its identity checked, through that descriptor, so a link swapped in after a caller's lstat is
-    "failed: the tracker is a symbolic link", not a write through it. A symlink put there between the
+    "failed: the tracker is a symbolic link", and the target is left as it was (the old code never wrote
+    through a link; it read the target and turned the link into a regular file). A symlink put there between the
     read and the rename shows as a changed inode, and the pass is redone.
 
     Returns "done", "done (no change)" or "failed: <reason>" and never raises
