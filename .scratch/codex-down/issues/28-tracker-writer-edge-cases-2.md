@@ -4,7 +4,7 @@
 
 **Blocked by:** 16 (Tracker writer edge cases)
 
-**Status:** done (Mauro built it, PR PRNUM)
+**Status:** done (Mauro built it, PR 128)
 
 - [x] **A prose line holding the tag counts as "already there" (class c).** `add_line` (`tracker.py`, `there`) takes any line of the section that holds the tag and has no marker as present, so a note `- resolved id=ab12cd34, see PR 90` in `## Open blockers` hides a new blocker with that id; a malformed marker holding the tag does the same. The docstring says prose does not count. Decide (count only lines with a readable marker, or document it) and test. No production caller yet; ticket 10 should use `marker_tag(id)`. Decided: documented, not changed. `add_line`'s tag is the caller's, and the generic callers pass bare tags on lines that carry no marker (`AddLine` tests), so counting only readable markers would break them. A caller that means "the marker with this id" passes `marker_tag(id)`, which holds `[ladder id=… ` and is not found in prose; a malformed marker holding the tag stays "there" on purpose (never a second line beside a hand-damaged one). The docstring says so; `test_marker_tag_is_not_found_in_prose_and_a_bare_tag_is_found_in_any_line` and `test_a_malformed_marker_holding_the_tag_is_there` pin both.
 - [x] **CRLF file without a final newline gets mixed endings (class c).** `insert_in_section` on `"## Open blockers\r\n- a"` yields `"...\r\n- a\nnew\r"`. Add the `\r` to the last line's break when the file has none at its end; test. Done: `insert_in_section` gives the last line its `\r` and leaves the new one bare, so the file ends as it did. `test_a_crlf_file_without_a_final_newline_keeps_one_ending`, `test_an_lf_file_without_a_final_newline_is_unchanged`.
