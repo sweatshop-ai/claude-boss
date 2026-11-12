@@ -16,7 +16,7 @@ import re
 import subprocess
 import sys
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, tzinfo
 from pathlib import Path
 from unittest import mock
 
@@ -147,6 +147,26 @@ class Raise(Base):
             codex_blocker.sync("t", now=datetime(2026, 11, 12, 10, 30, 15))
         self.assertEqual((self.text(), self.alerts()), (before, []))
 
+    def test_a_tzinfo_without_an_offset_is_a_value_error_and_nothing_is_written(self):
+        class NoOffset(tzinfo):
+            def utcoffset(self, dt):
+                return None
+
+            def dst(self, dt):
+                return None
+
+        class Broken(NoOffset):
+            def utcoffset(self, dt):
+                raise TypeError("utcoffset() must return a timedelta")
+
+        for tz in (NoOffset(), Broken()):
+            with self.subTest(tz=type(tz).__name__):
+                self.add(F, F, F)
+                before = self.text()
+                with self.assertRaises(ValueError):
+                    codex_blocker.sync("t", now=datetime(2026, 11, 12, 10, 30, 15, tzinfo=tz))
+                self.assertEqual((self.text(), self.alerts()), (before, []))
+
     def test_two_outages_in_one_minute_get_two_ids_and_both_lines_stay(self):
         self.add(F, F, F)
         self.sync()
@@ -165,6 +185,7 @@ class Raise(Base):
         self.sync()
         ids = [CD.search(ln).group() for ln in self.cd_lines()]
         self.assertEqual(ids, ["id=cd261112103015", "id=cd261112103016"])
+        self.assertEqual(len(self.alerts("0")), 2)
 
     def test_prose_outside_the_blockers_section_does_not_hold_back_a_raise(self):
         # prose under ## Notes names the id the raise would take: the id is still never shared, so the next second
@@ -470,8 +491,11 @@ class Choice(Base):
 
     def cli(self, *args):
         """The command in a process of its own, as the boss runs it (a restart between two calls)."""
-        return subprocess.run([sys.executable, str(HERE / "codex_blocker.py"), *args], env=dict(os.environ),
-                              capture_output=True, text=True, timeout=60)
+        posted = len(self.alerts())
+        run = subprocess.run([sys.executable, str(HERE / "codex_blocker.py"), *args], env=dict(os.environ),
+                             capture_output=True, text=True, timeout=60)
+        self.assertEqual(len(self.alerts()), posted, "%s posted an alert: the stub's call log grew" % (args,))
+        return run
 
     def raised(self, text=None):
         if text is not None:
@@ -484,11 +508,12 @@ class Choice(Base):
     def lines_of(self, id_):
         return [ln for ln in self.text().split("\n") if ln.startswith("- [codex-choice %s]" % id_)]
 
-    def same_blockers(self, before):
-        """Open blockers hold the same entries as `before` (the Codex down entry's ask= is rewritten by
-        --choose, so compare the count) and none of them is a choice line."""
+    def same_blockers(self, before, value):
+        """Open blockers hold the entries of `before`, the Codex down entry with only its ask= rewritten
+        to what --choose says was chosen, and none of them is a choice line."""
+        want = [tracker.set_ask(e, "Codex down; owner chose " + value) if self.is_cd(e) else e for e in before]
         now = tracker.open_blockers(self.text())
-        return len(now) == len(before) and not any(e.startswith("[codex-choice") for e in now)
+        return now == want and not any(e.startswith("[codex-choice") for e in now)
 
     def decisions(self):
         lines = self.text().split("\n")
@@ -537,7 +562,7 @@ class Choice(Base):
         lines = self.text().split("\n")
         lo, hi = tracker.blockers_range(lines)
         self.assertNotIn(self.lines_of(id_)[0], lines[lo:hi])
-        self.assertEqual(self.same_blockers(blockers_before), True)
+        self.assertEqual(self.same_blockers(blockers_before, "wait"), True)
 
     def test_with_open_blockers_as_the_last_section_the_line_still_lands_in_decisions(self):
         for tail in ("# t\n\n## Decisions in force\n\n## Notes\nx\n\n## Open blockers\n",
@@ -550,7 +575,7 @@ class Choice(Base):
                 self.assertEqual(self.cli("--choose", "t", "accept-fallback").returncode, 0)
                 (ln,) = self.lines_of(id_)
                 self.assertIn(ln, self.decisions())
-                self.assertTrue(self.same_blockers(before))
+                self.assertTrue(self.same_blockers(before, "accept-fallback"))
                 self.assertEqual(codex_blocker.choice("t")[2], "accept-fallback")
 
     def test_choosing_the_same_twice_writes_one_line_and_changes_nothing_the_second_time(self):
@@ -682,6 +707,42 @@ class Choice(Base):
         self.assertEqual((run.stdout.strip(), run.returncode), ("malformed", 2))
         self.assertEqual(self.cli("--choose", "t", "wait").returncode, 2)
 
+    def test_a_symlinked_tracker_is_malformed_for_both_commands_and_the_target_is_not_written(self):
+        self.raised()                                          # an open blocker: a write through the link would show
+        real = self.path.with_name("real.md")
+        real.write_text(self.text(), encoding="utf-8")
+        kept = real.read_text(encoding="utf-8")
+        self.path.unlink()
+        self.path.symlink_to(real)
+        run = self.cli("--choice", "t")
+        self.assertEqual((run.stdout.strip(), run.returncode), ("malformed", 2))
+        run = self.cli("--choose", "t", "wait")
+        self.assertEqual(run.returncode, 2)
+        self.assertIn("no blocker can be answered", run.stderr)
+        self.assertEqual(real.read_text(encoding="utf-8"), kept)
+
+    def test_a_tracker_of_another_owner_is_malformed_for_both_commands_and_is_not_written(self):
+        self.raised()                                          # without the uid check --choose would write
+        before = self.text()
+        other = os.getuid() + 1
+        with mock.patch.object(codex_blocker.os, "getuid", return_value=other), contextlib.redirect_stderr(io.StringIO()):
+            status, id_, why = codex_blocker.choice("t")
+            rc, msg = codex_blocker.choose("t", "wait", now=NOW)
+        self.assertEqual((status, id_), ("malformed", None))
+        self.assertTrue(why)
+        self.assertEqual(rc, 2)
+        self.assertEqual(msg, "no usable tracker for t")
+        self.assertEqual(self.text(), before)
+
+    def test_choice_and_choose_on_an_unusable_tracker_say_what_they_could_not_do_not_a_raise(self):
+        self.path.unlink()
+        run = self.cli("--choice", "t")
+        self.assertIn("no blocker can be read", run.stderr)
+        self.assertNotIn("raised", run.stderr)
+        run = self.cli("--choose", "t", "wait")
+        self.assertIn("no blocker can be answered", run.stderr)
+        self.assertNotIn("raised", run.stderr)
+
     def test_a_held_lock_is_exit_1_with_nothing_written(self):
         self.raised()
         before = self.text()
@@ -697,6 +758,15 @@ class Choice(Base):
         with self.assertRaises(ValueError):
             codex_blocker.choose("t", "wait", now=datetime(2026, 11, 12, 10, 0))
 
+    def test_a_tzinfo_without_an_offset_is_a_value_error(self):
+        class NoOffset(tzinfo):
+            def utcoffset(self, dt):
+                return None
+
+        self.raised()
+        with self.assertRaises(ValueError):
+            codex_blocker.choose("t", "wait", now=datetime(2026, 11, 12, 10, 0, tzinfo=NoOffset()))
+
     def test_the_ladder_and_classify_never_read_the_line(self):
         id_ = self.raised()
         self.assertEqual(self.cli("--choose", "t", "wait").returncode, 0)
@@ -704,6 +774,127 @@ class Choice(Base):
         opened, broken = codex_blocker._classify(lines)
         self.assertEqual((len(opened), broken), (1, []))
         self.assertFalse(any(tracker.has_marker(ln) for ln in self.lines_of(id_)))
+
+
+class Edges(Base):
+    """Ticket 20: the edge cases found in the review of 05c."""
+
+    def test_a_hand_written_empty_cleared_is_open_and_the_next_up_sync_clears_it(self):
+        for empty in ("cleared=", 'cleared=""'):
+            with self.subTest(empty=empty):
+                self.setUp()
+                marker = tracker.render_marker("cd261112080000", NOW, NOW, ask="x").replace(" ask=", " %s ask=" % empty)
+                self.path.write_text(TRACKER.replace("## Open blockers\n", "## Open blockers\n- a %s\n" % marker),
+                                     encoding="utf-8")
+                self.assertEqual(codex_blocker._classify(self.text().split("\n"))[0], [3])
+                self.add(OK, OK)
+                self.sync()
+                (ln,) = self.cd_lines()
+                self.assertEqual(tracker.validate(tracker.scan_marker(ln)[1])["cleared"], "2026-11-12T10:30+01:00")
+                self.assertEqual(codex_blocker._classify(self.text().split("\n")), ([], []))
+                self.assertEqual(len(self.alerts("clear")), 1)
+                after = self.text()
+                self.sync(NOW + timedelta(minutes=1))
+                self.assertEqual((self.text(), len(self.alerts())), (after, 1))
+
+    def test_a_symlink_swapped_in_after_the_check_is_not_written_through(self):
+        target = self.path.with_name("elsewhere.md")
+        real_usable = codex_blocker.usable_tracker
+        swapped = []
+
+        def swap(track):
+            path = real_usable(track)
+            target.write_text(self.text(), encoding="utf-8")
+            self.path.unlink()
+            self.path.symlink_to(target)
+            swapped.append(path)
+            return path
+
+        self.add(F, F, F)
+        with mock.patch.object(codex_blocker, "usable_tracker", swap):
+            err = self.sync()
+        self.assertEqual(len(swapped), 1)
+        self.assertIn("symbolic link", err)
+        self.assertEqual((target.read_text(encoding="utf-8"), self.alerts()), (TRACKER, []))
+
+    def test_a_symlink_swapped_in_after_the_check_is_not_chosen_through(self):
+        self.add(F, F, F)
+        self.sync()
+        target = self.path.with_name("elsewhere.md")
+        target.write_text(self.text(), encoding="utf-8")
+        before = self.text()
+        real_usable = codex_blocker.usable_tracker
+
+        def swap(track, *rest):
+            path = real_usable(track, *rest)
+            self.path.unlink()
+            self.path.symlink_to(target)
+            return path
+
+        with mock.patch.object(codex_blocker, "usable_tracker", swap):
+            rc, msg = codex_blocker.choose("t", "wait", now=NOW)
+        self.assertEqual(rc, 1)
+        self.assertIn("symbolic link", msg)
+        self.assertEqual(target.read_text(encoding="utf-8"), before)
+
+    def test_an_id_that_is_not_the_markers_own_is_not_a_cd_line(self):
+        lookalikes = (
+            '- see id=cd261112090000 here [ladder id=zz11 t0=bad last=0 next=x ask="a"]',     # prose before the marker
+            '- x [ladder id=cd2611120900001 t0=bad last=0 next=x ask="a"]',                   # a thirteenth digit
+            '- x [ladder xid=cd261112090000 t0=bad last=0 next=x ask="a"]',                   # another field
+            '- x [ladder id=zz11 t0=bad last=0 next=x ask="see id=cd261112090000"]',          # inside another's ask
+        )
+        for line in lookalikes:
+            with self.subTest(line=line):
+                self.setUp()
+                self.path.write_text(TRACKER.replace("## Open blockers\n", "## Open blockers\n%s\n" % line),
+                                     encoding="utf-8")
+                self.assertEqual(codex_blocker._classify(self.text().split("\n")), ([], []))
+                self.add(F, F, F)
+                err = self.sync()
+                self.assertEqual((err, len(self.alerts("0"))), ("", 1))
+                self.assertEqual(codex_blocker._classify(self.text().split("\n"))[0], [4])
+
+    def test_a_cd_id_in_the_markers_own_field_is_still_a_broken_cd_line(self):
+        line = '- x see xid=cd261112090000 [ladder id=cd261112090000 t0=bad last=0 next=x ask="a"]'
+        self.path.write_text(TRACKER.replace("## Open blockers\n", "## Open blockers\n%s\n" % line), encoding="utf-8")
+        opened, broken = codex_blocker._classify(self.text().split("\n"))
+        self.assertEqual((opened, [i for i, _ in broken]), ([], [3]))
+
+    def test_a_repo_with_marker_characters_gives_one_valid_marker(self):
+        repo = 'a]b"c[ladder x\nd'
+        self.add(F, F, F, repo=repo)
+        before = self.text().count("\n")
+        self.sync()
+        self.assertEqual(self.text().count("\n"), before + 1)
+        self.assertEqual(self.text().count(tracker.TOKEN), 1)
+        (ln,) = self.cd_lines()
+        self.assertIn("(last: a?b?c?ladder?x?d#1 ", ln)
+        self.assertEqual(tracker.validate(tracker.scan_marker(ln)[1])["ask"], codex_blocker.ASK)
+        self.assertEqual(len(self.alerts("0")), 1)
+
+    def test_a_crlf_tracker_is_raised_classified_chosen_and_cleared_with_its_line_ends(self):
+        def raw():
+            return self.path.read_bytes().decode("utf-8")
+
+        self.path.write_bytes(TRACKER.replace("\n", "\r\n").encode("utf-8"))
+        self.add(F, F, F)
+        self.sync()
+        self.assertEqual(len(self.alerts("0")), 1)
+        self.assertNotRegex(raw(), r"(?<!\r)\n")
+        self.assertEqual(len(codex_blocker._classify(raw().split("\n"))[0]), 1)
+        self.assertEqual(codex_blocker.choice("t")[0], "none")
+        self.sync(NOW + timedelta(minutes=1))
+        self.assertEqual(len(self.alerts()), 1)
+        self.assertEqual(codex_blocker.choose("t", "wait", now=NOW)[0], 0)
+        self.assertEqual(codex_blocker.choice("t")[0], "chosen")
+        self.assertNotRegex(raw(), r"(?<!\r)\n")
+        self.add(OK, OK)
+        self.sync(NOW + timedelta(minutes=2))
+        self.assertEqual(len(self.alerts("clear")), 1)
+        self.assertEqual(codex_blocker._classify(raw().split("\n")), ([], []))
+        self.assertIn(" cleared=", raw())
+        self.assertNotRegex(raw(), r"(?<!\r)\n")
 
 
 class Ladder(Base):

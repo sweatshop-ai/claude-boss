@@ -123,7 +123,10 @@ the child does not inherit (`env_unset`), extra `claude` flags
 of values and `-p` ends them), and which Codex reasons let it run. Optional;
 without one the chain is Codex only. Callers name one by **preset**
 (`opus` = `claude-opus-5-5`, `fable` = `claude-fable-5-1`), so the model ids are
-written in `reviewer_chain.py` alone. `claude_argv` builds its call, the one
+written in `reviewer_chain.py` alone. A preset's `claude` is looked up on our PATH
+without empty, relative and checkout-local entries and started by absolute path; its child
+gets our PATH minus the empty and relative entries only. With no `--cwd` a preset keeps nothing out for being
+under the current directory (the confined spec still does). `claude_argv` builds its call, the one
 place, and `fallback_flags` renders a whole spec as command-line flags for a
 caller that starts the chain as a child process.
 
@@ -158,6 +161,17 @@ leaves nothing behind. Kept under
 private (0700 and 0600). Its status is `posted`, `head-moved` (the head or the
 base moved during the review), `no-verdict`, `post-failed` or `list-failed` (a provisional GO that could not be
 listed in the track's tracker is not posted).
+
+**Provisional entry**: one line `- [prov owner/repo#N] head=<7 to 40 hex> round=<NN, two digits at least> base=<branch> at=<ISO
+8601 time>` under `## Provisional GO` in a track's tracker, written before a provisional GO is posted. A line off
+that form (a short head, a round of one digit or not a number, an `at=` that is no time, a repo without `owner/repo`) is
+no entry: the reader and the replace-by-tag step both skip it, so a hand-edited line is never taken over. An entry
+means "must recheck", not "a comment exists": it is kept when the PR cannot be read after the write or the comment
+fails, because a kept entry is rechecked by ticket 10 and a dropped one is a provisional GO nobody revisits.
+The prune (ticket 06b) keeps an entry whose PR has a round file it cannot read as a record (a half-written one, one
+nested too deep for the JSON parser, one whose own repo, pr or round are not its file's). A round file that is empty
+and has a later round above it is a dead claim, not an unreadable record: the prune skips it, so the next review of
+that PR (the recheck of ticket 10 included) clears the entry it kept; the newest round left empty still keeps it.
 
 **Round record**: `round<NN>.json`, what a gate reads. A round is `posted` only
 after `gh pr comment` returned success, so a comment on the PR with no `posted`

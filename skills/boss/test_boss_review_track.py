@@ -169,6 +169,42 @@ class WhenTheSyncRuns(Base):
         self.assertEqual(self.comments(), [])
         self.assertEqual(list(self.reviews.glob("*/*/pr*/round*")), [])
 
+    def test_a_findings_failure_whose_attempts_cannot_be_logged_does_not_call_the_answer_refused(self):
+        self.codex(answer="VERDICT: GO")
+        err = io.StringIO()
+        with mock.patch.object(br, "findings_block", side_effect=OSError("rules unreadable")), \
+                mock.patch.object(br, "append_attempts", side_effect=OSError("disk full")) as append, \
+                contextlib.redirect_stderr(err):
+            result = self.review(track="t")
+        self.assertEqual(result.exit_code, 7)
+        append.assert_called_once()
+        self.assertIn("the attempts of the answer whose findings could not be made safe are not logged: disk full",
+                      err.getvalue())
+        self.assertNotIn("refused", err.getvalue())
+
+    def test_a_refused_answer_whose_attempts_cannot_be_logged_still_says_so(self):
+        attempt = {"reviewer": "codex", "reason": "answered", "exit_code": 0}
+        err = io.StringIO()
+        with mock.patch.object(br, "_ask_codex", side_effect=br._Refused("a NUL", [attempt])), \
+                mock.patch.object(br, "append_attempts", side_effect=OSError("disk full")) as append, \
+                contextlib.redirect_stderr(err):
+            result = self.review(track="t")
+        self.assertEqual(result.exit_code, 7)
+        append.assert_called_once()
+        self.assertIn("the attempts of the refused answer are not logged: disk full", err.getvalue())
+
+    def infra_runs_no_sync(self, message):
+        with mock.patch.object(br, "_ask_codex", side_effect=br._Infra(message)) as ask:
+            result, seen = self.synced()
+        ask.assert_called_once()
+        self.assertEqual((result.exit_code, seen, self.attempts_log()), (7, [], []))
+
+    def test_never_when_the_chain_ran_past_its_time(self):
+        self.infra_runs_no_sync("the chain ran past its time and was stopped")
+
+    def test_never_when_the_chain_printed_output_that_cannot_be_read(self):
+        self.infra_runs_no_sync("the chain printed no result I can read: ValueError: not json")
+
     def test_never_when_the_run_ended_before_the_chain_answered(self):
         self.gh.configure(view=[{"rc": 1}])
         with mock.patch.object(codex_blocker, "sync", side_effect=AssertionError("synced")):

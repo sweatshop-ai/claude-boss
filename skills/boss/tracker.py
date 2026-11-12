@@ -57,6 +57,7 @@ and skipped, never guessed at.
 """
 from __future__ import annotations
 
+import errno
 import fcntl
 import os
 import re
@@ -90,6 +91,10 @@ PLACEHOLDER = "(boss names it)"
 
 class MarkerError(Exception):
     """A token that starts with [ladder but does not parse. Never guessed at."""
+
+
+class _FromFn(Exception):
+    """An exception raised by update's `fn`, carried past the writer's own I/O handler."""
 
 
 def _token_at(line: str) -> int:
@@ -223,7 +228,8 @@ def rewrite(raw: str, last: int, nxt: datetime) -> str:
 def mark_cleared(raw: str, when: datetime) -> str:
     """`raw` with ` cleared=<when, ISO to the minute>` put before ask=, byte for byte elsewhere.
 
-    A line with no readable marker, no ask= or a cleared= already is returned as it came.
+    A line with no readable marker, no ask= or a cleared= with a value is returned as it came;
+    an empty `cleared=` is not cleared (validate says so), so it is filled in.
     `when` must carry a UTC offset: parse_ts refuses a naive one, and the ladder
     would report the marker malformed.
     """
@@ -233,10 +239,20 @@ def mark_cleared(raw: str, when: datetime) -> str:
         found = _scan(raw)
     except MarkerError:
         return raw
-    if found is None or "cleared" in found[2] or "ask" not in found[3]:
+    if found is None or found[2].get("cleared") or "ask" not in found[3]:
         return raw
+    stamp = f"cleared={when.isoformat(timespec='minutes')}"
+    if "cleared" in found[2]:
+        lo = found[3]["cleared"]
+        hi = lo + len("cleared=")
+        if raw[hi:hi + 1] == '"':
+            hi = raw.find('"', hi + 1) + 1
+        else:
+            while hi < len(raw) and raw[hi] not in " \t]":
+                hi += 1
+        return f"{raw[:lo]}{stamp}{raw[hi:]}"
     at = found[3]["ask"]
-    return f"{raw[:at]}cleared={when.isoformat(timespec='minutes')} {raw[at:]}"
+    return f"{raw[:at]}{stamp} {raw[at:]}"
 
 
 def set_ask(raw: str, ask: str) -> str:
@@ -301,19 +317,31 @@ def open_blockers(text: str) -> list[str]:
     return out
 
 
-def insert_in_section(body: str, title: str, line: str) -> str:
-    """`line` at the end of section `title`, before its trailing blank lines.
-    A missing section is created at the end of the file."""
-    lines = body.split("\n")
+def _section(lines: list[str], title: str):
+    """(head, end): the heading's line index and the index where its section ends, or None."""
     head = next((i for i, ln in enumerate(lines)
                  if re.match(r"^##\s+%s\b" % re.escape(title), ln)), None)
     if head is None:
-        return body.rstrip("\n") + "\n\n## %s\n%s\n" % (title, line)
+        return None
     end = next((i for i in range(head + 1, len(lines)) if NEXT_H2_RE.match(lines[i])), len(lines))
+    return head, end
+
+
+def insert_in_section(body: str, title: str, line: str) -> str:
+    """`line` at the end of section `title`, before its trailing blank lines.
+    A missing section is created at the end of the file. The line goes in with the
+    file's own line ending (CRLF if its first line ends so)."""
+    first = body.find("\n")
+    eol = "\r\n" if first > 0 and body[first - 1] == "\r" else "\n"
+    lines = body.split("\n")
+    found = _section(lines, title)
+    if found is None:
+        return body.rstrip("\r\n") + eol + eol + "## %s%s%s%s" % (title, eol, line, eol)
+    head, end = found
     at = end
     while at > head + 1 and not lines[at - 1].strip():
         at -= 1
-    lines.insert(at, line)
+    lines.insert(at, line + ("\r" if eol == "\r\n" else ""))
     return "\n".join(lines)
 
 
@@ -328,6 +356,11 @@ def update(path: Path, fn: Callable[[str], Optional[str]], deadline: float) -> s
     takes no lock, so the file's (st_ino, st_mtime_ns, st_size) is checked between the
     read and the rename, and the pass is redone on the new text, 3 tries in all
     (the ladder's process_tracker makes the same check with the same limit).
+
+    A symlink in place of the tracker is never followed: the file is opened once with O_NOFOLLOW and read,
+    and its identity checked, through that descriptor, so a link swapped in after a caller's lstat is
+    "failed: the tracker is a symbolic link", not a write through it. A symlink put there between the
+    read and the rename shows as a changed inode, and the pass is redone.
 
     Returns "done", "done (no change)" or "failed: <reason>" and never raises
     for those; an exception from `fn` is not swallowed (the lock is let go, the
@@ -345,18 +378,27 @@ def update(path: Path, fn: Callable[[str], Optional[str]], deadline: float) -> s
                         return "failed: lock held past the deadline"
                     time.sleep(0.01)
             for _ in range(3):
-                before = path.stat()
-                with open(path, newline="") as fh:
+                try:
+                    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+                except OSError as err:
+                    if err.errno == errno.ELOOP:
+                        return "failed: the tracker is a symbolic link"
+                    raise
+                with os.fdopen(fd, newline="", encoding="utf-8") as fh:
+                    before = os.fstat(fh.fileno())
                     text = fh.read()
-                new = fn(text)
+                try:
+                    new = fn(text)
+                except (OSError, UnicodeDecodeError) as err:
+                    raise _FromFn(err) from None
                 if new is None:
                     return "done (no change)"
                 fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".boss-tracker-")
                 try:
-                    with os.fdopen(fd, "w", newline="") as fh:
+                    with os.fdopen(fd, "w", newline="", encoding="utf-8") as fh:
                         fh.write(new)
                     os.chmod(tmp, before.st_mode & 0o7777)
-                    now = path.stat()
+                    now = os.lstat(path)
                     if ((now.st_ino, now.st_mtime_ns, now.st_size)
                             != (before.st_ino, before.st_mtime_ns, before.st_size)):
                         continue
@@ -366,12 +408,19 @@ def update(path: Path, fn: Callable[[str], Optional[str]], deadline: float) -> s
                     if os.path.exists(tmp):
                         os.unlink(tmp)
             return "failed: file changed on all 3 tries"
+    except _FromFn as raised:
+        raise raised.args[0] from None
     except (OSError, UnicodeDecodeError) as err:
         return f"failed: {type(err).__name__}"
 
 
 def add_line(path: Path, title: str, line: str, tag: str, deadline: float) -> str:
-    """`line` at the end of section `title` unless `tag` is already in the file.
+    """`line` at the end of section `title` unless `tag` is already there.
+
+    "There" is a line of that section that holds `tag` as a whole token (not inside a
+    longer id, so `id=ab12cd34` is not found in `id=ab12cd345`) and carries no
+    `cleared=` value, so a cleared blocker does not hide a new one with the same id.
+    Prose and other sections do not count.
 
     One locked step, so eight callers with one tag leave one line. Returns
     "done", "done (already there)" or "failed: ...". An empty `tag` is a ValueError:
@@ -379,8 +428,28 @@ def add_line(path: Path, title: str, line: str, tag: str, deadline: float) -> st
     """
     if not tag:
         raise ValueError("tag is empty")
+    # A tag that starts or ends in a letter or digit may not sit inside a longer word.
+    whole = re.compile("%s%s%s" % (r"(?<![A-Za-z0-9])" if tag[0].isalnum() else "", re.escape(tag),
+                                   r"(?![A-Za-z0-9])" if tag[-1].isalnum() else ""))
+
+    def there(text: str) -> bool:
+        lines = text.split("\n")
+        found = _section(lines, title)
+        if found is None:
+            return False
+        for ln in lines[found[0] + 1:found[1]]:
+            if not whole.search(ln):
+                continue
+            try:
+                scanned = scan_marker(ln)
+            except MarkerError:
+                return True
+            if scanned is None or not scanned[1].get("cleared"):
+                return True
+        return False
+
     def fn(text: str) -> Optional[str]:
-        return None if tag in text else insert_in_section(text, title, line)
+        return None if there(text) else insert_in_section(text, title, line)
 
     got = update(path, fn, deadline)
     return "done (already there)" if got == "done (no change)" else got

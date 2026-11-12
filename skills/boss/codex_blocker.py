@@ -60,7 +60,7 @@ ALERT_TIMEOUT = 20      # seconds, as the ladder's post
 LOCK_WAIT = 20.0
 CLEAR_SLACK = 60        # seconds a cleared= may lie after `now` before it is taken as a typo
 ID_RE = re.compile(r"^cd[0-9]{12}$")
-CD_IN_TEXT = re.compile(r"id=cd[0-9]{12}")
+CD_ID = re.compile(r"(?<=\s)id=cd[0-9]{12}(?![0-9A-Za-z])")   # the marker's own id= field: a word of its own
 CHOICES = ("wait", "accept-fallback")                   # what --choose writes; 09c adds "tests-alone"
 READABLE = CHOICES + ("tests-alone",)                   # what the reader accepts
 ASK = "Codex is down: choose wait or accept the fallback review"
@@ -78,8 +78,9 @@ def default_alert() -> str:
     return os.environ.get("BOSS_ALERT", str(Path(__file__).resolve().parent / "bin" / "boss-alert"))
 
 
-def usable_tracker(track: str) -> Path | None:
-    """pm/<track>.md when it is a regular file the user owns, else None (said on stderr).
+def usable_tracker(track: str, verb: str = "raised") -> Path | None:
+    """pm/<track>.md when it is a regular file the user owns, else None (said on stderr as "no blocker can be
+    <verb>", so --choice and --choose do not word it as a raise).
     A `track` that is not a plain name is a ValueError."""
     path = boss_store.tracker_path(track)
     if path is None:
@@ -89,9 +90,28 @@ def usable_tracker(track: str) -> Path | None:
     except OSError:
         st = None
     if st is None or not stat_.S_ISREG(st.st_mode) or st.st_uid != os.getuid():
-        _say("no blocker can be raised: %s is not a regular file of yours" % path)
+        _say("no blocker can be %s: %s is not a regular file of yours" % (verb, path))
         return None
     return path
+
+
+def _require_offset(now: datetime, message: str) -> None:
+    """ValueError unless `now` has a UTC offset; a tzinfo whose utcoffset() is None or raises is not one."""
+    try:
+        offset = now.utcoffset()
+    except (TypeError, ValueError) as e:
+        raise ValueError("%s (%s)" % (message, e)) from e
+    if offset is None:
+        raise ValueError(message)
+
+
+def _is_cd(line: str) -> bool:
+    """Does the line carry a marker whose own `id=` field is a `cd` id? Only the text from the `[ladder` token
+    on is looked at, with the quoted values (ask=, cost=) taken out: `xid=cd...`, an id with a thirteenth digit
+    and an id named in another blocker's prose are not this marker's."""
+    if not tracker.has_marker(line):
+        return False
+    return bool(CD_ID.search(re.sub(r'"[^"]*"', '""', line[line.find(tracker.TOKEN):])))
 
 
 def _classify(lines: list[str]):
@@ -101,7 +121,7 @@ def _classify(lines: list[str]):
     opened, broken = [], []
     for i in range(lo, hi):
         line = lines[i]
-        if not tracker.has_marker(line) or not CD_IN_TEXT.search(line):
+        if not _is_cd(line):
             continue
         try:
             found = tracker.scan_marker(line)
@@ -124,7 +144,7 @@ def _newest_clear(lines: list[str], now: datetime, name: str) -> datetime | None
     newest = None
     for i in range(lo, hi):
         line = lines[i]
-        if not tracker.has_marker(line) or not CD_IN_TEXT.search(line):
+        if not _is_cd(line):
             continue
         try:
             found = tracker.scan_marker(line)
@@ -191,7 +211,7 @@ def choice(track: str):
     carries its id); `chosen` (choice is the last one recorded); `malformed` (the only `cd` lines cannot be read,
     or more than one is open, or the tracker is not a regular file of yours; the third item is the reason). A bad
     `track` is a ValueError (the command prints `malformed` for it too)."""
-    path = usable_tracker(track)
+    path = usable_tracker(track, "read")
     if path is None:
         return "malformed", None, "pm/%s.md is not a regular file of yours" % track
     try:
@@ -210,9 +230,8 @@ def choose(track: str, value: str, now: datetime | None = None) -> tuple[int, st
         raise ValueError("choice must be one of %s, not %r" % (", ".join(CHOICES), value))
     if now is None:
         now = datetime.now().astimezone()
-    if now.tzinfo is None:
-        raise ValueError("now has no UTC offset")
-    path = usable_tracker(track)
+    _require_offset(now, "now has no UTC offset")
+    path = usable_tracker(track, "answered")
     if path is None:
         return 2, "no usable tracker for %s" % track
     result = {}
@@ -251,8 +270,7 @@ def _post(alert: str, rung: str, text: str) -> None:
 def sync(track: str, now: datetime | None = None, health_path=None) -> None:
     if now is None:
         now = datetime.now().astimezone()
-    if now.tzinfo is None:
-        raise ValueError("now has no UTC offset: the ladder would report the marker malformed")
+    _require_offset(now, "now has no UTC offset: the ladder would report the marker malformed")
     path = usable_tracker(track)
     if path is None:
         return

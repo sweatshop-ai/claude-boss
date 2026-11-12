@@ -947,8 +947,9 @@ def _post(job: _Job, body: str) -> bool:
     return run.code == 0
 
 
-def _log_refused(job: _Job, attempts: list[dict]) -> None:
-    """The attempts of a refused answer, with no round: nothing was claimed, so `round` is null."""
+def _log_refused(job: _Job, attempts: list[dict], what: str = "the attempts of the refused answer") -> None:
+    """The attempts of an answer that ends the run without a round, with `round` null: nothing was claimed.
+    `what` names them in the line said when the log cannot be appended to."""
     reviews = _reviews_dir()
     try:
         reviews.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -956,7 +957,7 @@ def _log_refused(job: _Job, attempts: list[dict]) -> None:
         append_attempts(reviews / "attempts.jsonl",
                         [{"ts": _now(), "repo": job.key, "pr": job.pr, "round": None, **a} for a in attempts])
     except OSError as exc:
-        _say("the attempts of the refused answer are not logged: %s" % exc)
+        _say("%s are not logged: %s" % (what, exc))
 
 
 # ------------------------------------------------------- the list of provisional GOs ----
@@ -964,8 +965,10 @@ def _log_refused(job: _Job, attempts: list[dict]) -> None:
 # writes it) and 06b (which prunes it). A provisional GO is only a loan, so the line is written before the
 # comment is posted and no provisional GO can exist that the list does not know about.
 PROV_SECTION = "Provisional GO"
-PROV_LINE = re.compile(r"- \[prov (?P<repo>[^\]#\s]+)#(?P<pr>[0-9]+)\] head=(?P<head>[0-9a-f]+) "
-                       r"round=(?P<round>[0-9]+) base=(?P<base>\S+) at=(?P<at>\S+)")
+# As strict as what `_with_entry` writes: a hand-edited line off that form is no entry and is never replaced.
+PROV_LINE = re.compile(r"- \[prov (?P<repo>[A-Za-z0-9._-]+/[A-Za-z0-9._-]+)#(?P<pr>[0-9]+)\] "
+                       r"head=(?P<head>[0-9a-f]{7,40}) round=(?P<round>[0-9]{2,}) base=(?P<base>\S+) "
+                       r"at=(?P<at>[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:Z|[+-][0-9]{2}:[0-9]{2}))")
 _H2 = re.compile(r"##\s")
 _PROV_H2 = re.compile(r"##\s+%s\s*" % re.escape(PROV_SECTION))
 
@@ -1107,7 +1110,10 @@ def _codex_rounds(pr_dir: Path, entry: ProvEntry) -> list[_Round] | None:
     """The posted `kind: codex` rounds of one PR, or None when a round file cannot be read as a record. A
     round that is claimed and not yet recorded is an empty file: the prune takes no PR lock, so it can see
     one, and what that round will say is not known, so the PR keeps its entries. A record whose own `repo`,
-    `pr` and `round` are not its file's is no record of that round: the same."""
+    `pr` and `round` are not its file's is no record of that round: the same. The newest round left empty
+    (a claim not yet recorded, or a failed write: `_keep_and_post` says "round N is left empty") keeps the PR's
+    entry; once any later round exists, that empty file is a dead claim, since a round is claimed under the PR's
+    lock, and it is skipped. The next review of the PR, the recheck of ticket 10 included, therefore clears it."""
     try:
         names = [(int(m.group(1)), f) for f in pr_dir.iterdir() if (m := re.fullmatch(r"round(\d+)\.json", f.name))]
     except FileNotFoundError:
@@ -1115,12 +1121,16 @@ def _codex_rounds(pr_dir: Path, entry: ProvEntry) -> list[_Round] | None:
     except OSError:
         return None
     found = []
+    last = max((n for n, _ in names), default=0)
     for number, file in sorted(names):
         try:
-            data = json.loads(file.read_text(encoding="utf-8"))
+            text = file.read_text(encoding="utf-8")
+            if not text and number < last:      # a dead claim: rounds are claimed under the PR's lock
+                continue
+            data = json.loads(text)
             status, kind, head, verdict = (data[k] for k in ("status", "kind", "head_sha", "verdict"))
             own = (data["repo"], data["pr"], data["round"])
-        except (OSError, ValueError, KeyError, TypeError):
+        except (OSError, ValueError, KeyError, TypeError, RecursionError):      # a RecursionError: JSON nested too deep
             return None
         if own != (entry.repo, entry.pr, number) or type(data["pr"]) is not int or type(data["round"]) is not int:
             return None
@@ -1212,9 +1222,11 @@ def prune_provisional(track: str, repo: str, io_timeout: float = policy.REVIEW_I
     return [e.tag for e in removed]
 
 
-def _sync_health(track: str | None) -> None:
-    """Raise or clear the "Codex down" blocker in `track`'s tracker. A failure is said and changes nothing."""
-    if track is None:
+def _sync_health(track: str | None, tracker_path: Path | None) -> None:
+    """Raise or clear the "Codex down" blocker in `track`'s tracker. `tracker_path` is what `review()` made of
+    the track once (None: no usable tracker, already said), so an unusable track is not said a second time here.
+    A failure is said and changes nothing."""
+    if track is None or tracker_path is None:
         return
     try:
         codex_blocker.sync(track)
@@ -1299,9 +1311,8 @@ def review(repo: str, pr: int, checkout: str, author: str, *,
         raise ValueError("checkout is not a directory: %r" % (checkout,))
     if track is not None and not (isinstance(track, str) and boss_store.valid_track(track)):
         raise ValueError("track must match %s and hold no '..': %r" % (boss_store.TRACK_RE.pattern, track))
-    tracker_path = None
+    tracker_path = codex_blocker.usable_tracker(track) if track is not None else None   # said once, here
     if allow_fallback:
-        tracker_path = codex_blocker.usable_tracker(track) if track is not None else None
         if tracker_path is None:
             _say("the fallback review needs a usable track (--track T naming a regular file pm/T.md of yours): "
                  "this review asks Codex only")
@@ -1327,7 +1338,7 @@ def review(repo: str, pr: int, checkout: str, author: str, *,
     except _Infra as exc:
         if isinstance(exc, _Refused):
             _log_refused(job, exc.attempts)
-            _sync_health(track)
+            _sync_health(track, tracker_path)
         return _failed(str(exc))
     findings, label = "", None
     if chain["parsed"]:
@@ -1339,11 +1350,12 @@ def review(repo: str, pr: int, checkout: str, author: str, *,
                 if codex["reason"] == "error":
                     label = label._replace(exit_code=codex["exit_code"], stderr=stderr_block(codex["stderr_tail"]))
         except OSError as exc:
-            _log_refused(job, [{k: a[k] for k in ("reviewer", "reason", "exit_code")} for a in chain["attempts"]])
-            _sync_health(track)
+            _log_refused(job, [{k: a[k] for k in ("reviewer", "reason", "exit_code")} for a in chain["attempts"]],
+                         "the attempts of the answer whose findings could not be made safe")
+            _sync_health(track, tracker_path)
             return _failed("the findings cannot be made safe to publish: %s" % exc)
     result = _keep_and_post(job, seen, chain, findings, label, tracker_path=tracker_path)
-    _sync_health(track)      # outside the PR's lock, which _keep_and_post has let go
+    _sync_health(track, tracker_path)      # outside the PR's lock, which _keep_and_post has let go
     return result
 
 
