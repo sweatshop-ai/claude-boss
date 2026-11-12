@@ -8,7 +8,7 @@
 
 **Claimed by:** Anton 2026-11-12
 
-**Status:** in-progress
+**Status:** done (PR 91, review settled 2026-11-12; smoke test of --check-fallback and a Codex re-review owed)
 
 When it runs, and what it is called (R12, R13, finding 2):
 
