@@ -6,7 +6,7 @@
 
 **Blocked by:** 06a (Provisional GOs are written to a list that survives restarts), and through it 05a, 05c, 08 and 14
 
-**Status:** in progress (Marit, PR for 06b, 2026-11-12; spec refreshed 2026-11-12; Codex spec round 1 in `plan-review-codex-06-1.md`)
+**Status:** done (Marit built it, PR 103, merge b045291, 2026-11-12; spec rounds in `plan-review-codex-06-1.md`)
 
 Removal:
 
