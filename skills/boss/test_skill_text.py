@@ -111,7 +111,7 @@ class MergeGate(unittest.TestCase):
         sec = self.section()
         self.assertEqual(sec.count(self.COMMAND), 1)
         self.assertIn("`--dry-run`", sec)
-        self.assertIn("`--test-only-since SHA`", sec)
+        self.assertIn("`--test-only-since SHA` (arrives with ticket 11b)", sec)
 
     def test_the_outcomes_are_named(self):
         self.assertEqual(self.section().count(self.OUTCOMES), 1)

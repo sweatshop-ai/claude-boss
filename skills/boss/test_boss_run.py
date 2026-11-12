@@ -313,6 +313,14 @@ class HardRules(Base):
             ("gh api graphql -f query='mutation { mergePullRequest(input: {}) { clientMutationId } }'",),
             ("GH PR MERGE 5",),
             ("echo gh pr merge",),
+            ("bash -c \"gh pr merge 5\"",),
+            ("true;gh pr merge 5",),
+            ("cd x&&gh pr merge 5",),
+            ("echo $(gh pr merge 5)",),
+            ("echo `gh pr merge 5`",),
+            ("(gh pr merge 5)",),
+            ("gh pr merge 5 --auto",),
+            ("gh api graphql -f query='mutation { enablePullRequestAutoMerge(input: {}) { clientMutationId } }'",),
         ]
         for (command,) in cases:
             with self.subTest(command):
@@ -339,6 +347,8 @@ class HardRules(Base):
                         "gh pr view 5",
                         "gh pr comment 5 --body 'merge when green'",
                         "gh pr checks 5 --repo o/r",
+                        "github pr merge-notes",
+                        "my-gh pr merge-notes",
                         "gh api repos/o/r/pulls/5/merge",
                         "gh api repos/o/r/pulls/5/merge --method GET"):
             with self.subTest(command):

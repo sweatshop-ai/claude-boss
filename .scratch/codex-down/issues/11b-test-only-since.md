@@ -17,3 +17,5 @@ The test-only exception (`test_paths` has its schema in 04):
 Tests (the closing box of 11, which holds for this half as it does for 11a; its harness is 11a's last box):
 
 - [ ] Tests use 01's stub-directory harness with its PATH guard, as 11a's last box says: each test asserts its stub call logs and fails if `codex`, `claude` or `gh` resolves outside the stub directory [R25].
+
+- [ ] `skills/boss/SKILL.md` loses the words "(arrives with ticket 11b)" after `--test-only-since SHA` in P14 (11a wrote them because the flag did not exist), and `test_skill_text.py::MergeGate` loses them from its assertion.
