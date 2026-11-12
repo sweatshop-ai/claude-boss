@@ -113,8 +113,10 @@ class Raise(Base):
         self.assertEqual(m["t0"], NOW.replace(second=0))
         self.assertEqual(m["next"], m["t0"] + timedelta(minutes=policy.RUNGS[0]))
         self.assertNotIn('"', m["ask"])
-        for word in ("wait", "fallback review", "merge on tests alone"):
+        self.assertEqual(m["ask"], codex_blocker.ASK)
+        for word in ("wait", "fallback review"):
             self.assertIn(word, m["ask"])
+        self.assertNotIn("tests alone", m["ask"])         # 09c adds it back with the waiver
         lines = self.text().split("\n")
         lo, hi = tracker.blockers_range(lines)
         self.assertIn(lines.index(ln), range(lo, hi))
@@ -459,6 +461,249 @@ class Clear(Base):
         self.sync(NOW + timedelta(minutes=2))
         self.assertIn("boss-alert", err)
         self.assertEqual(len(self.alerts("clear")), 1)
+
+
+class Choice(Base):
+    """Ticket 09b: the owner's choice is a line in Decisions in force, written by --choose, read by --choice."""
+
+    DEC = "\n## Decisions in force\n"
+
+    def cli(self, *args):
+        """The command in a process of its own, as the boss runs it (a restart between two calls)."""
+        return subprocess.run([sys.executable, str(HERE / "codex_blocker.py"), *args], env=dict(os.environ),
+                              capture_output=True, text=True, timeout=60)
+
+    def raised(self, text=None):
+        if text is not None:
+            self.path.write_text(text, encoding="utf-8")
+        self.add(F, F, F)
+        self.sync()
+        (ln,) = self.cd_lines()
+        return tracker.validate(tracker.scan_marker(ln)[1])["id"]
+
+    def lines_of(self, id_):
+        return [ln for ln in self.text().split("\n") if ln.startswith("- [codex-choice %s]" % id_)]
+
+    def same_blockers(self, before):
+        """Open blockers hold the same entries as `before` (the Codex down entry's ask= is rewritten by
+        --choose, so compare the count) and none of them is a choice line."""
+        now = tracker.open_blockers(self.text())
+        return len(now) == len(before) and not any(e.startswith("[codex-choice") for e in now)
+
+    def decisions(self):
+        lines = self.text().split("\n")
+        head = next(i for i, ln in enumerate(lines) if ln.startswith("## Decisions in force"))
+        end = next((i for i in range(head + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
+        return lines[head + 1:end]
+
+    def test_no_blocker_prints_no_blocker_and_exits_2_and_choose_writes_nothing(self):
+        before = self.text()
+        run = self.cli("--choice", "t")
+        self.assertEqual((run.stdout.strip(), run.returncode), ("no-blocker", 2))
+        run = self.cli("--choose", "t", "wait")
+        self.assertEqual(run.returncode, 2, run.stderr)
+        self.assertIn("no-blocker", run.stderr)
+        self.assertEqual(self.text(), before)
+        self.assertEqual(codex_blocker.choice("t"), ("no-blocker", None, None))
+
+    def test_an_open_blocker_without_a_line_is_none_and_exits_1(self):
+        id_ = self.raised()
+        run = self.cli("--choice", "t")
+        self.assertEqual((run.stdout.strip(), run.returncode), ("none", 1))
+        self.assertEqual(codex_blocker.choice("t"), ("none", id_, None))
+
+    def test_each_choice_survives_a_restart(self):
+        for value in codex_blocker.CHOICES:
+            with self.subTest(value):
+                self.path.write_text(TRACKER, encoding="utf-8")
+                self.log.write_text("", encoding="utf-8")
+                id_ = self.raised()
+                run = self.cli("--choose", "t", value)               # one process writes ...
+                self.assertEqual(run.returncode, 0, run.stderr)
+                self.assertIn(id_, run.stdout)
+                run = self.cli("--choice", "t")                      # ... another reads
+                self.assertEqual((run.stdout.strip(), run.returncode), (value, 0), run.stderr)
+                self.assertEqual(codex_blocker.choice("t"), ("chosen", id_, value))
+                (ln,) = self.lines_of(id_)
+                self.assertRegex(ln, r"^- \[codex-choice cd[0-9]{12}\] %s - \S+$" % value)
+                self.assertNotIn(tracker.TOKEN, ln)
+
+    def test_the_line_goes_into_decisions_and_not_into_open_blockers(self):
+        id_ = self.raised()
+        blockers_before = tracker.open_blockers(self.text())
+        self.assertEqual(self.cli("--choose", "t", "wait").returncode, 0)
+        self.assertEqual(len(self.lines_of(id_)), 1)
+        self.assertIn(self.lines_of(id_)[0], self.decisions())
+        lines = self.text().split("\n")
+        lo, hi = tracker.blockers_range(lines)
+        self.assertNotIn(self.lines_of(id_)[0], lines[lo:hi])
+        self.assertEqual(self.same_blockers(blockers_before), True)
+
+    def test_with_open_blockers_as_the_last_section_the_line_still_lands_in_decisions(self):
+        for tail in ("# t\n\n## Decisions in force\n\n## Notes\nx\n\n## Open blockers\n",
+                     "# t\n\n## Notes\nx\n\n## Open blockers\n"):          # the second has no Decisions section
+            with self.subTest(tail=tail):
+                self.log.write_text("", encoding="utf-8")
+                id_ = self.raised(tail)
+                before = tracker.open_blockers(self.text())
+                self.assertEqual(len(before), 1)
+                self.assertEqual(self.cli("--choose", "t", "accept-fallback").returncode, 0)
+                (ln,) = self.lines_of(id_)
+                self.assertIn(ln, self.decisions())
+                self.assertTrue(self.same_blockers(before))
+                self.assertEqual(codex_blocker.choice("t")[2], "accept-fallback")
+
+    def test_choosing_the_same_twice_writes_one_line_and_changes_nothing_the_second_time(self):
+        id_ = self.raised()
+        self.assertEqual(self.cli("--choose", "t", "wait").returncode, 0)
+        once = self.text()
+        self.assertEqual(self.cli("--choose", "t", "wait").returncode, 0)
+        self.assertEqual(self.text(), once)
+        self.assertEqual(len(self.lines_of(id_)), 1)
+
+    def test_a_revocation_is_not_dropped_by_an_identical_earlier_line(self):
+        id_ = self.raised()
+        for value in ("wait", "accept-fallback", "wait"):
+            self.assertEqual(self.cli("--choose", "t", value).returncode, 0)
+        lines = self.lines_of(id_)
+        self.assertEqual([ln.split("] ")[1].split(" - ")[0] for ln in lines], ["wait", "accept-fallback", "wait"])
+        self.assertEqual(codex_blocker.choice("t"), ("chosen", id_, "wait"))
+        self.assertEqual(self.cli("--choice", "t").stdout.strip(), "wait")
+
+    def test_choose_rewrites_the_markers_ask_and_leaves_the_marker_valid(self):
+        self.raised()
+        (before,) = self.cd_lines()
+        mb = tracker.validate(tracker.scan_marker(before)[1])
+        self.assertEqual(self.cli("--choose", "t", "accept-fallback").returncode, 0)
+        (after,) = self.cd_lines()
+        ma = tracker.validate(tracker.scan_marker(after)[1])
+        self.assertEqual(ma["ask"], "Codex down; owner chose accept-fallback")
+        for key in ("id", "last", "t0", "next", "cleared"):
+            self.assertEqual(ma[key], mb[key])
+        self.assertEqual(before.split("ask=")[0], after.split("ask=")[0])
+        self.assertEqual(self.cli("--choose", "t", "wait").returncode, 0)
+        self.assertEqual(tracker.validate(tracker.scan_marker(self.cd_lines()[0])[1])["ask"],
+                         "Codex down; owner chose wait")
+
+    def test_choose_posts_no_alert(self):
+        self.raised()
+        self.assertEqual(len(self.alerts()), 1)                # the raise's own, seen by the stub
+        self.cli("--choose", "t", "wait")
+        self.assertEqual(len(self.alerts()), 1)
+
+    def test_a_choice_not_offered_is_refused_and_writes_nothing(self):
+        self.raised()
+        before = self.text()
+        for value in ("tests-alone", "yes", ""):
+            run = self.cli("--choose", "t", value)
+            self.assertEqual(run.returncode, 2, value)
+            self.assertTrue(run.stderr.strip())
+        self.assertEqual(self.text(), before)
+
+    def test_an_invalid_track_is_exit_2_for_both_commands(self):
+        for args in (("--choice", "../x"), ("--choose", "../x", "wait"), ("--choice", ""), ("--choice", "a/b")):
+            run = self.cli(*args)
+            self.assertEqual(run.returncode, 2, args)
+            self.assertTrue(run.stderr.strip(), args)
+            if args[0] == "--choice":
+                self.assertEqual(run.stdout.strip(), "malformed", args)
+        with self.assertRaises(ValueError):
+            codex_blocker.choice("../x")
+
+    def test_the_last_line_for_an_id_wins(self):
+        id_ = self.raised()
+        text = self.text()
+        extra = "- [codex-choice %s] wait - 2026-11-12T10:31:00+01:00\n- [codex-choice %s] accept-fallback - x\n" % (id_, id_)
+        self.path.write_text(text.replace("## Notes", "## Decisions in force\n" + extra + "\n## Notes", 1), encoding="utf-8")
+        self.assertEqual(codex_blocker.choice("t"), ("chosen", id_, "accept-fallback"))
+
+    def test_a_choice_for_a_cleared_blockers_id_does_not_count_for_a_new_one(self):
+        old = self.raised()
+        self.assertEqual(self.cli("--choose", "t", "accept-fallback").returncode, 0)
+        self.clear_by_hand()
+        self.assertEqual(codex_blocker.choice("t"), ("no-blocker", None, None))
+        self.add(F, ts=LATER)
+        self.sync(NOW + timedelta(minutes=5))
+        (ln,) = [c for c in self.cd_lines() if " cleared=" not in c]
+        new = tracker.validate(tracker.scan_marker(ln)[1])["id"]
+        self.assertNotEqual(new, old)
+        self.assertEqual(codex_blocker.choice("t"), ("none", new, None))
+        self.assertEqual(self.cli("--choice", "t").returncode, 1)
+
+    def test_lookalike_lines_are_ignored(self):
+        id_ = self.raised()
+        other = "cd000000000001"
+        lookalikes = [
+            "- [codex-choice %s] wait - 2026-11-12T10:31:00+01:00 and more" % id_,         # trailing text
+            "- [codex-choice %s] wait" % id_,                                                # no timestamp
+            "  - [codex-choice %s] wait - 2026-11-12T10:31:00+01:00" % id_,                  # indented
+            "- [codex-choice %s] maybe - 2026-11-12T10:31:00+01:00" % id_,                   # not a choice
+            "- [codex-choice %s] wait - 2026-11-12T10:31:00+01:00" % other,                  # another id
+            "- [codex-choice cd26111210301] wait - 2026-11-12T10:31:00+01:00",               # short id
+        ]
+        outside = "- [codex-choice %s] accept-fallback - 2026-11-12T10:31:00+01:00" % id_  # wrong section
+        text = self.text().replace("## Notes\n", "## Decisions in force\n" + "\n".join(lookalikes) + "\n\n## Notes\n" + outside + "\n", 1)
+        self.path.write_text(text, encoding="utf-8")
+        self.assertEqual(codex_blocker.choice("t"), ("none", id_, None))
+
+    def test_a_broken_cd_line_alone_is_malformed_not_no_blocker(self):
+        self.path.write_text(TRACKER.replace("## Open blockers\n", "## Open blockers\n- Codex down: x [ladder id=cd261112103015 bogus]\n"),
+                             encoding="utf-8")
+        run = self.cli("--choice", "t")
+        self.assertEqual((run.stdout.strip(), run.returncode), ("malformed", 2))
+        self.assertTrue(run.stderr.strip())
+        before = self.text()
+        run = self.cli("--choose", "t", "wait")
+        self.assertEqual(run.returncode, 2, run.stderr)
+        self.assertEqual(self.text(), before)
+        status, id_, why = codex_blocker.choice("t")
+        self.assertEqual((status, id_), ("malformed", None))
+        self.assertTrue(why)
+
+    def test_two_open_valid_lines_are_malformed_and_choose_writes_nothing(self):
+        a = tracker.render_marker("cd261112080000", NOW, NOW, ask="x")
+        b = tracker.render_marker("cd261112080001", NOW, NOW, ask="x")
+        self.path.write_text(TRACKER.replace("## Open blockers\n", "## Open blockers\n- a %s\n- b %s\n" % (a, b)),
+                             encoding="utf-8")
+        before = self.text()
+        run = self.cli("--choice", "t")
+        self.assertEqual((run.stdout.strip(), run.returncode), ("malformed", 2))
+        self.assertEqual(self.cli("--choose", "t", "wait").returncode, 2)
+        self.assertEqual(self.text(), before)
+
+    def test_a_tracker_that_is_not_a_regular_file_of_the_user_is_malformed(self):
+        self.path.unlink()
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            status, id_, why = codex_blocker.choice("t")
+        self.assertEqual((status, id_), ("malformed", None))
+        self.assertTrue(why and err.getvalue().strip())
+        run = self.cli("--choice", "t")
+        self.assertEqual((run.stdout.strip(), run.returncode), ("malformed", 2))
+        self.assertEqual(self.cli("--choose", "t", "wait").returncode, 2)
+
+    def test_a_held_lock_is_exit_1_with_nothing_written(self):
+        self.raised()
+        before = self.text()
+        with mock.patch.object(codex_blocker, "LOCK_WAIT", 0.05), \
+                mock.patch.object(tracker, "update", return_value="failed: lock held past the deadline"):
+            rc, msg = codex_blocker.choose("t", "wait", now=NOW)
+        self.assertEqual(rc, 1)
+        self.assertIn("lock held", msg)
+        self.assertEqual(self.text(), before)
+
+    def test_a_naive_now_is_a_value_error(self):
+        self.raised()
+        with self.assertRaises(ValueError):
+            codex_blocker.choose("t", "wait", now=datetime(2026, 11, 12, 10, 0))
+
+    def test_the_ladder_and_classify_never_read_the_line(self):
+        id_ = self.raised()
+        self.assertEqual(self.cli("--choose", "t", "wait").returncode, 0)
+        lines = self.text().split("\n")
+        opened, broken = codex_blocker._classify(lines)
+        self.assertEqual((len(opened), broken), (1, []))
+        self.assertFalse(any(tracker.has_marker(ln) for ln in self.lines_of(id_)))
 
 
 class Ladder(Base):

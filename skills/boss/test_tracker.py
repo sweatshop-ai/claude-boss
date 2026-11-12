@@ -151,6 +151,20 @@ LINE = ('- ship it [ladder id=ab12 t0=2026-09-18T10:53+02:00 last=0 '
 WHEN = datetime(2026, 9, 18, 12, 7, 31, tzinfo=TZ)
 
 
+class SetAsk(unittest.TestCase):
+    def test_only_the_ask_value_changes(self):
+        out = tracker.set_ask(LINE, "Codex down; owner chose wait")
+        self.assertEqual(out, LINE.replace('ask="put the u2 file on lab-0"', 'ask="Codex down; owner chose wait"'))
+        self.assertEqual(validate(scan_marker(out)[1])["ask"], "Codex down; owner chose wait")
+
+    def test_a_quote_is_refused_and_a_line_without_a_marker_comes_back_as_it_was(self):
+        with self.assertRaises(tracker.MarkerError):
+            tracker.set_ask(LINE, 'a "b"')
+        self.assertEqual(tracker.set_ask("- no marker ask=\"x\"", "y"), "- no marker ask=\"x\"")
+        broken = "- x [ladder id=ab12 bogus]"
+        self.assertEqual(tracker.set_ask(broken, "y"), broken)
+
+
 class MarkCleared(unittest.TestCase):
     def test_cleared_goes_before_ask_and_nothing_else_moves(self):
         out = tracker.mark_cleared(LINE, WHEN)
