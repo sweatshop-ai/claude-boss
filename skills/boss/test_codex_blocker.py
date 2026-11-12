@@ -804,6 +804,7 @@ class Edges(Base):
     """Ticket 20: the edge cases found in the review of 05c."""
 
     def test_a_hand_written_empty_cleared_is_open_and_the_next_up_sync_clears_it(self):
+        """Passes on main before ticket 20 too (ticket 16, c53fcef): it pins behaviour that already existed."""
         for empty in ("cleared=", 'cleared=""'):
             with self.subTest(empty=empty):
                 self.setUp()
@@ -821,7 +822,9 @@ class Edges(Base):
                 self.sync(NOW + timedelta(minutes=1))
                 self.assertEqual((self.text(), len(self.alerts())), (after, 1))
 
-    def test_a_symlink_swapped_in_after_the_check_is_not_written_through(self):
+    def test_a_symlink_swapped_in_after_the_check_is_not_read_through_into_a_regular_file(self):
+        """The link is not followed: the pass fails on it and the target is untouched (ticket 31: the old code
+        never wrote through the link, it read the target and turned the link into a regular file)."""
         target = self.path.with_name("elsewhere.md")
         real_usable = codex_blocker.usable_tracker
         swapped = []
@@ -880,7 +883,39 @@ class Edges(Base):
                 self.assertEqual(codex_blocker._classify(self.text().split("\n"))[0], [4])
 
     def test_a_cd_id_in_the_markers_own_field_is_still_a_broken_cd_line(self):
+        """Passes on main before ticket 20 too: it pins behaviour that already existed."""
         line = '- x see xid=cd261112090000 [ladder id=cd261112090000 t0=bad last=0 next=x ask="a"]'
+        self.path.write_text(TRACKER.replace("## Open blockers\n", "## Open blockers\n%s\n" % line), encoding="utf-8")
+        opened, broken = codex_blocker._classify(self.text().split("\n"))
+        self.assertEqual((opened, [i for i, _ in broken]), ([], [3]))
+
+    def test_a_stray_quote_after_the_id_does_not_hide_a_broken_cd_line(self):
+        """Ticket 31, class c: `"[^"]*"` pairs quotes left to right, so a stray quote in ask= must not eat id=."""
+        for line in ('- x [ladder id=cd261112090000 t0=bad ask="say "hi" next="x"]',
+                     '- x [ladder t0=bad ask="say "hi" id=cd261112090000 next="x"]'):
+            with self.subTest(line=line):
+                self.path.write_text(TRACKER.replace("## Open blockers\n", "## Open blockers\n%s\n" % line),
+                                     encoding="utf-8")
+                opened, broken = codex_blocker._classify(self.text().split("\n"))
+                self.assertEqual((opened, [i for i, _ in broken]), ([], [3]))
+                before = self.text()
+                self.add(F, F, F)
+                self.sync()
+                self.assertEqual(self.text(), before)             # no second blocker beside the broken one
+                self.assertEqual(self.alerts("0"), [])
+
+    def test_a_stray_quote_does_not_make_another_blockers_line_a_cd_line(self):
+        """Ticket 31 round 1: a broken marker of another blocker that names a cd id in its prose is not a cd line."""
+        for line in ('- x [ladder id=abcd t0=bad last=0 next=x ask="wait for id=cd261112090000"] 5" screen',
+                     '- x [ladder id=abcd t0=bad ask="Codex down id=cd261112090000 is 5" tall"]',
+                     '- x [ladder id=abcd t0=bad ask="Codex down id=cd261112090000 is "stuck" again" cost="5""]'):
+            with self.subTest(line=line):
+                self.path.write_text(TRACKER.replace("## Open blockers\n", "## Open blockers\n%s\n" % line),
+                                     encoding="utf-8")
+                self.assertEqual(codex_blocker._classify(self.text().split("\n")), ([], []))
+
+    def test_an_even_quote_unbalanced_line_with_the_id_first_is_still_a_broken_cd_line(self):
+        line = '- x [ladder id=cd261112090000 t0=bad ask="say "hi" next=x cost="5" mins"]'
         self.path.write_text(TRACKER.replace("## Open blockers\n", "## Open blockers\n%s\n" % line), encoding="utf-8")
         opened, broken = codex_blocker._classify(self.text().split("\n"))
         self.assertEqual((opened, [i for i, _ in broken]), ([], [3]))
