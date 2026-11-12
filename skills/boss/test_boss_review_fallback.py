@@ -771,6 +771,13 @@ class PresetLaunch(Base):
         seen = self.child_path(confined, os.pathsep.join([str(venv), os.environ["PATH"]]))
         self.assertNotIn(str(venv), seen)
 
+    def test_a_custom_spec_that_unsets_nothing_is_not_a_preset_and_gets_the_filtered_path(self):
+        venv = self.checkout / ".venv" / "bin"
+        venv.mkdir(parents=True)
+        custom = rc.Fallback("custom", "m")
+        seen = self.child_path(custom, os.pathsep.join([str(venv), os.environ["PATH"]]))
+        self.assertNotIn(str(venv), seen)
+
     def test_without_a_cwd_a_preset_starts_a_claude_that_links_into_the_current_directory(self):
         # the tradeoff of ticket 15, now pinned: with no checkout to name, nothing under the current directory is kept out
         self.planted(self.sb.root / "here")

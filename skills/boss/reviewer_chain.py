@@ -419,8 +419,8 @@ def claude_launch(fb: Fallback, prompt: str, cwd: str | None = None) -> tuple[li
     except OSError:         # no cwd and the current directory was deleted: nothing to keep out, nothing safe to start
         return None
     inside = _within(base) if base else (lambda path: False)
-    preset = env is None
-    if preset:
+    preset = fb in PRESETS.values()     # not "unsets nothing": a custom spec is confined by its own flags, so it gets the filtered PATH
+    if env is None:
         env = dict(os.environ)
     keep, child_keep = [], []
     for entry in os.environ.get("PATH", "").split(os.pathsep):
