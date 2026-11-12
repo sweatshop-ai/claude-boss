@@ -12,7 +12,7 @@
  "tool_input": {
   "annotations": {},
   "answers": {
-   "CONSENT: proceed with the third test?": "maybe later, ask Anna"
+   "CONSENT: proceed with the third test?": "maybe later, ask someone else"
   },
   "questions": [
    {
@@ -36,7 +36,7 @@
  "tool_response": {
   "annotations": {},
   "answers": {
-   "CONSENT: proceed with the third test?": "maybe later, ask Anna"
+   "CONSENT: proceed with the third test?": "maybe later, ask someone else"
   },
   "questions": [
    {

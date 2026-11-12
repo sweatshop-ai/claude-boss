@@ -535,7 +535,7 @@ class Hook(unittest.TestCase):
 
     # ---- the captured payloads
     def test_the_captured_payloads_hold_the_answer_where_the_hook_reads_it(self):
-        for name, answer in (("yes", "Yes, proceed"), ("no", "No, stop"), ("free-text", "maybe later, ask Anna")):
+        for name, answer in (("yes", "Yes, proceed"), ("no", "No, stop"), ("free-text", "maybe later, ask someone else")):
             payload = json.loads((FIXTURES / ("post-ask-%s.json" % name)).read_text())
             self.assertEqual(payload["hook_event_name"], "PostToolUse")
             (question,) = [q["question"] for q in payload["tool_response"]["questions"]]
