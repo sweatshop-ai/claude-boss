@@ -804,6 +804,7 @@ class Edges(Base):
     """Ticket 20: the edge cases found in the review of 05c."""
 
     def test_a_hand_written_empty_cleared_is_open_and_the_next_up_sync_clears_it(self):
+        """Passes on main before ticket 20 too (ticket 16, c53fcef): it pins behaviour that already existed."""
         for empty in ("cleared=", 'cleared=""'):
             with self.subTest(empty=empty):
                 self.setUp()
@@ -821,7 +822,9 @@ class Edges(Base):
                 self.sync(NOW + timedelta(minutes=1))
                 self.assertEqual((self.text(), len(self.alerts())), (after, 1))
 
-    def test_a_symlink_swapped_in_after_the_check_is_not_written_through(self):
+    def test_a_symlink_swapped_in_after_the_check_is_not_read_through_into_a_regular_file(self):
+        """The link is not followed: the pass fails on it and the target is untouched (ticket 31: the old code
+        never wrote through the link, it read the target and turned the link into a regular file)."""
         target = self.path.with_name("elsewhere.md")
         real_usable = codex_blocker.usable_tracker
         swapped = []
@@ -880,10 +883,26 @@ class Edges(Base):
                 self.assertEqual(codex_blocker._classify(self.text().split("\n"))[0], [4])
 
     def test_a_cd_id_in_the_markers_own_field_is_still_a_broken_cd_line(self):
+        """Passes on main before ticket 20 too: it pins behaviour that already existed."""
         line = '- x see xid=cd261112090000 [ladder id=cd261112090000 t0=bad last=0 next=x ask="a"]'
         self.path.write_text(TRACKER.replace("## Open blockers\n", "## Open blockers\n%s\n" % line), encoding="utf-8")
         opened, broken = codex_blocker._classify(self.text().split("\n"))
         self.assertEqual((opened, [i for i, _ in broken]), ([], [3]))
+
+    def test_a_stray_quote_after_the_id_does_not_hide_a_broken_cd_line(self):
+        """Ticket 31, class c: `"[^"]*"` pairs quotes left to right, so a stray quote in ask= must not eat id=."""
+        for line in ('- x [ladder id=cd261112090000 t0=bad ask="say "hi" next="x"]',
+                     '- x [ladder t0=bad ask="say "hi" id=cd261112090000 next="x"]'):
+            with self.subTest(line=line):
+                self.path.write_text(TRACKER.replace("## Open blockers\n", "## Open blockers\n%s\n" % line),
+                                     encoding="utf-8")
+                opened, broken = codex_blocker._classify(self.text().split("\n"))
+                self.assertEqual((opened, [i for i, _ in broken]), ([], [3]))
+                before = self.text()
+                self.add(F, F, F)
+                self.sync()
+                self.assertEqual(self.text(), before)             # no second blocker beside the broken one
+                self.assertEqual(self.alerts("0"), [])
 
     def test_a_repo_with_marker_characters_gives_one_valid_marker(self):
         repo = 'a]b"c[ladder x\nd'
