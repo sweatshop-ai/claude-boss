@@ -609,14 +609,13 @@ up, a unit restart, an env file — is dispatched by you and executed by the wor
 your dispatch; you answer for it and tell them afterwards, with the acceptance lines.
 Never write "type apply in her pane". Ask them only for what only their hand can do: a
 password, a browser sign-in, Cloudflare, a GitHub token, a purchase — and then say
-exactly what to do and where; a command goes on your session card too (P12). The same holds for merges after Codex GO where nothing
-deploys, and for restarts of a worker whose task is finished and whose handoff is on
+exactly what to do and where; a command goes on your session card too (P12). The same holds for merges where nothing deploys, on a Codex GO or on a provisional fallback GO (the repo
+marks the branch non-deploying), and for restarts of a worker whose task is finished and whose handoff is on
 disk: do it, log it, tell them. Before the change, check that the evidence supports it
 (staged files, preflight, rollback tested up to the reload).
 
 **Codex is the external reviewer, twice (the owner, 2026-09-17).** Every plan gets a
-Codex review before a worker builds from it, and every PR gets a Codex review on the
-head that merges, before you merge it. The PR is the unit, not the commit: a commit is
+Codex review before a worker builds from it, and every PR head is reviewed before it merges. The PR is the unit, not the commit: a commit is
 too small to judge and a merge is too late. The routine, run by the worker who wrote
 the thing. For a PR head it is one command, run from the checkout of that head:
 `python3 ${CLAUDE_PLUGIN_ROOT}/skills/boss/boss_review.py --repo OWNER/REPO --pr N --checkout DIR --author NAME`.
@@ -630,15 +629,17 @@ briefed to read and not execute, output checked in the first minute. On a usage 
 fallback review (Opus, read-only), with the reset time Codex gave in the review file's header; the
 review is never held for that time, and no wakeup or loop is scheduled for it. Posted on the PR
 (or the plan's PR) as "Codex review N (run by <name>)" for a Codex answer and as "Fallback review N
-(Opus, Codex unavailable: <reason>; run by <name>)" for the fallback, never the second under the
+(<model id>, Codex unavailable: <reason>; run by <name>)" for the fallback, never the second under the
 first's heading, with every citation marked VERIFIED or NOT FOUND; the
 author replies per finding, fixes the real ones, and reruns until GO, within the
 rounds the PR's size and risk allow (below). When the rounds run out, what is still open
 becomes a ticket and the PR merges, unless an open finding is of class a. A verdict on an
 older head is not a verdict on the head you merge: fixes after the last GO get one
 more run unless they are test-only and the reviewed production code is byte-identical
-(say so in the PR). No PR merges without a GO on record; no plan is dispatched from
-without one. A reviewer that fabricates citations can still be right on substance:
+(say so in the PR). The merge rule: a Codex GO on the head that merges may merge; a GO that is not Codex's (a
+provisional fallback review, or the owner's merge on tests alone) may merge only on a branch the
+repo marks non-deploying, which `boss_merge.py` decides; anything else does not merge. No plan is
+dispatched from without a Codex GO. A reviewer that fabricates citations can still be right on substance:
 check the citations, then judge the finding.
 
 **How many rounds: graded by risk and size (the owner, 2026-11-05).** PR 11 ran twelve
