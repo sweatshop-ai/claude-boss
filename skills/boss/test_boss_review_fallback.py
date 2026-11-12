@@ -514,6 +514,59 @@ if [ -n "$CLAUDE_CODE_PLUGIN_DIRS" ]; then echo %s; else echo %s; fi
         self.assertEqual([a.reason for a in result.attempts if a.reviewer == "opus"], ["absent"])
         self.assertFalse((self.sb.root / "planted-ran").exists())
 
+    def test_a_relative_symlink_straight_into_the_checkout_is_refused(self):
+        # no hop: the link's own text (../work/checkout/claude) names a file inside the checkout
+        self.planted_claude(self.checkout)
+        self.sb.stub("claude", answer=GO)
+        safe = self.safe_bin_with_link(self.checkout / "claude", relative=True)
+        self.assertEqual(os.readlink(safe / "claude"), "../work/checkout/claude")
+        self.assert_refused(self.run_with_path(safe, str(self.checkout)))
+
+    def test_a_refused_link_is_absent_even_when_a_later_entry_holds_a_good_claude(self):
+        # documented: shutil.which picks the first `claude`; the refusal is final, no later entry is tried
+        self.planted_claude(self.checkout)
+        self.sb.stub("claude", answer=GO)           # on the PATH behind the link: must not be reached
+        safe = self.safe_bin_with_link(self.checkout / "claude")
+        self.assert_refused(self.run_with_path(safe, str(self.checkout)))
+
+    def test_with_a_deleted_current_directory_and_no_cwd_the_confined_fallback_is_absent(self):
+        gone = self.sb.root / "gone"
+        gone.mkdir()
+        self.sb.stub("claude", answer=GO)
+        self.chdir(gone)
+        gone.rmdir()
+        with self.assertRaises(FileNotFoundError):
+            os.getcwd()                              # the premise
+        self.assertIsNone(rc.claude_launch(br.fallback_spec(), "p"))
+        turn = rc._claude("p", br.fallback_spec(), 5, lambda text: None, None)
+        self.assertEqual((turn.attempt.reviewer, turn.attempt.reason), ("opus", "absent"))
+
+    def test_with_a_deleted_current_directory_a_preset_without_a_cwd_is_still_started(self):
+        gone = self.sb.root / "gone"
+        gone.mkdir()
+        self.sb.stub("claude", answer=GO)
+        self.chdir(gone)
+        gone.rmdir()
+        launch = rc.claude_launch(rc.OPUS, "p")      # a preset with no cwd asks for no base
+        self.assertIsNotNone(launch)
+        self.assertEqual(launch[0][0], str(self.sb.stubs / "claude"))
+
+    def test_a_base_of_the_filesystem_root_keeps_out_every_entry(self):
+        # base + os.sep was "//": nothing started with it, so a cwd of "/" excluded nothing
+        self.sb.stub("claude", answer=GO)
+        self.assertIsNone(rc.claude_launch(br.fallback_spec(), "p", "/"))
+        result = rc.run_chain("p", words=rc.GO_NOGO, fallback=br.fallback_spec(), cwd="/")
+        self.assertEqual([a.reason for a in result.attempts if a.reviewer == "opus"], ["absent"])
+
+    def test_a_base_that_is_a_prefix_of_a_sibling_name_keeps_out_only_itself(self):
+        self.sb.stub("claude", answer=GO)
+        self.expect["claude"] = 1
+        sibling = self.sb.work / "checkout-other"      # shares the text "checkout" with the base
+        sibling.mkdir()
+        (sibling / "claude").symlink_to(self.sb.stubs / "claude")
+        result = self.run_with_path(sibling, str(self.checkout))
+        self.assertEqual(result.reviewer, "opus")
+
     def test_a_fallback_that_unsets_path_is_refused_at_construction(self):
         for names in (("PATH",), ("BASH_ENV", "PATH")):
             with self.subTest(names=names), self.assertRaisesRegex(ValueError, "PATH"):
