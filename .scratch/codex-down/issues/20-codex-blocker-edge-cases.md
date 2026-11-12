@@ -1,5 +1,7 @@
 # 20: Codex down blocker, edge cases found in the review of 05c
 
+**Blocked by:** 05c (merged with this PR)
+
 **Status:** ready-for-agent
 
 Found by the fallback review of PR 96, round 1 (Opus on b8a97ce, Codex unavailable; no class a finding). Each is a small box. Review files: `/home/tiroir/Projects/boss-plugin-wt/05c-reviews/`.
