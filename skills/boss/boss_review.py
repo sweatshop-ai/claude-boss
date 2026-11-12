@@ -3,7 +3,7 @@
 
     review(repo, pr, checkout, author) -> ReviewResult      the logic
     boss_review.py --repo OWNER/REPO --pr N --checkout DIR --author NAME   the command
-    fallback_spec(timeout=...) -> Fallback       the read-only fallback reviewer (review() does not run it yet)
+    fallback_spec(timeout=...) -> Fallback       the read-only fallback reviewer (review(allow_fallback=True) runs it)
     boss_review.py --check-fallback --checkout DIR   run that fallback once and check what it was left with
 
 Exit codes (5 belongs to a later ticket and is never used here):
@@ -19,7 +19,7 @@ not, or the call could not be run), and 2 for usage; it posts nothing and reads 
 
 
 The order: read the PR and its diff, read the PR again (it must not have moved), ask Codex (01's
-chain, Codex only, in a child process told `--cwd` the checkout) with a brief that fences the PR's text,
+chain, Codex only, or Codex then the fallback when review() is allowed it, in a child process told `--cwd` the checkout) with a brief that fences the PR's text,
 make the findings safe to publish, then under the PR's lock read the PR again, claim the next round,
 append the attempts, write the answer, post, and replace the claimed file by the full record. A
 failure before the claim leaves nothing; one after it leaves the claimed file empty. Rounds live under
@@ -53,7 +53,7 @@ from typing import NamedTuple
 import boss_store
 import policy
 from reviewer_chain import (CODEX_FAILURES, GO_NOGO, STDERR_TAIL, TERM_GRACE, Fallback, _parse, _snapshot,
-                            _stop, claude_launch)
+                            _stop, claude_launch, fallback_flags)
 
 HERE = Path(__file__).resolve().parent
 CHAIN = HERE / "reviewer_chain.py"
@@ -72,6 +72,7 @@ class ReviewResult:
     status: str | None
     verdict: str | None
     record: Path | None
+    kind: str | None = "codex"      # "provisional" once the fallback ran; None where no round was claimed
 
 
 NAME = re.compile(r"[A-Za-z0-9._-]+")      # fullmatch: `$` would let a trailing newline through
@@ -436,27 +437,38 @@ def build_brief(head_sha: str, base: str, title: str, body: str, diff: str) -> s
 _ATTEMPT_KEYS = ("reviewer", "reason", "output", "exit_code", "stderr_tail", "model")
 
 
-def _sound(data: dict, code: int, read_answer: bool = True) -> bool:
-    """Whether the chain's result is plainly a Codex-only one and agrees with its own exit code:
-    one Codex attempt, answered exactly when the result names Codex, with a verdict, and exit 0.
-    A malformed value raises KeyError or TypeError; the caller counts that as unsound."""
+def _answering(attempts: list[dict]) -> dict | None:
+    """The attempt that answered: the first whose reason is `answered`."""
+    return next((a for a in attempts if a["reason"] == "answered"), None)
+
+
+def _sound(data: dict, code: int, fallback: Fallback | None = None, read_answer: bool = True) -> bool:
+    """Whether the chain's result is plainly what was asked for and agrees with its own exit code: a
+    Codex attempt, followed by exactly one attempt of `fallback` when one was given and Codex's reason
+    is one it runs after (and by none otherwise); the result names the attempt that answered, or
+    "none"; a verdict and exit 0 go with an answer and with nothing else. A malformed value raises
+    KeyError or TypeError; the caller counts that as unsound."""
     reviewer, output, parsed, attempts = (data[k] for k in ("reviewer", "output", "parsed", "attempts"))
-    if not (isinstance(attempts, list) and len(attempts) == 1 and isinstance(attempts[0], dict)
-            and all(k in attempts[0] for k in _ATTEMPT_KEYS)):
+    if not (isinstance(attempts, list) and attempts
+            and all(isinstance(a, dict) and all(k in a for k in _ATTEMPT_KEYS) for a in attempts)):
         return False
-    a = attempts[0]
-    answered = reviewer == "codex"
+    if len(attempts) != 1 + (fallback is not None and attempts[0]["reason"] in fallback.when):
+        return False
+    who = [("codex", None)] + ([(fallback.name, fallback.model)] if len(attempts) == 2 else [])
+    for a, (name, model) in zip(attempts, who):
+        if not (a["reviewer"] == name and a["model"] == model
+                and isinstance(a["output"], str) and isinstance(a["stderr_tail"], str)
+                and (a["exit_code"] is None or type(a["exit_code"]) is int)
+                and (a["reason"] == "answered" or a["reason"] in CODEX_FAILURES)):
+            return False
+    won = _answering(attempts)
+    answered = won is not None
     word = None if parsed is None else parsed["word"]
-    return (reviewer in ("codex", "none")
-            and a["reviewer"] == "codex" and a["model"] is None
-            and isinstance(a["output"], str) and isinstance(a["stderr_tail"], str)
-            and (a["exit_code"] is None or type(a["exit_code"]) is int)
-            and (a["reason"] == "answered") == answered
-            and (answered or a["reason"] in CODEX_FAILURES)
+    return (reviewer == (won["reviewer"] if answered else "none")
             and (word in EXIT_FOR_VERDICT) == answered
             and (code == 0) == answered
-            and output == (a["output"] if answered else "")
-            and (not (answered and read_answer) or _follows(word, a["output"])))
+            and output == (won["output"] if answered else "")
+            and (not (answered and read_answer) or _follows(word, won["output"])))
 
 
 def _follows(word: str, output: str) -> bool:
@@ -470,49 +482,60 @@ def _follows(word: str, output: str) -> bool:
     return found is not None and found.word == word
 
 
-def _refused_for_nul(data: dict, code: int) -> bool:
+def _refused_for_nul(data: dict, code: int, fallback: Fallback | None) -> bool:
     """Whether the result is sound in everything but the reading of its answer, and the answer
-    holds a NUL (the one case `_follows` refuses for want of a reading, not for a contradiction)."""
+    (the answering attempt's, Codex's or the fallback's) holds a NUL (the one case `_follows` refuses
+    for want of a reading, not for a contradiction)."""
     try:
-        return "\0" in data["attempts"][0]["output"] and _sound(data, code, read_answer=False)
+        won = _answering(data["attempts"])
+        return won is not None and "\0" in won["output"] and _sound(data, code, fallback, read_answer=False)
     except (ValueError, KeyError, TypeError, AttributeError, IndexError):
         return False
 
 
-def _chain_result(run: _Out) -> dict:
-    """The chain's JSON, once it is plainly a Codex-only result; else _Infra. A child that
-    crashed, was killed or printed something else says nothing about Codex, so it is no outage."""
+def _chain_result(run: _Out, fallback: Fallback | None = None) -> dict:
+    """The chain's JSON, once it is plainly the result asked for (a Codex attempt, then the fallback's
+    when it was due); else _Infra. A child that crashed, was killed or printed something else says
+    nothing about Codex, so it is no outage."""
     if run.timed_out:
         raise _Infra("the chain ran past its time and was stopped")
     if run.code not in (0, 1):
         raise _Infra("the chain exited %s: %s" % (run.code, run.err.strip()[-300:]))
     try:
         data = json.loads(run.out.decode("utf-8"))
-        sound = _sound(data, run.code)
+        sound = _sound(data, run.code, fallback)
     except (ValueError, KeyError, TypeError) as exc:
         raise _Infra("the chain printed no result I can read: %s: %s" % (type(exc).__name__, exc))
     if not sound:
-        if _refused_for_nul(data, run.code):
+        if _refused_for_nul(data, run.code, fallback):
             raise _Refused("the chain's answer holds a NUL: it cannot be read as the chain read it",
                            [{k: a[k] for k in ("reviewer", "reason", "exit_code")} for a in data["attempts"]])
-        raise _Infra("the chain printed a result that is not a consistent Codex-only one")
+        raise _Infra("the chain printed a result that is not a consistent %s one"
+                     % ("Codex-only" if fallback is None else "Codex-then-fallback"))
     return data
 
 
-def _ask_codex(checkout: str, brief: str, codex_timeout: int) -> dict:
+def _ask_codex(checkout: str, brief: str, codex_timeout: int, fallback: Fallback | None = None) -> dict:
     """01's chain in a child process, told `--cwd` the checkout: every reviewer it starts runs
-    standing in that directory (the chain's own option; this was a child cwd before it had one)."""
+    standing in that directory (the chain's own option; this was a child cwd before it had one).
+    With a `fallback` the chain gets all of it (`fallback_flags`: the confinement and the removed
+    variables travel with the name and model) and may wait for it as well; without one it is Codex only."""
+    deadline = codex_timeout + policy.REVIEW_CHAIN_SLACK
+    if fallback is not None:
+        deadline += fallback.timeout
     try:
         with tempfile.TemporaryDirectory(prefix="boss-review-") as tmp:
             prompt = Path(tmp) / "prompt.txt"
             prompt.write_text(brief, encoding="utf-8")
             run = _spawn([sys.executable, str(CHAIN), "--prompt-file", str(prompt), "--words", "GO,NO-GO",
-                          "--match", "token", "--strict", "--no-fallback", "--effort", REVIEW_EFFORT,
+                          "--match", "token", "--strict",
+                          *(["--no-fallback"] if fallback is None else fallback_flags(fallback)),
+                          "--effort", REVIEW_EFFORT,
                           "--codex-timeout", str(codex_timeout), "--cwd", os.path.join(os.getcwd(), checkout)],   # absolute, components kept: abspath would fold link/..
-                         codex_timeout + policy.REVIEW_CHAIN_SLACK)
+                         deadline)
     except OSError as exc:
         raise _Infra("the brief for the chain could not be written: %s" % exc)
-    return _chain_result(run)
+    return _chain_result(run, fallback)
 
 
 # ------------------------------------------------------------------- writing rounds ----
@@ -821,16 +844,67 @@ def findings_block(text: str) -> str:
     return block
 
 
-def comment_body(number: int, author: str, head_sha: str, verdict: str, findings: str = "") -> str:
+class FallbackLabel(NamedTuple):
+    """What the comment of a fallback review says about the fallback and about why Codex was not there:
+    the model id the answering attempt ran with, Codex's reason and, for `error`, its exit code and
+    `stderr_block` (the tail of its stderr, already made safe to publish by `stderr_block`)."""
+    model: str
+    reason: str
+    exit_code: int | None = None
+    stderr: str = ""
+
+
+def stderr_block(tail: str) -> str:
+    """What is published of a Codex stderr tail: an indented code block, built as `findings_block` builds
+    its own (an @mention, link, image or HTML in it is not to be live): the last five non-blank lines,
+    one `redact` call, hiding characters written out, each cut to the length policy gives. A line
+    longer than policy lets be read is not matched, only its length is shown. "" for an empty tail."""
+    lines = [line for line in tail.split("\n") if line.strip()][-5:]
+    whole = [line for line in lines if len(line) <= policy.REVIEW_FINDING_READ]
+    redacted = iter(redact("\n".join(whole)).split("\n") if whole else [])
+    shown = []
+    for line in lines:
+        if len(line) > policy.REVIEW_FINDING_READ:
+            shown.append("    [a line of %d characters, not shown]" % len(line))
+            continue
+        line = _written_out(next(redacted))
+        if len(line) > policy.REVIEW_FINDING_CHARS:
+            line = line[:policy.REVIEW_FINDING_CHARS - 1] + "\u2026"
+        shown.append("    " + line)
+    return "\n".join(shown)
+
+
+FALLBACK_LAST_LINE = "Same model family as the workers, so Codex re-reviews this head before any deploy."
+
+
+def comment_body(number: int, author: str, head_sha: str, verdict: str, findings: str = "", *,
+                 fallback: FallbackLabel | None = None) -> str:
     """The comment: fixed words, the round, a validated name, the head reviewed, the verdict and, when
-    there are findings, `findings_block`'s text after a blank line. Never the raw output."""
-    body = "Codex review %d (run by %s)\nHead: %s\nVerdict: %s" % (number, author, head_sha, verdict)
-    return body + "\n\n" + findings if findings else body
+    there are findings, `findings_block`'s text after a blank line. Never the raw output.
+
+    With `fallback` it is a fallback review, headed so and never "Codex review": the verdict is
+    provisional when it is a GO, Codex's reason follows the findings (for `error` with its exit code and
+    stderr block under `Codex said:`), and the last line says the fallback shares the workers' model
+    family."""
+    if fallback is None:
+        body = "Codex review %d (run by %s)\nHead: %s\nVerdict: %s" % (number, author, head_sha, verdict)
+        return body + "\n\n" + findings if findings else body
+    body = ("Fallback review %d (%s, Codex unavailable: %s; run by %s)\nHead: %s\nVerdict: %s"
+            % (number, fallback.model, fallback.reason, author, head_sha,
+               "provisional GO" if verdict == "GO" else verdict))
+    parts = [body]
+    if findings:
+        parts.append(findings)
+    if fallback.reason == "error":
+        said = "Codex exited with code %s." % fallback.exit_code
+        parts.append(said + (" Codex said:\n\n" + fallback.stderr if fallback.stderr else " It said nothing."))
+    parts.append(FALLBACK_LAST_LINE)
+    return "\n\n".join(parts)
 
 
 def _nothing(exit_code: int) -> ReviewResult:
     """A result with no round: the command ended before it claimed one."""
-    return ReviewResult(exit_code, None, None, None, None)
+    return ReviewResult(exit_code, None, None, None, None, None)
 
 
 def _failed(message: str) -> ReviewResult:
@@ -882,7 +956,8 @@ def _log_refused(job: _Job, attempts: list[dict]) -> None:
         _say("the attempts of the refused answer are not logged: %s" % exc)
 
 
-def _keep_and_post(job: _Job, seen: _Pr, chain: dict, findings: str) -> ReviewResult:
+def _keep_and_post(job: _Job, seen: _Pr, chain: dict, findings: str,
+                   label: FallbackLabel | None = None) -> ReviewResult:
     """Under the PR's lock: look at the PR and the checkout again, claim the next round, keep what
     the review said, post, and make the claimed file the full record."""
     reviews = _reviews_dir()
@@ -902,6 +977,9 @@ def _keep_and_post(job: _Job, seen: _Pr, chain: dict, findings: str) -> ReviewRe
         attempts = [{k: a[k] for k in ("reviewer", "reason", "exit_code", "stderr_tail", "model")}
                     for a in chain["attempts"]]
         verdict = (chain["parsed"] or {}).get("word")
+        kind = "provisional" if len(chain["attempts"]) == 2 else "codex"     # the fallback ran
+        won = _answering(chain["attempts"])
+        model = won["model"] if won else None
         try:
             append_attempts(reviews / "attempts.jsonl",
                             [{"ts": ts, "repo": job.key, "pr": job.pr, "round": number,
@@ -913,25 +991,30 @@ def _keep_and_post(job: _Job, seen: _Pr, chain: dict, findings: str) -> ReviewRe
                 status, exit_code = "head-moved", EXIT_MOVED
             elif verdict is None:
                 status, exit_code = "no-verdict", EXIT_NO_VERDICT
-            elif _post(job, comment_body(number, job.author, seen.head, verdict, findings)):
+            elif _post(job, comment_body(number, job.author, seen.head, verdict, findings, fallback=label)):
                 status, exit_code = "posted", EXIT_FOR_VERDICT[verdict]
             else:
                 status, exit_code = "post-failed", EXIT_INFRA
             replace_record(path, {
                 "repo": job.key, "pr": job.pr, "round": number, "head_sha": seen.head, "base": seen.base,
-                "reviewer": chain["reviewer"], "model": None, "kind": "codex", "verdict": verdict,
+                "reviewer": chain["reviewer"], "model": model, "kind": kind, "verdict": verdict,
                 "status": status, "author": job.author, "ts": ts, "attempts": attempts})
         except OSError as exc:
             _say("round %d is left empty: %s" % (number, exc))
-            return ReviewResult(EXIT_INFRA, number, None, verdict, path)
-        return ReviewResult(exit_code, number, status, verdict, path)
+            return ReviewResult(EXIT_INFRA, number, None, verdict, path, kind)
+        return ReviewResult(exit_code, number, status, verdict, path, kind)
     finally:
         os.close(lock)
 
 
 def review(repo: str, pr: int, checkout: str, author: str, *,
            codex_timeout: int = policy.REVIEW_CODEX_TIMEOUT,
-           io_timeout: int = policy.REVIEW_IO_TIMEOUT) -> ReviewResult:
+           io_timeout: int = policy.REVIEW_IO_TIMEOUT,
+           fallback_timeout: int = policy.REVIEW_FALLBACK_TIMEOUT,
+           allow_fallback: bool = False) -> ReviewResult:
+    """Review one PR head. With `allow_fallback`, a Codex that does not answer (absent, timeout, error)
+    runs the confined fallback and its verdict is recorded as provisional; the command line leaves it
+    off until the track's list of provisional verdicts exists (ticket 06)."""
     key = repo_key(repo)
     check_name(author, "author")
     if type(pr) is not int or pr < 1:
@@ -953,19 +1036,25 @@ def review(repo: str, pr: int, checkout: str, author: str, *,
         if (recheck.head, recheck.base) != (seen.head, seen.base):
             _say("the PR moved while its text was read: nothing reviewed")
             return _nothing(EXIT_MOVED)
+        spec = fallback_spec(timeout=fallback_timeout) if allow_fallback else None
         chain = _ask_codex(checkout, build_brief(seen.head, seen.base, seen.title, seen.body, diff),
-                           codex_timeout)
+                           codex_timeout, spec)
     except _Infra as exc:
         if isinstance(exc, _Refused):
             _log_refused(job, exc.attempts)
         return _failed(str(exc))
-    findings = ""
+    findings, label = "", None
     if chain["parsed"]:
         try:
             findings = findings_block(chain["output"])
+            if len(chain["attempts"]) == 2 and chain["reviewer"] == spec.name:
+                codex = chain["attempts"][0]
+                label = FallbackLabel(chain["attempts"][1]["model"], codex["reason"])
+                if codex["reason"] == "error":
+                    label = label._replace(exit_code=codex["exit_code"], stderr=stderr_block(codex["stderr_tail"]))
         except OSError as exc:
             return _failed("the findings cannot be made safe to publish: %s" % exc)
-    return _keep_and_post(job, seen, chain, findings)
+    return _keep_and_post(job, seen, chain, findings, label)
 
 
 # ------------------------------------------------------------ the fallback, confined ----
@@ -989,7 +1078,7 @@ def fallback_spec(timeout: int = policy.REVIEW_FALLBACK_TIMEOUT) -> Fallback:
     the file tools to the working directory. `--safe-mode` also turns off what is not a settings file:
     the checkout's custom agents, output styles, workflows, skills and CLAUDE.md. `env_unset` keeps the
     variables that name plugins, settings or launchers out of the child. It runs when Codex is absent, hangs or fails, and not after
-    a Codex answer that has no verdict. Not yet run by review(): ticket 08 does that."""
+    a Codex answer that has no verdict. review(allow_fallback=True) runs it (the command line does not yet)."""
     return Fallback("opus", policy.REVIEW_FALLBACK_MODEL, timeout=timeout,
                     when=("absent", "timeout", "error"), env_unset=policy.REVIEW_FALLBACK_ENV_UNSET,
                     extra_args=("--tools", ",".join(policy.REVIEW_FALLBACK_TOOLS),

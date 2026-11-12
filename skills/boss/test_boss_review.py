@@ -308,8 +308,8 @@ class NoGoAndNoVerdict(Base):
                 self.assertEqual(self.comments(), [])
 
 
-REFUSED = br.ReviewResult(2, None, None, None, None)
-INFRA = br.ReviewResult(7, None, None, None, None)
+REFUSED = br.ReviewResult(2, None, None, None, None, None)
+INFRA = br.ReviewResult(7, None, None, None, None, None)
 
 
 class Refused(Base):
@@ -839,21 +839,26 @@ class Contract(Base):
     def test_the_signature_later_callers_extend_with_keyword_only_parameters(self):
         sig = inspect.signature(br.review)
         self.assertEqual(list(sig.parameters),
-                         ["repo", "pr", "checkout", "author", "codex_timeout", "io_timeout"])
+                         ["repo", "pr", "checkout", "author", "codex_timeout", "io_timeout",
+                          "fallback_timeout", "allow_fallback"])
         self.assertEqual([p.kind.name for p in sig.parameters.values()],
-                         ["POSITIONAL_OR_KEYWORD"] * 4 + ["KEYWORD_ONLY"] * 2)
-        self.assertEqual((sig.parameters["codex_timeout"].default, sig.parameters["io_timeout"].default),
-                         (policy.REVIEW_CODEX_TIMEOUT, policy.REVIEW_IO_TIMEOUT))
+                         ["POSITIONAL_OR_KEYWORD"] * 4 + ["KEYWORD_ONLY"] * 4)
+        self.assertEqual((sig.parameters["codex_timeout"].default, sig.parameters["io_timeout"].default,
+                          sig.parameters["fallback_timeout"].default, sig.parameters["allow_fallback"].default),
+                         (policy.REVIEW_CODEX_TIMEOUT, policy.REVIEW_IO_TIMEOUT,
+                          policy.REVIEW_FALLBACK_TIMEOUT, False))
 
     def test_the_review_waits_are_in_policy_with_their_values(self):
         self.assertEqual((policy.REVIEW_CODEX_TIMEOUT, policy.REVIEW_FALLBACK_TIMEOUT,
                           policy.REVIEW_IO_TIMEOUT), (600, 600, 60))
         self.assertEqual(policy.REVIEW_CHAIN_SLACK, 30)
 
-    def test_a_result_is_a_frozen_value_with_the_five_fields_in_order(self):
+    def test_a_result_is_a_frozen_value_with_the_six_fields_in_order(self):
         result = br.ReviewResult(0, 1, "posted", "GO", Path("x"))
         self.assertEqual([f.name for f in dataclasses.fields(result)],
-                         ["exit_code", "round", "status", "verdict", "record"])
+                         ["exit_code", "round", "status", "verdict", "record", "kind"])
+        self.assertEqual(result.kind, "codex")
+        self.assertIsNone(br.ReviewResult(7, None, None, None, None, None).kind)
         with self.assertRaises(dataclasses.FrozenInstanceError):
             result.exit_code = 3
 

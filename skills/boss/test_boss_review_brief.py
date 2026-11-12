@@ -431,8 +431,11 @@ class CommentText(unittest.TestCase):
     def test_the_signature_takes_the_block_last_and_defaults_to_none(self):
         import inspect
         sig = inspect.signature(br.comment_body)
-        self.assertEqual(list(sig.parameters), ["number", "author", "head_sha", "verdict", "findings"])
+        self.assertEqual(list(sig.parameters), ["number", "author", "head_sha", "verdict", "findings", "fallback"])
+        self.assertEqual([p.kind.name for p in sig.parameters.values()],
+                         ["POSITIONAL_OR_KEYWORD"] * 5 + ["KEYWORD_ONLY"])
         self.assertEqual(sig.parameters["findings"].default, "")
+        self.assertIsNone(sig.parameters["fallback"].default)
 
     def test_without_findings_it_is_the_three_lines_of_02_and_nothing_after_them(self):
         self.assertEqual(br.comment_body(3, "worker-a", "a" * 40, "GO"),
@@ -670,7 +673,7 @@ class ReviewBrief(base.Base):
                 self.setUp_clean()
                 self.codex(answer="VERDICT: GO")
                 self.gh.configure(view=[{}, {"patch": patch}])
-                self.assertEqual(self.review(), br.ReviewResult(6, None, None, None, None))
+                self.assertEqual(self.review(), br.ReviewResult(6, None, None, None, None, None))
                 self.assertEqual(self.sb.calls_of("codex"), [])
                 self.assertEqual(self.comments(), [])
                 self.assertFalse(self.reviews.exists())
@@ -801,13 +804,11 @@ class SkillText(unittest.TestCase):
         self.assertIn("codex exec -s read-only", paragraph)
         self.assertIn("VERIFIED or NOT FOUND", paragraph)
 
-    def test_the_two_absolute_merge_sentences_are_untouched_for_08_to_replace(self):
+    def test_the_two_absolute_merge_sentences_are_replaced_by_one_rule(self):
         paragraph = self.paragraph()
-        msg1 = ("Every plan gets a Codex review before a worker builds from it, and every PR "
-                "gets a Codex review on the head that merges, before you merge it.")
-        self.assertIn(msg1, paragraph)
-        msg2 = "No PR merges without a GO on record; no plan is dispatched from without one."
-        self.assertIn(msg2, paragraph)
+        self.assertNotIn("every PR gets a Codex review on the head that merges", paragraph)
+        self.assertNotIn("No PR merges without a GO on record", paragraph)
+        self.assertIn("no plan is dispatched from without a Codex GO", paragraph)      # the plan half stays
 
     def test_the_rules_that_still_hold_are_still_there(self):
         paragraph = self.paragraph()
