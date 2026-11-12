@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Codex health is derived from the attempts log (ticket 05b).** `skills/boss/codex_health.py` reads `pm/reviews/attempts.jsonl` in one scan and says `down` after `policy.CODEX_DOWN_AFTER` (3) failed Codex attempts in a row, `up` again after `policy.CODEX_UP_AFTER` (2) answered ones. It stores no counter and writes nothing; the blocker that uses it is ticket 05c.
 - **A Done when line names its local tickets as `<feature>/<NN>`, or a range `<feature>/<NN> to <MM>`.** SKILL.md,
   `references/objective.md` and the hand-to-boss brief template say so. FleetView (agentview PR 33) shows each Done when
   line as a row on the track's card, worked on, waiting, planned or done, and finds the line's tickets by that name

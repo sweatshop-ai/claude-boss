@@ -86,6 +86,8 @@ QUOTES = {
         "the\nteam is under %d" % policy.BOSS_SPAN,
         "Already %d workers" % policy.BOSS_SPAN,
         "start with %d background\n   subagents, at most %d" % (policy.BURST_START, policy.BURST_MAX),
+        "Codex counts as down after %d failed attempts in a row" % policy.CODEX_DOWN_AFTER,
+        "as back after %d answered ones in a row" % policy.CODEX_UP_AFTER,
     ],
     "skills/team/SKILL.md": [
         "**above ~%s of context or ~%s cost-units per turn**" % (k(policy.WORKER_SPLIT), k(policy.COST_RECYCLE)),
