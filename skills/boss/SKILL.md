@@ -618,7 +618,7 @@ disk: do it, log it, tell them. Before the change, check that the evidence suppo
 Codex review before a worker builds from it, and every PR head is reviewed before it merges. The PR is the unit, not the commit: a commit is
 too small to judge and a merge is too late. The routine, run by the worker who wrote
 the thing. For a PR head it is one command, run from the checkout of that head:
-`python3 ${CLAUDE_PLUGIN_ROOT}/skills/boss/boss_review.py --repo OWNER/REPO --pr N --checkout DIR --author NAME`.
+`python3 ${CLAUDE_PLUGIN_ROOT}/skills/boss/boss_review.py --repo OWNER/REPO --pr N --checkout DIR --author NAME --track T`.
 It asks Codex, at high effort and read-only, with the PR's own text fenced as data,
 keeps the full answer in the private round record, and posts "Codex review N (run by
 <name>)" itself, with the head, the verdict and the findings (redacted and cut to a
@@ -628,12 +628,9 @@ infrastructure. Codex counts as down after 3 failed attempts in a row (`absent`,
 all repos together) and as back after 2 answered ones in a row (`codex_health.py` reads the attempts log).
 Pass `--track T` (the track from your dispatch header) and the same command raises a `Codex down` blocker in `pm/T.md` after the 3rd failure, with a ladder marker and a `boss-alert 0`, and clears it after the 2nd answer (`codex_blocker.py`); without it nothing is written to a tracker.
 A plan is reviewed by hand: `codex exec -s read-only ... < /dev/null`,
-briefed to read and not execute, output checked in the first minute. On a usage limit or an outage, the same turn runs the labelled
-fallback review (Opus, read-only), with the reset time Codex gave in the review file's header; the
-review is never held for that time, and no wakeup or loop is scheduled for it. `boss_review.py` does not run that
-fallback from its command line yet (it ends 4, or 7 on an infrastructure failure, when Codex does not answer), so you run the Opus review by hand beside
-it, under the exact heading "Fallback review N (Opus, Codex unavailable: <reason>; run by <name>)"; ticket 06 makes it
-automatic and removes this sentence. Posted on the PR
+briefed to read and not execute, output checked in the first minute. On a usage limit or an outage, a plan's review is the labelled fallback review (Opus, read-only), run
+the same turn, with the reset time Codex gave in the review file's header; the
+review is never held for that time, and no wakeup or loop is scheduled for it. A PR head's fallback review is never run by hand: with `--track T` the command runs it itself when Codex does not answer, lists the provisional GO in `pm/T.md` before it posts, and prints "Fallback review N"; without a usable track the PR waits for Codex, or for the owner's choice, when Codex does not answer (exit 4 or 7). Posted on the PR
 (or the plan's PR) as "Codex review N (run by <name>)" for a Codex answer and as "Fallback review N
 (<model id>, Codex unavailable: <reason>; run by <name>)" for the fallback, never the second under the
 first's heading, with every citation marked VERIFIED or NOT FOUND; the

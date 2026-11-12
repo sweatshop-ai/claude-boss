@@ -18,9 +18,9 @@ def flat() -> str:
 class CodexUsageLimit(unittest.TestCase):
     """Ticket 12: a usage limit or an outage means the fallback review now, not a wait."""
 
-    SENTENCE = ("On a usage limit or an outage, the same turn runs the labelled fallback review (Opus, "
-                "read-only), with the reset time Codex gave in the review file's header; the review is "
-                "never held for that time, and no wakeup or loop is scheduled for it.")
+    SENTENCE = ("On a usage limit or an outage, a plan's review is the labelled fallback review (Opus, "
+                "read-only), run the same turn, with the reset time Codex gave in the review file's header; "
+                "the review is never held for that time, and no wakeup or loop is scheduled for it.")
 
     def test_the_fallback_sentence_appears_exactly_once(self):
         self.assertEqual(flat().count(self.SENTENCE), 1)
@@ -35,6 +35,24 @@ class CodexUsageLimit(unittest.TestCase):
         text = flat()
         self.assertEqual(text.count('"Fallback review N (<model id>, Codex unavailable: <reason>; run by <name>)"'), 1)
         self.assertEqual(text.count('"Codex review N (run by <name>)" for a Codex answer'), 1)
+
+    def test_a_pr_heads_fallback_is_never_run_by_hand_and_the_command_runs_it_with_a_track(self):
+        """Ticket 06a: `boss_review.py --track T` runs the fallback itself, so the by-hand sentence is gone."""
+        text = flat()
+        self.assertNotIn("does not run that fallback from its command line yet", text)
+        self.assertNotIn("so you run the Opus review by hand beside it", text)
+        self.assertNotIn("ticket 06 makes it automatic and removes this sentence", text)
+        self.assertEqual(text.count(self.NO_HAND), 1)
+        self.assertLess(text.index(self.SENTENCE), text.index(self.NO_HAND))
+        self.assertLess(text.index(self.NO_HAND), text.index("How many rounds"))
+
+    def test_the_command_shown_for_a_pr_head_carries_the_track(self):
+        self.assertEqual(flat().count("--author NAME --track T`."), 1)
+
+    NO_HAND = ("A PR head's fallback review is never run by hand: with `--track T` the command runs it itself "
+               "when Codex does not answer, lists the provisional GO in `pm/T.md` before it posts, and prints "
+               "\"Fallback review N\"; without a usable track the PR waits for Codex, or for the owner's choice, "
+               "when Codex does not answer (exit 4 or 7).")
 
     def test_no_line_tells_anyone_to_wait_for_the_reset(self):
         found = re.findall(r"\b(?:wait(?:s|ing)?|hold(?:s|ing)?|sleep(?:s|ing)?)\s+(?:for|until|till)\s+(?:the|its|a)?\s*"
