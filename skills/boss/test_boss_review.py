@@ -1008,6 +1008,7 @@ class ChainChild(Base):
         self.assertEqual(argv[argv.index("--effort") + 1], br.REVIEW_EFFORT)
         self.assertIn("--strict", argv)
         self.assertIn("--no-fallback", argv)
+        self.assertEqual(argv[argv.index("--cwd") + 1], str(self.checkout))
         self.assertFalse([a for a in argv if a.startswith("--fallback-")])
 
 

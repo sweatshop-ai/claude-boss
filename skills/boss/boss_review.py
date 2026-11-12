@@ -11,7 +11,7 @@ Exit codes (5 belongs to a later ticket and is never used here):
     6 the PR's head or base (or the checkout's head) moved during the review: nothing posted
     7 infrastructure: gh, the chain or a write failed
 
-The order: read the PR, ask Codex (01's chain, Codex only, in a child process started in the
+The order: read the PR, ask Codex (01's chain, Codex only, in a child process told `--cwd` the
 checkout), then under the PR's lock read the PR again, claim the next round, append the attempts,
 write the answer, post, and replace the claimed file by the full record. A failure before the
 claim leaves nothing; one after it leaves the claimed file empty. Rounds live under
@@ -382,16 +382,16 @@ def _chain_result(run: _Out) -> dict:
 
 
 def _ask_codex(checkout: str, head: str, base: str, codex_timeout: int) -> dict:
-    """01's chain in a child process whose working directory is the checkout, so every reviewer
-    it starts inherits that directory (`run_chain` has no parameter for one)."""
+    """01's chain in a child process, told `--cwd` the checkout: every reviewer it starts runs
+    standing in that directory (the chain's own option; this was a child cwd before it had one)."""
     try:
         with tempfile.TemporaryDirectory(prefix="boss-review-") as tmp:
             prompt = Path(tmp) / "prompt.txt"
             prompt.write_text(build_brief(head, base), encoding="utf-8")
             run = _spawn([sys.executable, str(CHAIN), "--prompt-file", str(prompt), "--words", "GO,NO-GO",
                           "--match", "token", "--strict", "--no-fallback", "--effort", REVIEW_EFFORT,
-                          "--codex-timeout", str(codex_timeout)],
-                         codex_timeout + policy.REVIEW_CHAIN_SLACK, cwd=checkout)
+                          "--codex-timeout", str(codex_timeout), "--cwd", checkout],
+                         codex_timeout + policy.REVIEW_CHAIN_SLACK)
     except OSError as exc:
         raise _Infra("the brief for the chain could not be written: %s" % exc)
     return _chain_result(run)
