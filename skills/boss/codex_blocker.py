@@ -15,6 +15,14 @@ and has no cleared=; a line that holds such an id but whose marker is unreadable
 open too (never a second blocker beside it) unless its text holds ` cleared=`. `clear` is posted only when
 the write was `done` and no open or broken `cd` line is left.
 
+A blocker the owner closed by hand holds: with no open `cd` line, a raise also needs `last_ts` (the newest
+failure's `ts`) to be absent or at or after the minute start of the newest `cleared=` on a readable `cd` line
+in the section, so a `noverdict`, or a run that logged nothing, does not bring it back. This is an
+approximation: attempts.jsonl is ordered by file position, not by `ts`, so a writer that appended a failure
+whose `ts` was taken before the clear can be read as old, and that failure does not raise. A `cleared=`
+more than CLEAR_SLACK seconds after `now` (a local time read as UTC, a mistyped month) is ignored as
+invalid, said on stderr, and holds nothing. Deleting the line from the tracker leaves nothing to compare.
+
 Failures (a missing tracker, a failed update, a failed alert) go to stderr and raise nothing.
 """
 from __future__ import annotations
@@ -35,6 +43,7 @@ import tracker
 
 ALERT_TIMEOUT = 20      # seconds, as the ladder's post
 LOCK_WAIT = 20.0
+CLEAR_SLACK = 60        # seconds a cleared= may lie after `now` before it is taken as a typo
 ID_RE = re.compile(r"^cd[0-9]{12}$")
 CD_IN_TEXT = re.compile(r"id=cd[0-9]{12}")
 ASK = "Codex is down: choose wait, accept the fallback review, or merge on tests alone"
@@ -88,6 +97,32 @@ def _classify(lines: list[str]):
     return opened, broken
 
 
+def _newest_clear(lines: list[str], now: datetime, name: str) -> datetime | None:
+    """Minute start of the newest usable `cleared=` on a readable `cd` line in the Open blockers body.
+    One later than now + CLEAR_SLACK is ignored and said on stderr."""
+    lo, hi = tracker.blockers_range(lines)
+    newest = None
+    for i in range(lo, hi):
+        line = lines[i]
+        if not tracker.has_marker(line) or not CD_IN_TEXT.search(line):
+            continue
+        try:
+            found = tracker.scan_marker(line)
+            m = tracker.validate(found[1]) if found else None
+        except tracker.MarkerError:
+            continue
+        if m is None or not ID_RE.match(m["id"]) or not m["cleared"]:
+            continue
+        at = tracker.parse_ts(m["cleared"], "cleared")
+        if at > now + timedelta(seconds=CLEAR_SLACK):
+            _say("%s:%d has cleared=%s, later than now; ignored as invalid" % (name, i + 1, m["cleared"]))
+            continue
+        at = at.replace(second=0, microsecond=0)
+        if newest is None or at > newest:
+            newest = at
+    return newest
+
+
 def _new_id(text: str, now: datetime) -> tuple[str, datetime]:
     while True:
         id_ = "cd" + now.strftime("%y%m%d%H%M%S")
@@ -125,6 +160,9 @@ def sync(track: str, now: datetime | None = None, health_path=None) -> None:
             _say("%s:%d holds a Codex down marker that cannot be read (%s); the ladder reports it" % (path.name, i + 1, why))
         if h["state"] == "down" and h["failures"] >= policy.CODEX_DOWN_AFTER:
             if opened or broken:
+                return None
+            clear = _newest_clear(lines, now, path.name)
+            if clear is not None and h["last_ts"] is not None and h["last_ts"] < clear:
                 return None
             id_, at = _new_id(text, now)
             repo = UNSAFE.sub("?", str(h["last_repo"]))

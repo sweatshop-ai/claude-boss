@@ -33,10 +33,11 @@ NOW = datetime(2026, 11, 12, 10, 30, 15, tzinfo=timezone(timedelta(hours=1)))
 F, OK, NV = "timeout", "answered", "noverdict"
 TRACKER = "# t\n\n## Open blockers\n\n## Notes\nprose with id=cd000000000000 outside the section\n"
 CD = re.compile(r"id=cd[0-9]{12}")
+LATER = (NOW + timedelta(seconds=20)).isoformat()     # a failure logged after clear_by_hand (which clears at NOW)
 
 
-def entry(reason, repo="o/r", pr=1, reviewer="codex"):
-    return {"ts": "2026-11-12T10:00:00+01:00", "repo": repo, "pr": pr, "round": 1, "reviewer": reviewer,
+def entry(reason, repo="o/r", pr=1, reviewer="codex", ts="2026-11-12T10:00:00+01:00"):
+    return {"ts": ts, "repo": repo, "pr": pr, "round": 1, "reviewer": reviewer,
             "reason": reason, "exit_code": 0}
 
 
@@ -61,7 +62,7 @@ class Base(unittest.TestCase):
         self.sb.guard()
         self.assertEqual(os.environ["BOSS_ALERT"], str(self.alert), "BOSS_ALERT must be the stub")
 
-    def add(self, *reasons, **kw):
+    def add(self, *reasons, **kw):            # ts=<ISO string> dates the lines; the default is before NOW
         with open(self.log, "a", encoding="utf-8") as fh:
             for r in reasons:
                 fh.write(json.dumps(entry(r, **kw)) + "\n")
@@ -148,6 +149,7 @@ class Raise(Base):
         self.add(F, F, F)
         self.sync()
         self.clear_by_hand()
+        self.add(F, ts=LATER)
         self.sync(NOW + timedelta(seconds=20))
         ids = [CD.search(ln).group() for ln in self.cd_lines()]
         self.assertEqual(len(set(ids)), 2, ids)
@@ -157,16 +159,10 @@ class Raise(Base):
         self.add(F, F, F)
         self.sync()
         self.clear_by_hand()
+        self.add(F, ts=LATER)
         self.sync()
         ids = [CD.search(ln).group() for ln in self.cd_lines()]
         self.assertEqual(ids, ["id=cd261112103015", "id=cd261112103016"])
-
-    def test_an_id_on_a_cleared_line_is_never_reused(self):
-        self.add(F, F, F)
-        self.sync()
-        self.clear_by_hand()
-        self.sync(NOW)
-        self.assertEqual(len({CD.search(ln).group() for ln in self.cd_lines()}), 2)
 
     def test_prose_outside_the_blockers_section_does_not_hold_back_a_raise(self):
         # prose under ## Notes names the id the raise would take: the id is still never shared, so the next second
@@ -263,6 +259,131 @@ class Raise(Base):
             with self.assertRaises(ValueError):
                 codex_blocker.sync(bad, now=NOW)
         self.assertIn("no blocker can be raised", self.sync(track="nosuch"))
+
+
+class HandClear(Base):
+    """09a: a blocker the owner closed by hand holds until a failure with a later ts is logged."""
+
+    def cleared(self, **kw):
+        """Down, raised at NOW, then cleared by hand at NOW (10:30); the log holds three failures at 10:00."""
+        self.add(F, F, F)
+        self.sync()
+        self.clear_by_hand()
+        self.assertEqual(len(self.alerts("0")), 1)
+
+    def set_cleared(self, value):
+        self.path.write_text(re.sub(r" cleared=\S+", " cleared=" + value, self.text()), encoding="utf-8")
+
+    def test_the_same_log_after_a_hand_clear_raises_nothing(self):
+        self.cleared()
+        before = self.text()
+        err = self.sync(NOW + timedelta(hours=1))
+        self.assertEqual((self.text(), len(self.alerts()), err), (before, 1, ""))
+
+    def test_a_noverdict_after_the_clear_raises_nothing(self):
+        self.cleared()
+        self.add(NV, ts=LATER)
+        self.sync(NOW + timedelta(hours=1))
+        self.assertEqual((len(self.cd_lines()), len(self.alerts())), (1, 1))
+
+    def test_one_more_failure_with_a_later_ts_raises_a_new_line_and_one_alert(self):
+        self.cleared()
+        self.add(F, ts=LATER)
+        self.sync(NOW + timedelta(minutes=1))
+        self.assertEqual(len(self.cd_lines()), 2)
+        self.assertEqual(len(self.alerts("0")), 2)
+        self.assertEqual(len({CD.search(ln).group() for ln in self.cd_lines()}), 2)
+
+    def test_a_failure_in_the_clears_minute_counts_as_new(self):
+        for at in ("2026-11-12T10:30:00+01:00", "2026-11-12T10:30:05+01:00"):    # HH:MM:00 and later in the minute
+            with self.subTest(at=at):
+                self.setUp()
+                self.cleared()
+                self.add(F, ts=at)
+                self.sync(NOW + timedelta(minutes=1))
+                self.assertEqual(len(self.alerts("0")), 2)
+
+    def test_a_failure_in_the_minute_before_the_clear_does_not(self):
+        self.cleared()
+        self.add(F, ts="2026-11-12T10:29:59+01:00")
+        self.sync(NOW + timedelta(minutes=1))
+        self.assertEqual(len(self.alerts()), 1)
+
+    def test_a_ts_in_another_offset_is_compared_as_an_instant(self):
+        self.cleared()
+        self.add(F, ts="2026-11-12T09:31:00Z")                   # 10:31+01:00, after the 10:30+01:00 clear
+        self.sync(NOW + timedelta(minutes=2))
+        self.assertEqual(len(self.alerts("0")), 2)
+
+    def test_the_line_deleted_raises_again(self):
+        self.cleared()
+        self.path.write_text(TRACKER, encoding="utf-8")
+        self.sync(NOW + timedelta(hours=1))
+        self.assertEqual((len(self.cd_lines()), len(self.alerts("0"))), (1, 2))
+
+    def test_an_up_syncs_clear_is_a_clear_and_three_later_failures_raise(self):
+        self.add(F, F, F)
+        self.sync()
+        self.add(OK, OK, ts="2026-11-12T10:31:00+01:00")
+        self.sync(NOW + timedelta(minutes=2))
+        self.assertEqual(len(self.alerts("clear")), 1)
+        self.add(F, F, F, ts="2026-11-12T10:40:00+01:00")
+        self.sync(NOW + timedelta(minutes=12))
+        self.assertEqual((len(self.cd_lines()), len(self.alerts("0"))), (2, 2))
+
+    def test_an_unreadable_or_empty_cleared_does_not_hold(self):
+        for value in ("", "yesterday", "2026-11-12T10:30"):         # empty, not ISO, no offset
+            with self.subTest(value=value):
+                self.setUp()
+                self.add(F, F, F)
+                self.sync()
+                self.clear_by_hand()
+                self.set_cleared(value)
+                self.sync(NOW + timedelta(hours=1))
+                # an empty value reads as open (no second line); the others are broken lines closed by hand
+                self.assertEqual(len(self.alerts("0")), 1 if value == "" else 2, self.text())
+
+    def test_a_last_ts_of_none_raises(self):
+        self.cleared()
+        real = codex_health.health
+
+        def no_ts(path=None):
+            return dict(real(path), last_ts=None)
+
+        with mock.patch.object(codex_health, "health", no_ts):
+            self.sync(NOW + timedelta(hours=1))
+        self.assertEqual(len(self.alerts("0")), 2)
+
+    def test_a_cleared_an_hour_ahead_is_ignored_with_a_note_on_stderr(self):
+        self.cleared()
+        self.set_cleared("2026-11-12T11:30+01:00")                  # last failure 10:00, now 10:30
+        err = self.sync(NOW)
+        self.assertEqual(len(self.alerts("0")), 2)
+        self.assertIn("cleared=2026-11-12T11:30+01:00", err)
+        self.assertIn("ignored", err)
+
+    def test_a_clear_at_now_plus_60_s_holds_and_one_at_61_s_does_not(self):
+        for second, value, raises in ((0, "2026-11-12T10:31+01:00", 1), (59, "2026-11-12T10:32+01:00", 2)):
+            now = datetime(2026, 11, 12, 10, 30, second, tzinfo=NOW.tzinfo)       # the clear is at now + 60 s, now + 61 s
+            with self.subTest(value=value):
+                self.setUp()
+                self.add(F, F, F, ts="2026-11-12T10:00:00+01:00")
+                self.sync(now)
+                self.clear_by_hand()
+                self.set_cleared(value)
+                err = self.sync(now)
+                self.assertEqual(len(self.alerts("0")), raises, self.text())
+                self.assertEqual("ignored" in err, raises == 2)
+
+    def test_the_newest_of_two_clears_decides(self):
+        self.cleared()
+        self.add(F, ts="2026-11-12T10:25:00+01:00")                 # after the first clear below, before the second
+        older = tracker.render_marker("cd261112080000", NOW, NOW, ask="x")
+        older = tracker.mark_cleared(older, NOW - timedelta(minutes=30))
+        self.path.write_text(self.text().replace("## Open blockers\n", "## Open blockers\n- old %s\n" % older),
+                             encoding="utf-8")
+        self.sync(NOW + timedelta(hours=1))
+        self.assertEqual(len(self.alerts("0")), 1)                  # the 10:30 clear is the newest: 10:25 is old
 
 
 class Clear(Base):

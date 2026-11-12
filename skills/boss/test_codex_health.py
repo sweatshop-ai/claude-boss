@@ -94,6 +94,26 @@ class Streaks(Base):
                         line(F, ts="2026-11-12T11:00:00+01:00"))
         self.assertEqual(h["state"], "down")
 
+    def test_last_ts_is_the_newest_failure_in_file_order(self):
+        from datetime import datetime, timedelta, timezone
+        utc = self.health(line(F, ts="2026-11-12T09:00:00Z"))["last_ts"]
+        self.assertEqual(utc, datetime(2026, 11, 12, 9, 0, tzinfo=timezone.utc))
+        off = self.health(line(F, ts="2026-11-12T10:00:00+01:00"))["last_ts"]
+        self.assertEqual((off, off.utcoffset()), (utc, timedelta(hours=1)))
+        h = self.health(line(F, ts="2026-11-12T12:00:00+01:00"), line(F, ts="2026-11-12T09:00:00+01:00"))
+        self.assertEqual(h["last_ts"].hour, 9)       # the later line in the file wins, not the later ts
+        h = self.health(line(F, ts="2026-11-12T12:00:00+01:00"), line(OK, ts="2026-11-12T13:00:00+01:00"))
+        self.assertEqual(h["last_ts"].hour, 12)      # an answer is no failure: last_* keep the old one
+
+    def test_last_ts_is_none_without_a_usable_ts(self):
+        gone = line(F)
+        del gone["ts"]
+        for bad in (gone, line(F, ts="yesterday"), line(F, ts=12), line(F, ts="2026-11-12T10:00:00")):
+            with self.subTest(bad=bad.get("ts")):
+                h = self.health(bad)
+                self.assertEqual((h["last_ts"], h["last_reason"]), (None, F))
+        self.assertIsNone(self.health(line(OK))["last_ts"])
+
     def test_blocker_text_fields(self):
         h = self.health(line(OK), line(F, repo="a/x", pr=4), line("error", repo="b/y", pr=9))
         self.assertEqual((h["last_repo"], h["last_pr"], h["last_reason"], h["prs"]), ("b/y", 9, "error", 2))
