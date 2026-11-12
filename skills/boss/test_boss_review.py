@@ -238,13 +238,15 @@ class GoPosted(Base):
         self.codex(answer="VERDICT: GO")
         self.review()
         (call,) = self.sb.calls_of("codex")
-        self.assertEqual(Path(call.cwd), self.checkout.resolve())
+        # main's chain hands the directory to Codex as `-C DIR`; the stub does not move there itself
+        self.assertEqual(call.argv[call.argv.index("-C") + 1], str(self.checkout))
         brief = call.argv[-1]
         self.assertEqual(brief, br.build_brief(self.head, "main"))
         for needle in (self.head, "main", "FINDING:", "VERDICT: GO", "VERDICT: NO-GO"):
             self.assertIn(needle, brief)
-        self.assertEqual(call.argv[:6], ["exec", "-s", "read-only", "--skip-git-repo-check", "-c",
-                                         'model_reasoning_effort="%s"' % br.REVIEW_EFFORT])
+        self.assertEqual(call.argv[:7], ["exec", "-s", "read-only", "--skip-git-repo-check", "-C",
+                                         str(self.checkout), "-c"])
+        self.assertEqual(call.argv[7], 'model_reasoning_effort="%s"' % br.REVIEW_EFFORT)
 
 
 RAMBLE = "I would need more context before I can say anything about this."
@@ -476,9 +478,10 @@ class Moved(Base):
         # Codex reviewed whatever the checkout held; the comment must not name a head it did not read.
         who = ("GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.invalid "
                "GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.invalid")
-        self.sb.stub_script("codex", who + ''' git commit -q --allow-empty -m moved
-prev=""; dest=""
-for a in "$@"; do [ "$prev" = "-o" ] && dest=$a; prev=$a; done
+        self.sb.stub_script("codex", '''prev=""; dest=""; dir=""
+for a in "$@"; do [ "$prev" = "-o" ] && dest=$a; [ "$prev" = "-C" ] && dir=$a; prev=$a; done
+cd "$dir" || exit 9
+''' + who + ''' git commit -q --allow-empty -m moved
 printf 'VERDICT: GO\\n' > "$dest"''')
         result = self.review()
         self.assertEqual(result, br.ReviewResult(6, 1, "head-moved", "GO", self.round_file(1)))
