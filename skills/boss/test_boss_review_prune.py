@@ -82,6 +82,16 @@ class RemovalRows(PruneBase):
          [(2, A, "GO", {"kind": "provisional"})], False),
         ("a Codex GO that was never posted", "OPEN", A, line(), [(2, A, "GO", {"status": "post-failed"})], False),
         ("a Codex GO that moved head, never posted", "OPEN", A, line(), [(2, A, "GO", {"status": "head-moved"})], False),
+        # ticket 35: rule 1 clears the entry's own head; a merged PR is cleared by the head it merged at
+        ("provisional GO on A, provisional GO on B (the entry), Codex GO on B, merged at A", "MERGED", A,
+         line(head=B, round=2),
+         [(1, A, "GO", {"kind": "provisional"}), (2, B, "GO", {"kind": "provisional"}), (3, B, "GO")], False),
+        ("the same, then Codex GO on A as well: the merged head is cleared (rule 4)", "MERGED", A,
+         line(head=B, round=2),
+         [(1, A, "GO", {"kind": "provisional"}), (2, B, "GO", {"kind": "provisional"}), (3, B, "GO"),
+          (4, A, "GO")], True),
+        ("the same, but the Codex round on A is a NO-GO", "MERGED", A, line(head=B, round=2),
+         [(2, B, "GO", {"kind": "provisional"}), (3, B, "GO"), (4, A, "NO-GO")], False),
         # finding 16: a later head never removes the entry of a merged PR
         ("a Codex GO on a later head of a merged PR", "MERGED", A, line(), [(2, B, "GO")], False),
         # rule 2
