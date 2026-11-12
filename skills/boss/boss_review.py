@@ -3,6 +3,8 @@
 
     review(repo, pr, checkout, author) -> ReviewResult      the logic
     boss_review.py --repo OWNER/REPO --pr N --checkout DIR --author NAME   the command
+    fallback_spec(timeout=...) -> Fallback       the read-only fallback reviewer (review() does not run it yet)
+    boss_review.py --check-fallback --checkout DIR   run that fallback once and check what it was left with
 
 Exit codes (5 belongs to a later ticket and is never used here):
 
@@ -11,6 +13,10 @@ Exit codes (5 belongs to a later ticket and is never used here):
     6 the PR's head or base (or the checkout's head) moved during the review, or while its text was
       read for the brief (then nothing was claimed): nothing posted
     7 infrastructure: gh, the chain or a write failed
+
+--check-fallback uses 0 (the init event shows the tools, MCP servers and model specified) and 1 (it does
+not, or the call could not be run), and 2 for usage; it posts nothing and reads no PR.
+
 
 The order: read the PR and its diff, read the PR again (it must not have moved), ask Codex (01's
 chain, Codex only, in a child process told `--cwd` the checkout) with a brief that fences the PR's text,
@@ -23,6 +29,7 @@ checkout; the record, not the comment, is what a gate reads. Standard library on
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import fcntl
 import json
 import os
@@ -45,7 +52,8 @@ from typing import NamedTuple
 
 import boss_store
 import policy
-from reviewer_chain import CODEX_FAILURES, GO_NOGO, STDERR_TAIL, TERM_GRACE, _parse, _snapshot, _stop
+from reviewer_chain import (CODEX_FAILURES, GO_NOGO, STDERR_TAIL, TERM_GRACE, Fallback, _parse, _snapshot,
+                            _stop, claude_launch)
 
 HERE = Path(__file__).resolve().parent
 CHAIN = HERE / "reviewer_chain.py"
@@ -54,6 +62,7 @@ REVIEW_EFFORT = "high"     # Codex reasoning effort: a PR review is the gate, no
 
 EXIT_GO, EXIT_USAGE, EXIT_NO_GO, EXIT_NO_VERDICT, EXIT_MOVED, EXIT_INFRA = 0, 2, 3, 4, 6, 7
 EXIT_FOR_VERDICT = {"GO": EXIT_GO, "NO-GO": EXIT_NO_GO}
+EXIT_CHECK_PASSED, EXIT_CHECK_FAILED = 0, 1       # --check-fallback only
 
 
 @dataclass(frozen=True)
@@ -221,21 +230,21 @@ def _stop_below(seen: list[_Seen]) -> None:
             os.close(fd)
 
 
-def _spawn(argv: list[str], timeout: float, cwd: str | None = None) -> _Out:
+def _spawn(argv: list[str], timeout: float, cwd: str | None = None, env: dict | None = None) -> _Out:
     """Run one program with a closed stdin, its output in temporary files, and stop it and
     everything it started, in whatever session, when it outlasts `timeout`. A program that cannot
     be started, or whose output cannot be kept, has no exit code: the caller sees `code` None."""
     try:
         with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
-            return _run_into(argv, timeout, cwd, out, err)
+            return _run_into(argv, timeout, cwd, out, err, env)
     except OSError as exc:
         return _Out(None, b"", str(exc), False)
 
 
-def _run_into(argv: list[str], timeout: float, cwd: str | None, out, err) -> _Out:
+def _run_into(argv: list[str], timeout: float, cwd: str | None, out, err, env: dict | None = None) -> _Out:
     try:
         proc = subprocess.Popen(argv, cwd=cwd, stdin=subprocess.DEVNULL, stdout=out, stderr=err,
-                                start_new_session=True)
+                                start_new_session=True, env=env)
     except OSError as exc:
         return _Out(None, b"", str(exc), False)
     try:
@@ -959,6 +968,146 @@ def review(repo: str, pr: int, checkout: str, author: str, *,
     return _keep_and_post(job, seen, chain, findings)
 
 
+# ------------------------------------------------------------ the fallback, confined ----
+CHECK_PROMPT = "ok"         # one word: the check reads the init event, not the answer
+# `claude -p` refuses stream-json without --verbose; without --include-hook-events the stream shows only
+# the SessionStart hooks (checked with 2.1.311: a UserPromptSubmit or Stop hook ran unseen)
+CHECK_FLAGS = ("--output-format", "stream-json", "--verbose", "--include-hook-events")
+BUILTIN_PLUGIN_PATH = "builtin"     # the `path` claude 2.1.289 gives the plugins that are part of it
+_MISSING = object()
+
+
+def fallback_spec(timeout: int = policy.REVIEW_FALLBACK_TIMEOUT) -> Fallback:
+    """The PR gate's fallback reviewer: `claude` on the policy's model, limited to the built-in tools
+    Read, Grep and Glob, with every MCP server and every slash command off, and any permission it was
+    not given denied rather than asked for. `--tools` alone leaves the MCP tools in (checked with
+    `claude` 2.1.288 and 2.1.289), hence `--strict-mcp-config`. `--restricted` keeps the user, project and
+    local settings files out (managed and remote settings still apply: `env_unset` removes the variables
+    that name them): `claude -p` skips the workspace trust dialog, so without it the checkout's `.claude/settings.json`
+    runs its hooks (a `SessionStart` hook ran a command there, checked with 2.1.289), as do the owner's
+    own hooks and plugins, and the owner's CLAUDE.md and auto-memory reach the model; it also confines
+    the file tools to the working directory. `--safe-mode` also turns off what is not a settings file:
+    the checkout's custom agents, output styles, workflows, skills and CLAUDE.md. `env_unset` keeps the
+    variables that name plugins, settings or launchers out of the child. It runs when Codex is absent, hangs or fails, and not after
+    a Codex answer that has no verdict. Not yet run by review(): ticket 08 does that."""
+    return Fallback("opus", policy.REVIEW_FALLBACK_MODEL, timeout=timeout,
+                    when=("absent", "timeout", "error"), env_unset=policy.REVIEW_FALLBACK_ENV_UNSET,
+                    extra_args=("--tools", ",".join(policy.REVIEW_FALLBACK_TOOLS),
+                                "--strict-mcp-config", "--disable-slash-commands", "--restricted", "--safe-mode",
+                                "--permission-mode", policy.REVIEW_FALLBACK_PERMISSION_MODE))
+
+
+def _describe(value) -> str:
+    return "absent" if value is _MISSING else json.dumps(value)[:200]
+
+
+def _plugin_label(plugin) -> str:
+    return str(plugin.get("name", "?"))[:60] if isinstance(plugin, dict) else repr(plugin)[:60]
+
+
+def init_problems(events: list[dict]) -> list[str]:
+    """Why the events of a fallback run do not show the confinement it was asked for; [] when they do.
+    Fail-closed. No `system` event whose subtype starts `hook_`: a hook started or answered, so a
+    settings file was loaded. Exactly one init event; its `tools` exactly Glob, Grep and Read (a list of
+    strings, each once, in any order); its `mcp_servers` present and an empty list; its `slash_commands`
+    present and an empty list; its `model` the policy's model id, whole; its `permissionMode` the policy's;
+    its `plugins` a list in which each entry is an object whose `path` is "builtin" (what claude 2.1.289
+    reports for the plugins that are part of it; any other path is an installed plugin). That version's
+    init event has no field for hooks, hence the first rule."""
+    hooks = [e for e in events if e.get("type") == "system" and isinstance(e.get("subtype"), str)
+             and e["subtype"].startswith("hook_")]
+    problems = []
+    if hooks:
+        problems.append("the stream holds %d hook event%s: a settings file was loaded and its hooks ran"
+                        % (len(hooks), "" if len(hooks) == 1 else "s"))
+    inits = [e for e in events if e.get("type") == "system" and e.get("subtype") == "init"]
+    if len(inits) != 1:
+        return problems + ["expected exactly one init event, found %d" % len(inits)]
+    init = inits[0]
+    tools = init.get("tools", _MISSING)
+    wanted = sorted(policy.REVIEW_FALLBACK_TOOLS)
+    if not (isinstance(tools, list) and all(isinstance(t, str) for t in tools)):
+        problems.append("the init event's tools are not a list of strings: %s" % _describe(tools))
+    elif sorted(tools) != wanted:
+        problems.append("the init event lists the tools %s, not exactly %s" % (sorted(tools), wanted))
+    servers = init.get("mcp_servers", _MISSING)
+    if servers != []:
+        problems.append("the init event's mcp_servers is %s, not an empty list" % _describe(servers))
+    commands = init.get("slash_commands", _MISSING)
+    if commands != []:
+        problems.append("the init event's slash_commands is %s, not an empty list" % _describe(commands))
+    model = init.get("model", _MISSING)
+    if not isinstance(model, str) or model != policy.REVIEW_FALLBACK_MODEL:
+        problems.append("the init event's model is %s, not %r" % (_describe(model), policy.REVIEW_FALLBACK_MODEL))
+    mode = init.get("permissionMode", _MISSING)
+    if mode != policy.REVIEW_FALLBACK_PERMISSION_MODE:
+        problems.append("the init event's permissionMode is %s, not %r"
+                        % (_describe(mode), policy.REVIEW_FALLBACK_PERMISSION_MODE))
+    plugins = init.get("plugins", _MISSING)
+    if not isinstance(plugins, list):
+        problems.append("the init event's plugins is %s, not a list" % _describe(plugins))
+    else:
+        outside = [_plugin_label(p) for p in plugins
+                   if not (isinstance(p, dict) and p.get("path") == BUILTIN_PLUGIN_PATH)]
+        if outside:
+            problems.append("the init event lists plugins that are not part of claude: %s" % ", ".join(outside))
+    return problems
+
+
+def _events(out: bytes) -> tuple[list[dict], list[str]]:
+    """The events of newline-delimited JSON output, and a problem for each non-blank line that is
+    not a JSON object."""
+    events, problems = [], []
+    for n, line in enumerate(out.decode("utf-8", "replace").split("\n"), 1):
+        if not line.strip():
+            continue
+        try:
+            event = json.loads(line)
+        except (ValueError, RecursionError):
+            event = None
+        if isinstance(event, dict):
+            events.append(event)
+        else:
+            problems.append("line %d of claude's output is not a JSON object" % n)
+    return events, problems
+
+
+def check_fallback(checkout: str, timeout: int = policy.REVIEW_FALLBACK_TIMEOUT) -> list[str]:
+    """Run the fallback call once, from `checkout`, with a one-word prompt in stream-JSON mode, and
+    say why what it printed does not show the confinement it was asked for (`init_problems`); [] means
+    it does. The argv is the one a
+    review sends (`claude_argv` of `fallback_spec`) plus CHECK_FLAGS, so the two cannot drift. A run
+    that is stopped, cannot be started or exits non-zero is not a pass, whatever it printed first."""
+    spec = fallback_spec(timeout)
+    probe = dataclasses.replace(spec, extra_args=spec.extra_args + CHECK_FLAGS)
+    launch = claude_launch(probe, CHECK_PROMPT, checkout)
+    if launch is None:
+        return ["claude could not be started: not found on a PATH without the checkout's entries"]
+    run = _spawn(launch[0], timeout, cwd=checkout, env=launch[1])
+    if run.timed_out:
+        return ["claude ran past %ss and was stopped" % timeout]
+    if run.code is None:
+        return ["claude could not be started: %s" % run.err.strip()[-300:]]
+    events, problems = _events(run.out)
+    problems += init_problems(events)
+    if run.code != 0:
+        problems.append("claude exited %s: %s" % (run.code, run.err.strip()[-300:]))
+    return problems
+
+
+def _check_main(checkout: str) -> int:
+    problems = check_fallback(checkout)
+    for problem in problems:
+        _say("check-fallback: " + problem)
+    if problems:
+        return EXIT_CHECK_FAILED
+    print("fallback check passed: tools %s; permission mode %s; model %s; no MCP servers, no slash "
+          "commands, no hooks, no plugins but claude's own"
+          % (", ".join(sorted(policy.REVIEW_FALLBACK_TOOLS)), policy.REVIEW_FALLBACK_PERMISSION_MODE,
+             policy.REVIEW_FALLBACK_MODEL))
+    return EXIT_CHECK_PASSED
+
+
 def _pr_number(text: str) -> int:
     if not re.fullmatch(r"[0-9]+", text) or int(text) < 1:      # not int(): it takes Arabic-Indic digits too
         raise argparse.ArgumentTypeError("must be a positive integer: %r" % text)
@@ -970,13 +1119,30 @@ def main(argv: list[str] | None = None) -> int:
         prog="boss_review.py",
         description="Review one PR head with Codex and post the verdict. Exit 0: GO posted. 2: usage, "
                     "wrong PR or wrong checkout. 3: NO-GO posted. 4: Codex gave no verdict. 6: the head "
-                    "or base moved. 7: infrastructure failure.")
-    ap.add_argument("--repo", required=True, metavar="OWNER/REPO", help="never inferred from the directory")
-    ap.add_argument("--pr", required=True, type=_pr_number, metavar="N")
-    ap.add_argument("--checkout", required=True, metavar="DIR", help="a checkout standing on the PR head")
-    ap.add_argument("--author", required=True, metavar="NAME",
-                    help="who runs the review, as the comment says")
+                    "or base moved. 7: infrastructure failure. With --check-fallback: 0 the fallback "
+                    "call is confined, 1 it is not, 2 usage.")
+    ap.add_argument("--repo", metavar="OWNER/REPO", help="never inferred from the directory")
+    ap.add_argument("--pr", type=_pr_number, metavar="N")
+    ap.add_argument("--checkout", metavar="DIR",
+                    help="a checkout standing on the PR head (with --check-fallback: where the fallback runs)")
+    ap.add_argument("--author", metavar="NAME", help="who runs the review, as the comment says")
+    ap.add_argument("--check-fallback", action="store_true",
+                    help="instead of a review: run the read-only fallback once, in --checkout, and check "
+                         "its init event (one real, one-word call; takes no --repo, --pr or --author)")
     args = ap.parse_args(argv)
+    given = {"--repo": args.repo, "--pr": args.pr, "--checkout": args.checkout, "--author": args.author}
+    if args.check_fallback:
+        refused = [flag for flag in ("--repo", "--pr", "--author") if given[flag] is not None]
+        if refused:
+            ap.error("--check-fallback does not take %s" % ", ".join(refused))
+        if args.checkout is None:
+            ap.error("--check-fallback needs --checkout")
+        if not os.path.isdir(args.checkout):
+            ap.error("checkout is not a directory: %r" % (args.checkout,))
+        return _check_main(args.checkout)
+    missing = [flag for flag, value in given.items() if value is None]
+    if missing:
+        ap.error("the following arguments are required: %s" % ", ".join(missing))
     try:
         result = review(args.repo, args.pr, args.checkout, args.author)
     except ValueError as exc:

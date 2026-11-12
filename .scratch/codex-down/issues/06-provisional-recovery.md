@@ -4,7 +4,7 @@
 
 **Scope:** new on 2026-10-04, split out of the original ticket 04 at the boss's request, after Codex review 1 of the plan and the owner-accepted premortem (R19, R25); split again after Codex review 3 (findings 5, 16, 23) into 06 (the list) and 10 (the recheck and the release stop). The gate that refuses provisional and waived GOs on deploying branches is 04. **Why this ticket does not wait for 04:** it needs 08's provisional records and `kind` field, and 05a's `tracker.update` with its return contract, and it reads and writes nothing that `boss_merge.py` owns.
 
-**Blocked by:** 05a (The tracker writer), 05c (A dead reviewer becomes an open blocker: the box that gives `review()` its `track` parameter and defines a usable track), 08 (The fallback review, labelled and provisional)
+**Blocked by:** 05a (The tracker writer), 05c (A dead reviewer becomes an open blocker: the box that gives `review()` its `track` parameter and defines a usable track), 08 (The fallback review, labelled and provisional), 14 (claude_launch hardening: the fallback does not go live before it)
 
 **Status:** ready-for-agent
 

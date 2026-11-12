@@ -6,6 +6,8 @@ One place decides which reviewer answers, so `boss-run`, `boss-goal review` and
 
     run_chain(prompt, words=..., fallback=OPUS) -> Result
     run_chain(prompt, lines=Shape("RISK", min=8), fallback=FABLE) -> Result
+    claude_argv(fallback, prompt) -> argv        the fallback's `claude` call, built in this one place
+    fallback_flags(fallback) -> flags            the command-line flags that rebuild a Fallback
 
 What makes an answer usable is one of two rules: a `VERDICT:` line in `words`, or
 `lines.min` lines under `lines.label`. The fallbacks a caller names by preset
@@ -77,6 +79,8 @@ class Fallback:
     timeout: int | None = None     # None: twice the Codex timeout, as every caller gave it
     allowed_tools: tuple[str, ...] | None = None
     when: tuple[str, ...] = ("absent", "timeout", "error", "noverdict")
+    extra_args: tuple[str, ...] = ()     # more `claude` flags, put ahead of `-p` (see claude_argv)
+    env_unset: tuple[str, ...] = ()      # environment variables the `claude` child does not inherit
 
     def __post_init__(self):
         if not self.name.strip() or self.name.strip().lower() in RESERVED_NAMES:
@@ -84,6 +88,14 @@ class Fallback:
                              % (self.name, " and ".join(sorted(RESERVED_NAMES))))
         if self.allowed_tools is not None and not self.allowed_tools:
             raise ValueError("allowed_tools=() would read as no restriction; use None for that")
+        if not isinstance(self.extra_args, tuple) or not all(isinstance(a, str) for a in self.extra_args):
+            raise ValueError("extra_args must be a tuple of strings: %r" % (self.extra_args,))
+        if (not isinstance(self.env_unset, tuple) or not all(isinstance(n, str) and n and n == n.strip()
+                                                             and "=" not in n and "," not in n for n in self.env_unset)):
+            raise ValueError("env_unset must be a tuple of variable names, without = , or surrounding space: %r"
+                             % (self.env_unset,))
+        if "--" in self.extra_args:
+            raise ValueError("extra_args cannot hold a bare --: it would end option parsing before -p")
         unknown = set(self.when) - CODEX_FAILURES
         if unknown:
             raise ValueError("when names reasons Codex cannot fail with: %s" % sorted(unknown))
@@ -282,7 +294,8 @@ def _read(f, tail: int | None = None) -> str:
     return _snapshot(f, tail).decode("utf-8", "replace")
 
 
-def _run(argv: list[str], timeout: int, keep_stdout: bool = True, cwd: str | None = None) -> _Run:
+def _run(argv: list[str], timeout: int, keep_stdout: bool = True, cwd: str | None = None,
+         env: dict[str, str] | None = None) -> _Run:
     """Run one reviewer with a closed stdin.
 
     Its output goes to anonymous temporary files, not pipes, so the wait is on the
@@ -296,7 +309,7 @@ def _run(argv: list[str], timeout: int, keep_stdout: bool = True, cwd: str | Non
             (tempfile.TemporaryFile() if keep_stdout else open(os.devnull, "wb")) as out:
         try:
             proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=out, stderr=err,
-                                    start_new_session=True, cwd=cwd)
+                                    start_new_session=True, cwd=cwd, env=env)
         except OSError as exc:
             return _Run(None, b"", str(exc), False)
         code: int | None = None
@@ -350,13 +363,58 @@ def _codex(prompt, effort, timeout, parse, cwd) -> _Turn:
         Path(last).unlink(missing_ok=True)
 
 
-def _claude(prompt, fb: Fallback, timeout, parse, cwd) -> _Turn:
-    if shutil.which("claude") is None:
-        return _Turn(Attempt(fb.name, "absent", "", None, "", fb.model), None)
-    # --allowedTools takes a variable number of values, so it goes ahead of -p:
-    # after it, the prompt would be read as one more tool name.
+def claude_argv(fb: Fallback, prompt: str) -> list[str]:
+    """The `claude` call for a fallback: the one place its argv is built, so that whatever checks
+    the call (boss_review.py --check-fallback) runs the argv a review runs.
+
+    `--allowedTools`, `--tools` and `--mcp-config` take a variable number of values, so everything
+    but the model and the prompt goes ahead of `-p`, which ends them: after one of them, the prompt
+    would be read as one more tool name.
+    """
     tools = ["--allowedTools", ",".join(fb.allowed_tools)] if fb.allowed_tools else []
-    run = _run(["claude", *tools, "-p", "--model", fb.model, prompt], timeout, cwd=cwd)
+    return ["claude", *tools, *fb.extra_args, "-p", "--model", fb.model, prompt]
+
+
+def child_env(fb: Fallback) -> dict[str, str] | None:
+    """The environment of the fallback's `claude`: ours without `fb.env_unset` (None: inherit as is).
+    `claude` loads plugins, and so their hooks, that the environment names even where it ignores the
+    settings files; the review and --check-fallback both start it with this (see `claude_launch`)."""
+    return {k: v for k, v in os.environ.items() if k not in fb.env_unset} if fb.env_unset else None
+
+
+def claude_launch(fb: Fallback, prompt: str, cwd: str | None = None) -> tuple[list[str], dict | None] | None:
+    """The argv and environment to start the fallback's `claude` with, or None when it is not there.
+
+    A spec that unsets variables is the confined one, and for it `claude` is looked up on a PATH
+    without the entries a PR checkout could supply (empty or relative ones, and any inside `cwd`),
+    and started by its absolute path: a bare name is resolved after the process has changed into the
+    checkout, where `PATH=.:...` or a checkout-local `.venv/bin` would run the PR's own `claude`
+    before any confinement flag is read. Any other spec runs as it always did."""
+    argv, env = claude_argv(fb, prompt), child_env(fb)
+    if env is None:
+        return (argv, None) if shutil.which("claude") else None
+    base = os.path.realpath(cwd) if cwd else None
+    keep = []
+    for entry in os.environ.get("PATH", "").split(os.pathsep):
+        if not entry or not os.path.isabs(entry):
+            continue
+        real = os.path.realpath(entry)
+        if base and (real == base or real.startswith(base + os.sep)):
+            continue
+        keep.append(entry)
+    env["PATH"] = os.pathsep.join(keep)
+    exe = shutil.which("claude", path=env["PATH"])
+    if exe is None:
+        return None
+    argv[0] = exe
+    return argv, env
+
+
+def _claude(prompt, fb: Fallback, timeout, parse, cwd) -> _Turn:
+    launch = claude_launch(fb, prompt, cwd)
+    if launch is None:
+        return _Turn(Attempt(fb.name, "absent", "", None, "", fb.model), None)
+    run = _run(launch[0], timeout, cwd=cwd, env=launch[1])
     return _turn(fb.name, fb.model, run.out, run, parse)
 
 
@@ -389,6 +447,38 @@ def _csv(text: str) -> tuple[str, ...]:
     return tuple(part.strip() for part in text.split(",") if part.strip())
 
 
+def _json_strings(text: str) -> tuple[str, ...]:
+    try:
+        value = json.loads(text)
+    except (ValueError, RecursionError):        # nested past the parser's depth: not a list of strings either
+        value = None
+    if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
+        raise argparse.ArgumentTypeError("must be a JSON list of strings, e.g. '[\"--tools\", \"Read\"]': %r"
+                                         % text[:80])
+    return tuple(value)
+
+
+def fallback_flags(fb: Fallback) -> list[str]:
+    """`fb` as the command-line flags that rebuild it, for a caller that starts this command as a
+    child process and so cannot hand it a `Fallback`. Every field is carried, so that none (the
+    confinement in `extra_args`, above all) is dropped on the way; what the flags cannot carry
+    exactly is refused, never changed."""
+    flags = ["--fallback-name", fb.name, "--fallback-model", fb.model,
+             "--fallback-when", ",".join(fb.when)]
+    if fb.timeout is not None:
+        flags += ["--fallback-timeout", str(fb.timeout)]
+    if fb.allowed_tools:
+        tools = ",".join(fb.allowed_tools)
+        if _csv(tools) != tuple(fb.allowed_tools):
+            raise ValueError("--fallback-tools is one comma list and cannot carry %r" % (fb.allowed_tools,))
+        flags += ["--fallback-tools", tools]
+    if fb.extra_args:
+        flags += ["--fallback-extra-args", json.dumps(list(fb.extra_args))]
+    if fb.env_unset:
+        flags += ["--fallback-env-unset", ",".join(fb.env_unset)]
+    return flags
+
+
 def _parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
         prog="reviewer_chain.py",
@@ -416,6 +506,10 @@ def _parser() -> argparse.ArgumentParser:
     ap.add_argument("--fallback-tools", type=_csv, help="comma list for `claude --allowedTools`")
     ap.add_argument("--fallback-when", type=_csv, metavar="REASONS",
                     help="Codex reasons that let the fallback run (default: all four)")
+    ap.add_argument("--fallback-extra-args", type=_json_strings, metavar="JSON",
+                    help="more `claude` flags, as one JSON list of strings, put ahead of -p")
+    ap.add_argument("--fallback-env-unset", type=_csv, metavar="NAMES",
+                    help="comma list of environment variables the `claude` call does not inherit")
     ap.add_argument("--no-fallback", action="store_true", help="Codex only (also the default)")
     ap.add_argument("--strict", action="store_true",
                     help="two usable VERDICT lines that disagree are no verdict")
@@ -427,7 +521,8 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
     options = {"--fallback-name": args.fallback_name, "--fallback-model": args.fallback_model,
                "--fallback-timeout": args.fallback_timeout, "--fallback-tools": args.fallback_tools,
-               "--fallback-when": args.fallback_when}
+               "--fallback-when": args.fallback_when, "--fallback-extra-args": args.fallback_extra_args,
+               "--fallback-env-unset": args.fallback_env_unset}
     given = [flag for flag, value in options.items() if value is not None]
     if args.no_fallback and (given or args.fallback):
         ap.error("--no-fallback conflicts with %s" % ", ".join(given or ["--fallback"]))
@@ -452,6 +547,10 @@ def main(argv: list[str] | None = None) -> int:
         if args.fallback or args.fallback_name:
             preset = PRESETS.get(args.fallback)
             extra = {} if args.fallback_when is None else {"when": args.fallback_when}
+            if args.fallback_extra_args is not None:
+                extra["extra_args"] = args.fallback_extra_args
+            if args.fallback_env_unset is not None:
+                extra["env_unset"] = args.fallback_env_unset
             fallback = Fallback(preset.name if preset else args.fallback_name,
                                 preset.model if preset else args.fallback_model,
                                 args.fallback_timeout, args.fallback_tools, **extra)
