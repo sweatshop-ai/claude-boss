@@ -156,7 +156,8 @@ order and each comment's number is its file's. A failure before the claim
 leaves nothing behind. Kept under
 `$CLAUDE_CONFIG_DIR/pm/reviews/<owner>/<repo>/pr<N>/`, never in a checkout,
 private (0700 and 0600). Its status is `posted`, `head-moved` (the head or the
-base moved during the review), `no-verdict` or `post-failed`.
+base moved during the review), `no-verdict`, `post-failed` or `list-failed` (a provisional GO that could not be
+listed in the track's tracker is not posted).
 
 **Round record**: `round<NN>.json`, what a gate reads. A round is `posted` only
 after `gh pr comment` returned success, so a comment on the PR with no `posted`

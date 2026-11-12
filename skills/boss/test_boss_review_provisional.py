@@ -7,7 +7,9 @@ Run: python3 skills/boss/test_boss_review_provisional.py
 Every test goes through hermetic.Sandbox, as test_boss_review.py does: `codex`, `claude` and `gh` are
 stubs that log their argv, stdin and working directory, and a test fails if one of the three resolves
 outside the stub directory (R25) or if a stub was called a number of times other than the test expected.
-The fallback is reached through `review(..., allow_fallback=True)`: `main()` never sets it before ticket 06.
+The fallback is reached through `review(..., allow_fallback=True, track="t")`: since ticket 06a it runs only where the
+track's tracker exists, because every provisional GO is listed there before it is posted. The sandbox holds that
+tracker (pm/t.md) and stubs `boss-alert`, so no test writes a real tracker or raises a real alert.
 """
 import json
 import os
@@ -33,9 +35,29 @@ class Base(ReviewBase):
     def setUp(self):
         super().setUp()
         self.expect = {"claude": 0, "codex": 0}
+        self.alert = self.sb.stub("boss-alert")
+        pm = self.sb.cfg / "pm"
+        for key, value in (("BOSS_ALERT", str(self.alert)), ("BOSS_LADDER_PM", str(pm)),
+                           ("BOSS_LADDER_STATE", str(self.sb.side / "ladder.json"))):
+            patcher = mock.patch.dict(os.environ, {key: value})
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.make_tracker()
+
+    def make_tracker(self):
+        pm = self.sb.cfg / "pm"
+        pm.mkdir(parents=True, exist_ok=True)
+        self.tracker = pm / "t.md"
+        self.tracker.write_text("# t\n\n## Open blockers\n", encoding="utf-8")
+
+    def setUp_clean(self):
+        super().setUp_clean()
+        self.make_tracker()          # setUp_clean empties the config dir, tracker included
 
     def tearDown(self):
         self.sb.guard()
+        self.assertEqual(os.environ["BOSS_ALERT"], str(self.alert), "BOSS_ALERT must be the stub")
+        self.assertEqual(self.sb.calls_of("boss-alert"), [], "no alert is raised by a single review")
         for name, count in self.expect.items():
             self.assertEqual(len(self.sb.calls_of(name)), count, "calls the %s stub logged" % name)
         for call in self.sb.calls_of("gh"):
@@ -50,7 +72,7 @@ class Base(ReviewBase):
         return super().codex(**kw)
 
     def fallback_review(self, **kw):
-        return self.review(allow_fallback=True, **kw)
+        return self.review(allow_fallback=True, track="t", **kw)
 
     def assertGhVerbs(self, *verbs):
         """The exact `gh pr` verbs the review used, in order: view, diff, the recheck, the read under
@@ -79,7 +101,7 @@ class FallbackRuns(Base):
         result = self.fallback_review()
         self.assertEqual(result, br.ReviewResult(0, 1, "posted", "GO", self.round_file(1), "provisional"))
         self.assertClaudeCall()
-        self.assertGhVerbs("view", "diff", "view", "view", "comment")
+        self.assertGhVerbs("view", "diff", "view", "view", "view", "comment")      # the last view: after the list write
         (comment,) = self.comments()
         self.assertEqual(comment.argv[-1], self.head_line(1, MODEL, "absent", "provisional GO")
                          + "\n\n    FINDING: none\n\n" + LAST)
@@ -172,7 +194,7 @@ class FallbackRuns(Base):
             self.assertNotIn("model", line)
             self.assertNotIn(MODEL, json.dumps(line))
 
-    def test_the_command_line_cannot_reach_the_fallback(self):
+    def test_the_command_line_without_a_track_cannot_reach_the_fallback(self):
         self.gh.configure()
         self.assertEqual(br.main(["--repo", REPO, "--pr", str(PR), "--checkout", str(self.checkout),
                                   "--author", AUTHOR]), 4)
@@ -218,7 +240,7 @@ class ChildProcess(Base):
                 self.codex(answer="VERDICT: GO")
                 calls, patch = self.spawned()
                 with patch:
-                    self.review(codex_timeout=3, fallback_timeout=7, allow_fallback=allow)
+                    self.review(codex_timeout=3, fallback_timeout=7, allow_fallback=allow, track="t")
                 ((argv, timeout),) = calls
                 self.assertEqual(timeout, expected)
                 self.assertEqual("--no-fallback" in argv, not allow)
@@ -246,7 +268,7 @@ class ChildProcess(Base):
         self.codex(hang=True, ignore_term=True)
         self.claude(delay=5)
         with mock.patch.object(policy, "REVIEW_CHAIN_SLACK", 6):
-            result = self.review(codex_timeout=1, fallback_timeout=10, allow_fallback=True)
+            result = self.review(codex_timeout=1, fallback_timeout=10, allow_fallback=True, track="t")
         self.assertEqual((result.exit_code, result.status, result.kind), (0, "posted", "provisional"))
         self.assertEqual(len(self.comments()), 1)
         self.assertClaudeCall(fallback_timeout=10)
