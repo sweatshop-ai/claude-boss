@@ -666,6 +666,7 @@ class ReviewBrief(base.Base):
         (comment,) = self.comments()
         self.assertIn("Verdict: NO-GO", comment.argv[-1])
         self.assertNotIn("Verdict: GO", comment.argv[-1])
+        self.assertEqual(len(self.sb.calls_of("codex")), 1)
 
     def test_a_pr_that_moved_while_its_diff_was_read_is_exit_six_with_nothing_claimed(self):
         for what, patch in (("head", {"headRefOid": base.OTHER_SHA}), ("base", {"baseRefName": "release"})):
@@ -723,6 +724,7 @@ class ReviewBrief(base.Base):
         self.assertEqual(self.review().exit_code, 3)
         (comment,) = self.comments()
         self.assertNotIn("secret", comment.argv[-1])
+        self.assertEqual(len(self.sb.calls_of("codex")), 1)
 
     def test_a_hard_rules_file_that_cannot_be_read_is_exit_seven_before_codex_is_asked(self):
         (self.sb.cfg / "boss-hard-rules.tsv").mkdir()
@@ -768,12 +770,14 @@ class ReviewBrief(base.Base):
             "    FINDING: it writes %s" % REDACTED,
             "    " + REDACTED,
             "    FINDING: a plain defect with no secret"]))
+        self.assertEqual(len(self.sb.calls_of("codex")), 1)
 
     def test_a_verdict_with_no_finding_line_posts_the_three_lines_and_nothing_else(self):
         self.codex(answer="Looks right to me.\nVERDICT: GO")
         self.assertEqual(self.review().exit_code, 0)
         (comment,) = self.comments()
         self.assertEqual(comment.argv[-1], self.body(1, "GO"))
+        self.assertEqual(len(self.sb.calls_of("codex")), 1)
 
     def test_the_comment_never_holds_the_raw_output(self):
         self.codex(answer="long preamble that is not a finding\nFINDING: one\ntrailing prose\nVERDICT: GO")
@@ -781,6 +785,7 @@ class ReviewBrief(base.Base):
         (comment,) = self.comments()
         self.assertNotIn("preamble", comment.argv[-1])
         self.assertNotIn("trailing prose", comment.argv[-1])
+        self.assertEqual(len(self.sb.calls_of("codex")), 1)
 
 
 class SkillText(unittest.TestCase):

@@ -96,6 +96,7 @@ class TrackArgument(Base):
         self.assertEqual(result.exit_code, 0)
         self.assertIn("no blocker can be raised", err.getvalue())
         self.assertEqual((real.read_text(encoding="utf-8"), self.alerts()), (TRACKER, []))
+        self.assertEqual(len(self.sb.calls_of("codex")), 1)
 
     def test_a_missing_tracker_says_so_runs_no_health_sync_and_keeps_the_result(self):
         self.tracker.unlink()
@@ -118,11 +119,13 @@ class WhenTheSyncRuns(Base):
         self.assertEqual(result.exit_code, 0)
         (track, log), = seen
         self.assertEqual((track, [l["reason"] for l in log]), ("t", ["answered"]))
+        self.assertEqual(len(self.sb.calls_of("codex")), 1)
 
     def test_never_with_track_none(self):
         self.codex(answer="VERDICT: GO")
         with mock.patch.object(codex_blocker, "sync", side_effect=AssertionError("synced")):
             self.assertEqual(self.review().exit_code, 0)
+        self.assertEqual(len(self.sb.calls_of("codex")), 1)
 
     def test_after_a_refused_answer_whose_attempts_are_logged_with_round_null(self):
         attempt = {"reviewer": "codex", "reason": "answered", "exit_code": 0}
@@ -138,6 +141,7 @@ class WhenTheSyncRuns(Base):
         result, seen = self.synced()
         self.assertEqual((result.exit_code, result.status), (6, "head-moved"))
         self.assertEqual(len(seen), 1)
+        self.assertEqual(len(self.sb.calls_of("codex")), 1)
 
     def test_after_a_round_left_empty(self):
         self.codex(answer="VERDICT: NO-GO")
@@ -145,12 +149,14 @@ class WhenTheSyncRuns(Base):
             result, seen = self.synced()
         self.assertEqual((result.exit_code, result.status), (7, None))
         self.assertEqual(len(seen), 1)
+        self.assertEqual(len(self.sb.calls_of("codex")), 1)
 
     def test_after_a_no_verdict(self):
         self.codex(answer="no idea")
         result, seen = self.synced()
         self.assertEqual((result.exit_code, result.status), (4, "no-verdict"))
         self.assertEqual(len(seen), 1)
+        self.assertEqual(len(self.sb.calls_of("codex")), 1)
 
     def test_after_a_failed_post(self):
         self.codex(answer="VERDICT: GO")
@@ -158,6 +164,7 @@ class WhenTheSyncRuns(Base):
         result, seen = self.synced()
         self.assertEqual((result.exit_code, result.status), (7, "post-failed"))
         self.assertEqual(len(seen), 1)
+        self.assertEqual(len(self.sb.calls_of("codex")), 1)
 
     def test_after_a_findings_failure_the_attempts_are_logged_with_round_null_and_the_exit_is_seven(self):
         self.codex(answer="VERDICT: GO")
@@ -168,6 +175,7 @@ class WhenTheSyncRuns(Base):
         self.assertEqual([(l["round"], l["reviewer"], l["reason"]) for l in log], [(None, "codex", "answered")])
         self.assertEqual(self.comments(), [])
         self.assertEqual(list(self.reviews.glob("*/*/pr*/round*")), [])
+        self.assertEqual(len(self.sb.calls_of("codex")), 1)
 
     def test_a_findings_failure_whose_attempts_cannot_be_logged_does_not_call_the_answer_refused(self):
         self.codex(answer="VERDICT: GO")
@@ -181,6 +189,7 @@ class WhenTheSyncRuns(Base):
         self.assertIn("the attempts of the answer whose findings could not be made safe are not logged: disk full",
                       err.getvalue())
         self.assertNotIn("refused", err.getvalue())
+        self.assertEqual(len(self.sb.calls_of("codex")), 1)
 
     def test_a_refused_answer_whose_attempts_cannot_be_logged_still_says_so(self):
         attempt = {"reviewer": "codex", "reason": "answered", "exit_code": 0}
@@ -217,6 +226,7 @@ class WhenTheSyncRuns(Base):
                 contextlib.redirect_stderr(err):
             self.assertEqual(self.review(track="t").exit_code, 3)
         self.assertIn("boom", err.getvalue())
+        self.assertEqual(len(self.sb.calls_of("codex")), 1)
 
 
 class EndToEnd(Base):
@@ -236,6 +246,7 @@ class EndToEnd(Base):
         self.assertEqual([c[0] for c in self.alerts()], ["0", "clear"])
         self.assertIn(" cleared=", self.tracker.read_text(encoding="utf-8"))
         self.assertEqual(json.loads(json.dumps(codex_health.health()["state"])), "up")
+        self.assertEqual(len(self.sb.calls_of("codex")), 2)      # the stub came after the four absent ones
 
 
 if __name__ == "__main__":
