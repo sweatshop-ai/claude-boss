@@ -162,6 +162,13 @@ private (0700 and 0600). Its status is `posted`, `head-moved` (the head or the
 base moved during the review), `no-verdict`, `post-failed` or `list-failed` (a provisional GO that could not be
 listed in the track's tracker is not posted).
 
+**Provisional entry**: one line `- [prov owner/repo#N] head=<7 to 40 hex> round=<NN, two digits at least> base=<branch> at=<ISO
+8601 time>` under `## Provisional GO` in a track's tracker, written before a provisional GO is posted. A line off
+that form (a short head, a round of one digit or not a number, an `at=` that is no time, a repo without `owner/repo`) is
+no entry: the reader and the replace-by-tag step both skip it, so a hand-edited line is never taken over. An entry
+means "must recheck", not "a comment exists": it is kept when the PR cannot be read after the write or the comment
+fails, because a kept entry is rechecked by ticket 10 and a dropped one is a provisional GO nobody revisits.
+
 **Round record**: `round<NN>.json`, what a gate reads. A round is `posted` only
 after `gh pr comment` returned success, so a comment on the PR with no `posted`
 record behind it authorizes nothing. A round claimed and never finished is an
