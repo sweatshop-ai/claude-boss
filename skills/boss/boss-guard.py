@@ -22,6 +22,13 @@ It cannot leave a boss stuck: no concierge, a dead one, or a tmux that does not
 answer, and the question goes through as before. So does a question starting
 `CONSENT:`, which only the boss's own turn can ask.
 
+The consent token (ticket 09c). A completed Ask (PostToolUse) of a boss session first deletes that session's
+token, then writes a new one only when the Ask had one question, a `CONSENT:` question naming the track and the
+exact command, and the owner pressed the one affirmative button (`consent.py`). A Bash call (PreToolUse) that
+names `codex_blocker.py --choose .. tests-alone` or `boss_review.py --waive` without a valid token is denied: a
+second line of defence only, since `bash -c`, a variable or a script hide the words. The commands check the
+token themselves.
+
 Active only for sessions that registered themselves as a boss:
     ~/.claude/pm/.boss-sessions/<session_id>
 """
@@ -35,6 +42,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import boss_store  # noqa: E402
+import consent  # noqa: E402
 import fleet  # noqa: E402
 import registry  # noqa: E402
 
@@ -285,6 +293,74 @@ def is_consent(questions):
                if isinstance(q, dict))
 
 
+def flag_value(words, flag):
+    """The value after `flag` (or in `flag=value`), or None."""
+    for i, w in enumerate(words):
+        if w == flag:
+            return words[i + 1] if i + 1 < len(words) else None
+        if w.startswith(flag + "="):
+            return w[len(flag) + 1:]
+    return None
+
+
+def consent_use(cmd):
+    """(track, command or None) when the Bash command names a use of the consent, else None: `codex_blocker.py
+    --choose TRACK tests-alone` (the command from --test-cmd), `boss_review.py --waive` (from --track and
+    --test-cmd). Read from the shlex words only; a line that does not split is split on blanks."""
+    try:
+        words = shlex.split(cmd)
+    except ValueError:
+        words = cmd.split()
+    names = {os.path.basename(w) for w in words}
+    track = test_cmd = None
+    if "codex_blocker.py" in names and "--choose" in words and "tests-alone" in words:
+        at = words.index("--choose")
+        track = words[at + 1] if at + 1 < len(words) else ""
+    elif "boss_review.py" in names and "--waive" in words:
+        track = flag_value(words, "--track") or ""
+    else:
+        return None
+    test_cmd = flag_value(words, "--test-cmd")
+    return track, test_cmd
+
+
+def consent_denial(sid, cmd):
+    """The reason a command that uses the consent is denied, or None."""
+    use = consent_use(cmd)
+    if use is None:
+        return None
+    track, test_cmd = use
+    if not boss_store.valid_track(track) or test_cmd is None:
+        return "this command uses the owner's consent but names no usable track and --test-cmd"
+    ok, why, _ = consent.check(track, consent.cmd_hash(test_cmd), sid=sid)
+    return None if ok else "no consent: %s. Ask the owner the CONSENT: question in your own turn (SKILL.md)" % why
+
+
+def deny(reason, event="PreToolUse"):
+    print(json.dumps({"hookSpecificOutput": {"hookEventName": event, "permissionDecision": "deny",
+                                             "permissionDecisionReason": reason}}))
+
+
+def record_consent(sid, payload):
+    """PostToolUse of an AskUserQuestion: withdraw the session's token, then issue one when the owner said yes
+    to exactly one `CONSENT:` question that names this boss's track and a command."""
+    consent.revoke(sid)
+    if payload.get("agent_id"):
+        return                        # a subagent's Ask is not the boss's own turn
+    questions = ti_questions(payload)
+    if len(questions) != 1 or not isinstance(questions[0], dict):
+        return
+    text = questions[0].get("question")
+    named = consent.parse_question(text)
+    answers = (payload.get("tool_response") or {}).get("answers")
+    if named is None or not isinstance(answers, dict) or answers.get(text) != consent.AFFIRMATIVE:
+        return
+    own = boss_store.track_of(sid)
+    if own and own != named[0]:
+        return
+    consent.issue(sid, named[0], named[1], payload.get("tool_use_id") or "unknown")
+
+
 def concierge_name(sid):
     """The name of this boss's live concierge, or None."""
     try:
@@ -307,6 +383,10 @@ def main():
         return 0                      # not a boss session; nothing to say
 
     tool = payload.get("tool_name") or ""
+    if payload.get("hook_event_name") == "PostToolUse":
+        if tool == "AskUserQuestion":
+            record_consent(sid, payload)
+        return 0
     if tool == "AskUserQuestion":
         name = None if is_consent(ti_questions(payload)) else concierge_name(sid)
         if name:
@@ -329,6 +409,10 @@ def main():
     detail = ""
     if tool == "Bash":
         cmd = (ti.get("command") or "").strip()
+        reason = consent_denial(sid, cmd)
+        if reason:
+            deny(reason)
+            return 0
         if ALLOWED_CMD.match(cmd) or ALLOWED_CMD.match(strip_prefix(cmd)) or is_coordination(cmd):
             return 0
         detail = cmd[:200]

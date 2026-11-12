@@ -5,14 +5,23 @@
     boss_review.py --repo OWNER/REPO --pr N --checkout DIR --author NAME   the command
     fallback_spec(timeout=...) -> Fallback       the read-only fallback reviewer (review(allow_fallback=True) runs it)
     boss_review.py --check-fallback --checkout DIR   run that fallback once and check what it was left with
+    waive(repo, pr, checkout, author, track, test_cmd) -> ReviewResult      merge on tests alone (ticket 09c)
+    boss_review.py --waive --repo R --pr N --checkout DIR --author NAME --track T --test-cmd CMD
 
-Exit codes (5 belongs to a later ticket and is never used here):
+Exit codes (5 is only --waive's: a condition of the waiver does not hold, nothing recorded):
 
     0 GO posted        3 NO-GO posted       4 Codex gave no verdict (absent, timeout, error, noverdict)
     2 usage, the PR is not the one asked for, or the checkout is not on its head
     6 the PR's head or base (or the checkout's head) moved during the review, or while its text was
       read for the brief (then nothing was claimed): nothing posted
     7 infrastructure: gh, the chain or a write failed
+
+--waive records a `waived` round (reviewer `tests`, verdict GO) and posts one comment, but only when the owner chose
+tests-alone for the track's open Codex down blocker, the consent token stands for that track and that exact command
+(consent.py), the checkout is clean and stands on the PR head, the command exits 0 in it within
+policy.WAIVE_TEST_TIMEOUT, and, under the PR's lock after the command, none of that has changed. 0 recorded and
+posted; 2 usage; 5 refused; 6 the head, base or checkout moved (a `head-moved` round, nothing posted); 7
+infrastructure. It appends nothing to attempts.jsonl, so Codex's health count is unchanged.
 
 --check-fallback uses 0 (the init event shows the tools, MCP servers and model specified) and 1 (it does
 not, or the call could not be run), and 2 for usage; it posts nothing and reads no PR.
@@ -52,6 +61,7 @@ from typing import NamedTuple
 
 import boss_store
 import codex_blocker
+import consent
 import policy
 import tracker
 from reviewer_chain import (CODEX_FAILURES, GO_NOGO, STDERR_TAIL, TERM_GRACE, Fallback, _parse, _snapshot,
@@ -65,6 +75,7 @@ REVIEW_EFFORT = "high"     # Codex reasoning effort: a PR review is the gate, no
 EXIT_GO, EXIT_USAGE, EXIT_NO_GO, EXIT_NO_VERDICT, EXIT_MOVED, EXIT_INFRA = 0, 2, 3, 4, 6, 7
 EXIT_FOR_VERDICT = {"GO": EXIT_GO, "NO-GO": EXIT_NO_GO}
 EXIT_CHECK_PASSED, EXIT_CHECK_FAILED = 0, 1       # --check-fallback only
+EXIT_REFUSED = 5                                   # --waive only: a condition of the waiver does not hold
 
 
 @dataclass(frozen=True)
@@ -1352,6 +1363,115 @@ def review(repo: str, pr: int, checkout: str, author: str, *,
     return result
 
 
+# ------------------------------------------------------------------------ the waiver ----
+def _dirty(job: _Job) -> bool:
+    """Does the checkout hold a change git can see, untracked files included? A git that cannot be
+    run or fails is _Infra: that says nothing about the files."""
+    run = _spawn(["git", "-C", job.checkout, "status", "--porcelain", "--untracked-files=all"], job.io_timeout)
+    if run.timed_out or run.code is None or run.code != 0:
+        raise _Infra("git status %s" % ("ran past %ss" % job.io_timeout if run.timed_out
+                                        else "failed (%s): %s" % (run.code, run.err.strip()[-300:])))
+    return bool(run.out.strip())
+
+
+def _blocker_choice(track: str) -> tuple[str | None, str]:
+    """(blocker id, why not) for a track whose open Codex down blocker carries `tests-alone` as the last
+    choice; (None, reason) otherwise. The tracker is read, never locked."""
+    status, id_, got = codex_blocker.choice(track)
+    if status == "chosen" and got == "tests-alone":
+        return id_, ""
+    if status == "chosen":
+        return None, "the owner's choice for %s is %s, not tests-alone" % (id_, got)
+    return None, "no Codex down choice of tests-alone (%s)" % (status if status != "malformed" else "malformed: %s" % got)
+
+
+def waive(repo: str, pr: int, checkout: str, author: str, track: str, test_cmd: str, *,
+          test_timeout: float = policy.WAIVE_TEST_TIMEOUT,
+          io_timeout: int = policy.REVIEW_IO_TIMEOUT) -> ReviewResult:
+    """Merge on tests alone (ticket 09c): record a `waived` round when the owner chose it with their consent,
+    the command passes on the checkout and the head has not moved. Nothing is claimed or posted by a refusal
+    (exit 5). The conditions, cheap ones first: the blocker's last choice is `tests-alone`, the consent token
+    stands for this track and this command, the checkout is clean, and its HEAD is the PR's. Then the command;
+    then, under the PR's lock, all of it once more, because the command ran for up to `test_timeout`."""
+    key = repo_key(repo)
+    check_name(author, "author")
+    if type(pr) is not int or pr < 1:
+        raise ValueError("pr must be a positive integer: %r" % (pr,))
+    if not os.path.isdir(checkout):
+        raise ValueError("checkout is not a directory: %r" % (checkout,))
+    if not (isinstance(track, str) and boss_store.valid_track(track)):
+        raise ValueError("track must match %s and hold no '..': %r" % (boss_store.TRACK_RE.pattern, track))
+    if not isinstance(test_cmd, str) or not test_cmd.strip() or "\0" in test_cmd:
+        raise ValueError("test-cmd must be a command line without a NUL byte")
+    job = _Job(repo, key, pr, checkout, author, io_timeout)
+    seen = _prepare(job)
+    if isinstance(seen, ReviewResult):
+        return seen
+    cmd_sha = consent.cmd_hash(test_cmd)
+
+    def refuse(why: str) -> ReviewResult:
+        _say("waiver refused: " + why)
+        return _nothing(EXIT_REFUSED)
+
+    try:
+        blocker, why = _blocker_choice(track)
+        if blocker is None:
+            return refuse(why)
+        ok, why, token = consent.check(track, cmd_sha)
+        if not ok:
+            return refuse(why)
+        if _dirty(job):
+            return refuse("the checkout holds uncommitted or untracked files")
+        run = _spawn(["/bin/sh", "-c", test_cmd], test_timeout, cwd=checkout)
+        if run.code is None and not run.timed_out:
+            return _failed("the test command could not be started: %s" % run.err.strip()[-300:])
+        if run.timed_out:
+            return refuse("the tests ran past %ss" % test_timeout)
+        if run.code != 0:
+            return refuse("the tests failed (exit %s)" % run.code)
+    except _Infra as exc:
+        return _failed(str(exc))
+
+    reviews = _reviews_dir()
+    pr_dir = reviews / key / ("pr%d" % pr)
+    try:
+        lock = open_lock(reviews, pr_dir, io_timeout)
+    except OSError as exc:
+        return _failed("cannot take the lock of %s: %s" % (pr_dir, exc))
+    try:
+        try:
+            live = _read_pr(job)
+            now_at = _checkout_of(job)
+            dirty = _dirty(job)
+            again, why = _blocker_choice(track)
+            if again != blocker:
+                return refuse("during the tests: " + (why or "the blocker changed"))
+            ok, why, _ = consent.check(track, cmd_sha, same_as=token)
+            if not ok:
+                return refuse("during the tests: " + why)
+            number, path = claim_round(pr_dir)
+        except (_Infra, OSError) as exc:
+            return _failed("nothing claimed: %s" % exc)
+        ts = _now()
+        try:
+            if (live.head, live.base, now_at and now_at.head) != (seen.head, seen.base, seen.head) or dirty:
+                status, exit_code = "head-moved", EXIT_MOVED
+            elif _post(job, "Merge on tests alone (Codex unavailable): %s passed on %s" % (redact(test_cmd), seen.head)):
+                status, exit_code = "posted", EXIT_GO
+            else:
+                status, exit_code = "post-failed", EXIT_INFRA
+            replace_record(path, {
+                "repo": key, "pr": pr, "round": number, "head_sha": seen.head, "base": seen.base,
+                "reviewer": "tests", "model": None, "kind": "waived", "verdict": "GO", "status": status,
+                "author": author, "ts": ts, "attempts": [], "tests": {"cmd": redact(test_cmd), "exit": 0}})
+        except OSError as exc:
+            _say("round %d is left empty: %s" % (number, exc))
+            return ReviewResult(EXIT_INFRA, number, None, "GO", path, "waived")
+        return ReviewResult(exit_code, number, status, "GO", path, "waived")
+    finally:
+        os.close(lock)
+
+
 # ------------------------------------------------------------ the fallback, confined ----
 CHECK_PROMPT = "ok"         # one word: the check reads the init event, not the answer
 # `claude -p` refuses stream-json without --verbose; without --include-hook-events the stream shows only
@@ -1516,12 +1636,35 @@ def main(argv: list[str] | None = None) -> int:
                          "\"Codex down\" blocker in pm/T.md, and, when Codex does not answer, run the labelled "
                          "Opus fallback review and list a provisional GO in pm/T.md before it is posted "
                          "(without a usable pm/T.md the review asks Codex only and nothing is written to a tracker)")
+    ap.add_argument("--waive", action="store_true",
+                    help="instead of a review: merge on tests alone. Records a `waived` round and posts one comment "
+                         "when the owner chose tests-alone with their consent (the consent token), --test-cmd "
+                         "passes in --checkout and the head has not moved; takes --repo, --pr, --checkout, "
+                         "--author, --track and --test-cmd. Exit 0 recorded; 2 usage; 5 refused (nothing "
+                         "recorded); 6 the head moved; 7 infrastructure")
+    ap.add_argument("--test-cmd", metavar="CMD", help="with --waive: the command run as /bin/sh -c in --checkout")
     ap.add_argument("--check-fallback", action="store_true",
                     help="instead of a review: run the read-only fallback once, in --checkout, and check "
                          "its init event (one real, one-word call; takes no --repo, --pr or --author)")
     args = ap.parse_args(argv)
     given = {"--repo": args.repo, "--pr": args.pr, "--checkout": args.checkout, "--author": args.author,
              "--track": args.track}
+    if args.waive and args.check_fallback:
+        ap.error("--waive does not take --check-fallback")
+    if args.test_cmd is not None and not args.waive:
+        ap.error("--test-cmd is only for --waive")
+    if args.waive:
+        absent = [flag for flag, value in (*given.items(), ("--test-cmd", args.test_cmd)) if value is None]
+        if absent:
+            ap.error("--waive needs %s" % ", ".join(absent))
+        try:
+            result = waive(args.repo, args.pr, args.checkout, args.author, args.track, args.test_cmd)
+        except ValueError as exc:
+            print("boss_review: %s" % exc, file=sys.stderr)
+            return EXIT_USAGE
+        if result.round is not None:
+            print("Waived review %d: GO (%s) %s" % (result.round, result.status or "round left empty", result.record))
+        return result.exit_code
     if args.check_fallback:
         refused = [flag for flag in ("--repo", "--pr", "--author", "--track") if given[flag] is not None]
         if refused:

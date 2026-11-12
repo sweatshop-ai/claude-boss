@@ -33,7 +33,9 @@ process of the same user can edit the tracker. What makes a choice the owner's i
 (SKILL.md).
 
     codex_blocker.py TRACK                    sync (as boss_review does after a review)
-    codex_blocker.py --choose TRACK CHOICE    exit 0 written or already so; 2 with a reason: no or more than one
+    codex_blocker.py --choose TRACK CHOICE [--test-cmd CMD]
+                                              (tests-alone only with the owner's consent token and its CMD)
+                                              exit 0 written or already so; 2 with a reason: no or more than one
                                               open blocker, a choice not offered, a bad TRACK; 1 lock or write failed
     codex_blocker.py --choice TRACK           prints no-blocker (exit 2), none (1), malformed (2, reason on stderr)
                                               or the recorded choice (0)
@@ -53,6 +55,7 @@ import stat as stat_
 
 import boss_store
 import codex_health
+import consent
 import policy
 import tracker
 
@@ -61,9 +64,9 @@ LOCK_WAIT = 20.0
 CLEAR_SLACK = 60        # seconds a cleared= may lie after `now` before it is taken as a typo
 ID_RE = re.compile(r"^cd[0-9]{12}$")
 CD_ID = re.compile(r"(?<=\s)id=cd[0-9]{12}(?![0-9A-Za-z])")   # the marker's own id= field: a word of its own
-CHOICES = ("wait", "accept-fallback")                   # what --choose writes; 09c adds "tests-alone"
-READABLE = CHOICES + ("tests-alone",)                   # what the reader accepts
-ASK = "Codex is down: choose wait or accept the fallback review"
+CHOICES = ("wait", "accept-fallback", "tests-alone")     # what --choose writes; tests-alone needs the owner's consent token
+READABLE = CHOICES                                      # what the reader accepts
+ASK = "Codex is down: choose wait, accept the fallback review, or merge on tests alone"
 DECISIONS = "Decisions in force"
 DECISIONS_RE = re.compile(r"^##\s+%s\b" % DECISIONS)
 CHOICE_RE = re.compile(r"^- \[codex-choice (cd[0-9]{12})\] (%s) - \S+$" % "|".join(READABLE))
@@ -211,8 +214,10 @@ def choice(track: str):
     return _state(text.split("\n"))
 
 
-def choose(track: str, value: str, now: datetime | None = None) -> tuple[int, str]:
-    """Record `value` for the open blocker: (exit code, message). Nothing is written when the last choice
+def choose(track: str, value: str, now: datetime | None = None, test_cmd: str | None = None) -> tuple[int, str]:
+    """Record `value` for the open blocker: (exit code, message). `tests-alone` is recorded only while this
+    session holds a valid consent token (consent.py) for `track` and for exactly `test_cmd`; without one the
+    exit code is 2 and nothing is written. `wait` and `accept-fallback` need no token. Nothing is written when the last choice
     for its id already equals `value`; otherwise the line is added (so a revocation is never dropped by an
     earlier identical line) and the marker's ask= says what was chosen, so the ladder's repeats do not look lost."""
     if value not in CHOICES:
@@ -221,6 +226,12 @@ def choose(track: str, value: str, now: datetime | None = None) -> tuple[int, st
         now = datetime.now().astimezone()
     if now.tzinfo is None:
         raise ValueError("now has no UTC offset")
+    if value == "tests-alone":
+        if not test_cmd:
+            return 2, "tests-alone needs --test-cmd: the consent is for one command"
+        ok, why, _ = consent.check(track, consent.cmd_hash(test_cmd))
+        if not ok:
+            return 2, "no consent for tests-alone: " + why
     path = usable_tracker(track)
     if path is None:
         return 2, "no usable tracker for %s" % track
@@ -316,8 +327,8 @@ def sync(track: str, now: datetime | None = None, health_path=None) -> None:
 def main() -> int:
     argv = sys.argv[1:]
     try:
-        if len(argv) == 3 and argv[0] == "--choose":
-            rc, msg = choose(argv[1], argv[2])
+        if len(argv) in (3, 5) and argv[0] == "--choose" and (len(argv) == 3 or argv[3] == "--test-cmd"):
+            rc, msg = choose(argv[1], argv[2], test_cmd=argv[4] if len(argv) == 5 else None)
             print(msg, file=sys.stderr if rc else sys.stdout)
             return rc
         if len(argv) == 2 and argv[0] == "--choice":
@@ -337,7 +348,7 @@ def main() -> int:
             print("malformed")
         _say(str(exc))
         return 2
-    print("usage: codex_blocker.py TRACK | --choose TRACK wait|accept-fallback | --choice TRACK", file=sys.stderr)
+    print("usage: codex_blocker.py TRACK | --choose TRACK wait|accept-fallback|tests-alone [--test-cmd CMD] | --choice TRACK", file=sys.stderr)
     return 2
 
 

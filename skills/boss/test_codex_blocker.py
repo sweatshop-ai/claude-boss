@@ -114,9 +114,8 @@ class Raise(Base):
         self.assertEqual(m["next"], m["t0"] + timedelta(minutes=policy.RUNGS[0]))
         self.assertNotIn('"', m["ask"])
         self.assertEqual(m["ask"], codex_blocker.ASK)
-        for word in ("wait", "fallback review"):
+        for word in ("wait", "fallback review", "tests alone"):      # 09c: tests alone is offered again
             self.assertIn(word, m["ask"])
-        self.assertNotIn("tests alone", m["ask"])         # 09c adds it back with the waiver
         lines = self.text().split("\n")
         lo, hi = tracker.blockers_range(lines)
         self.assertIn(lines.index(ln), range(lo, hi))
@@ -513,7 +512,7 @@ class Choice(Base):
         self.assertEqual(codex_blocker.choice("t"), ("none", id_, None))
 
     def test_each_choice_survives_a_restart(self):
-        for value in codex_blocker.CHOICES:
+        for value in ("wait", "accept-fallback"):          # tests-alone: test_waiver.py, it needs the token
             with self.subTest(value):
                 self.path.write_text(TRACKER, encoding="utf-8")
                 self.log.write_text("", encoding="utf-8")
@@ -594,7 +593,7 @@ class Choice(Base):
     def test_a_choice_not_offered_is_refused_and_writes_nothing(self):
         self.raised()
         before = self.text()
-        for value in ("tests-alone", "yes", ""):
+        for value in ("yes", ""):
             run = self.cli("--choose", "t", value)
             self.assertEqual(run.returncode, 2, value)
             self.assertTrue(run.stderr.strip())

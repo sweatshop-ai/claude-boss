@@ -130,6 +130,15 @@ under the current directory (the confined spec still does). `claude_argv` builds
 place, and `fallback_flags` renders a whole spec as command-line flags for a
 caller that starts the chain as a child process.
 
+**Waiver**: a PR merged on tests alone while Codex is down, only through `boss_review.py --waive`. The owner chose it
+for the open `Codex down` blocker (`codex_blocker.py --choose T tests-alone`) with a `CONSENT:` question asked in the boss's
+own turn; the guard's PostToolUse hook turned the owner's yes (one button, one question, the track and the exact test
+command named) into a **consent token**, `pm/consent/<session_id>.json`, good for `policy.CONSENT_TTL` seconds and
+withdrawn by any later Ask. Both commands read the token themselves and fail closed (exit 2 for `--choose`, 5 for
+`--waive`). `--waive` runs the command in a clean checkout and records a `kind: waived` round (reviewer `tests`) only if the
+head, base and checkout did not move and the choice and token still stand under the PR's lock. A forged token, a
+hand-written round or another route to a merge by a process of the same user is outside it (accepted by the owner).
+
 **Read-only fallback**: the PR gate's fallback, `boss_review.fallback_spec()`:
 `claude` on the policy's exact model, `--tools Read,Grep,Glob`,
 `--strict-mcp-config` (without it `--tools` alone leaves every MCP tool in),
