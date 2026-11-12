@@ -4,7 +4,7 @@
 
 **Blocked by:** 06b (Provisional entries are removed when Codex has since said GO)
 
-**Status:** done (Tarek built it, PR <N>)
+**Status:** done (Tarek built it, PR 115)
 
 - [x] **Round files that break the parser are kept, not raised (class c).** `_codex_rounds` (`boss_review.py`) lets a `ValueError` from `int()` on a round file named with over 4300 digits and a `RecursionError` from deeply nested JSON escape, which stops the prune of every entry of that repo for the pass. Catch both and keep that PR's entries. Test each. **Done for the `RecursionError`, with a test; declined for the 4300-digit name:** a file name is at most 255 bytes (`OSError: File name too long` at 4301 digits, tested), so `int()` never sees one.
 - [x] **A round left empty after an OSError keeps its PR's entry for good (class c).** `_keep_and_post` says "round %d is left empty"; the prune keeps the entry (as the spec asks) but nothing ever clears it. Decide who clears it (10's recheck reviewing the PR, which writes a later round) and say so in 10's text. **Done:** the answer is that the next review of that PR clears it, since an empty round with a later round above it is skipped as a dead claim (tested; the newest round empty still keeps the entry). Ticket 10's text is not edited here (PR 106 owns it): its recheck needs no change, it writes a later round.
