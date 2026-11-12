@@ -21,3 +21,13 @@ NO-GO
 |---|---|---|
 | 1 | 01:54 at `b25ce2f` (the sentence that gives `Fallback.when` its default and says 03 passes the three reasons) | VERIFIED |
 | 1 | 03-labelled-fallback-review.md:14 (the constructor, no `when`), :20 (noverdict never reaches `claude`) | VERIFIED (working copy of 03, uncommitted at the time) |
+
+## Settled (Otilia, 2026-11-12, against main ef95b4c)
+
+Added by the goal audit of 2026-11-12. The review had one finding and Anouk's header above states what became of it; this section gives it a disposition with evidence on main.
+
+| Finding | Disposition | Evidence on main |
+|---|---|---|
+| 1. Ticket 03's fallback is built without `when`, so a Codex `noverdict` would reach `claude` | **Fixed**, in ticket 03's code, as the review asked (not in ticket 01, whose `Fallback.when` interface Codex called sufficient) | `skills/boss/boss_review.py:1516` builds the fallback with `when=("absent", "timeout", "error")`. Tests: `test_boss_review_provisional.py` `FallbackRuns.test_a_codex_answer_without_a_verdict_does_not_run_the_fallback` (Codex `noverdict`: exit 4, the `claude` call log empty); `ChainShape.test_other_shapes_are_exit_seven_before_any_claim` (a fallback after a Codex `noverdict` is exit 7) |
+
+Nothing is open.
