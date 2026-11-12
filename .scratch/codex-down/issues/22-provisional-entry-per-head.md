@@ -4,13 +4,15 @@
 
 - A: provisional GO on head A (round 1), push of head B, Codex GO on B (round 2, rule 2 removes the entry), force-push back to A: round 1 decides again and the PR merges on a non-deploying base with no entry.
 - B: provisional GO on A, then on B (the entry now names B), the PR goes back to A and merges: 10 reviews the merged PR at B, not at the merged A (R17).
-- C: a CLOSED PR loses its entry (06b rule 3), is reopened on the same head and merges on its old provisional round; no new provisional GO writes an entry.
+- C: a CLOSED PR lost its entry (06b's old rule 3, replaced in spec round 3: a CLOSED PR now keeps it), was reopened on the same head and merged on its old provisional round; no new provisional GO wrote an entry.
 
-**Blocked by:** 06a, 06b, 04, 10 (it edits their text and code)
+**Blocked by:** 06b (it changes 06b's rule 3 and brings 06a with it)
+
+**Order:** 22 blocks 04 and 10: it is the gate's own correctness, so it lands before either is built. It writes the two rules that 04 and 10 must implement as boxes in their ticket files (the first two boxes below); 04 and 10 build the code and the tests for cases A and B.
 
 **Status:** ready-for-agent
 
-- [ ] In 04's gate, a provisional or waived GO decides only when it is the PR's highest-numbered posted round; an older one on the same head, followed by any later posted round, does not.
-- [ ] In 10's recheck, a merged PR is reviewed at its merged `headRefOid`, not at the entry's `head=`; an entry whose head differs from it is reviewed at both, or says why not.
-- [ ] 06b's rule 3 (a CLOSED unmerged PR loses its entry) is kept, or replaced by "kept, and skipped by 10's release stop while CLOSED"; whichever is chosen, case C has a test.
-- [ ] A test per case A, B and C.
+- [ ] Add to ticket 04 a box, with a test for case A: in 04's gate, a provisional or waived GO decides only when it is the PR's highest-numbered round file of any status (`posted`, `post-failed`, `head-moved`, `no-verdict`, `list-failed`); any later round, whatever its head or status, means the GO no longer decides and the PR needs a new round. This covers a later `post-failed` provisional GO that replaced the entry (06a replaces the entry before posting and keeps it when posting fails). Test: provisional GO on A posted, provisional GO on B `post-failed`, force-push back to A: the gate refuses.
+- [ ] Add to ticket 10 a box, with a test for case B: in 10's recheck, a merged PR is reviewed at its merged `headRefOid`, not at the entry's `head=`. A Codex GO on the merged head removes the entry by 06b's rule 4 (done in 22 below); a NO-GO writes 10's post-merge blocker and then removes the entry as 10 already says; a failed or stalled review leaves the entry and the release stop holds. The box also says: 10's recheck does not review a PR that is `CLOSED` without a merge, and 10's release stop (`--list`) does not count its entry while it is closed; a closed PR whose state cannot be read counts.
+- [ ] 06b's rule 3 is replaced (done in 06b, 2026-11-12, spec round 3 finding 1): a CLOSED unmerged PR keeps its entry, so case C cannot merge on a bare old round; rule 4 is added for case B. The tests of both are in 06b's box (this ticket checks they exist).
+- [ ] Case C is tested end to end: provisional GO on head A with an entry, the PR closed, `prune_provisional` keeps the entry, the PR reopened on A and merged: the entry is still there and 10's release stop holds.

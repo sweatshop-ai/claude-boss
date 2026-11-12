@@ -29,7 +29,7 @@ Checked and no defect: lock order PR lock then tracker lock; `list-failed` (04 :
 | 1 | Accepted. The replacement says a PR's fallback is never run by hand; the pinned sentence is reworded to plan reviews only, its pin moves, and :621 gains `--track T`. | 06, third box |
 | 2 | Accepted. An unreadable state keeps the entry under every rule, rule 1 included; test row added. | 06, removal box |
 | 3 | Accepted. Rule 2 applies only when the live head differs from the entry's `head=`; test row added. | 06, removal box |
-| 4 | Accepted. Rule 3: a CLOSED unmerged PR loses its entry; test row. | 06, removal box |
+| 4 | Accepted. Rule 3: a CLOSED unmerged PR loses its entry; test row. (Reversed in round 3, finding 1: a CLOSED PR keeps its entry.) | 06, removal box |
 | 5 | Accepted. Three ways to fail `update` named; the 0444 trap stated; the read-back-fails case added. | 06, tests box |
 | 6 | Accepted. Deadline `time.monotonic() + policy.REVIEW_IO_TIMEOUT` (60 s), with the reason. | 06, list box |
 | 7 | Accepted. `_keep_and_post` gains the tracker path as a keyword parameter; `_Job` stays without a track. | 06, list box |
@@ -55,3 +55,19 @@ Run by Lucia, 2026-11-12 after 15:02. **Codex stalled** (`codex-review.sh exec` 
 | 9 | P3: two imprecise citations. | Accepted: `kind` :76, `SENTENCE` :21-23. |
 | 10 | P3: "never run by hand" vs the plan's PR line. | Accepted: "a PR head's fallback review". |
 | 11 | P3: no tracker path in `_keep_and_post`. | Accepted: `list-failed`, exit 7. |
+
+## Round 3 (on 06a, 06b and the new ticket 22): real Codex
+
+Run by Rumi, 2026-11-12, `codex-review.sh exec` on `brief-3.md` (brief-2 plus: are the ten applied round-2 findings closed, and is 22's scope and blocking right). **Codex answered** in 6 min 25 s, first try, verdict **NO-GO**, 4 P1 and 3 P2; its file is `06-spec-reviews/round-3.md` beside the worktree. It found the six round-1 findings and the ten applied round-2 findings CLOSED (one reopened by finding 1), and the cut itself clean (five boxes plus one, 10 correctly blocked, 06b -> 22 -> {04, 10} acyclic).
+
+| # | Finding | Disposition |
+|---|---|---|
+| 1 | P1: 22 does not close case C: removing a CLOSED PR's entry leaves the old provisional round as the highest posted round. | Accepted. 06b's rule 3 now keeps the entry; 10 skips a CLOSED PR and its release stop does not count it; case-C test in 06b and 22. |
+| 2 | P1: case B has no cleanup path. | Accepted. New rule 4 in 06b: a Codex GO on the merged head removes the entry; NO-GO and failure behaviour stated in 22's box for 10. |
+| 3 | P1: case A misses a later `post-failed` provisional GO. | Accepted. 04's rule: a GO decides only as the highest round of any status; test added. |
+| 4 | P1: a real home path in ticket 20. | Accepted. Replaced by a relative description. |
+| 5 | P2: tracker wait after the last head check. | Accepted. 06a re-reads the head after the write; `head-moved` and exact-line cleanup; test. |
+| 6 | P2: 06b blamed `_keep_and_post` for the caller's exceptions. | Accepted. Rewritten as `prune_provisional` / `boss_recheck` behaviour, tracker unchanged. |
+| 7 | P2: the index names 09 and 04 as switch-only consumers. | Accepted. Sentence replaced. |
+
+Codex read this spec for the first time in round 3; no Opus fallback was needed. No finding was deferred, so no new ticket (23 and up) was filed.

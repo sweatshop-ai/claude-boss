@@ -4,7 +4,7 @@
 
 **Scope:** new on 2026-10-04, split out of the original ticket 06 after Codex review 3 of the plan (finding 23), with the owner-accepted premortem (R16 to R18, R20, R25). The list and its write are 06a's, its removal rule is 06b's (`prune_provisional`); this ticket adds the command that walks the list and the skill text that makes the boss run it. It does not wait for 04: it reads and writes nothing that `boss_merge.py` owns.
 
-**Blocked by:** 06b (Provisional entries are removed when Codex has since said GO; it brings 06a, the list, with it). Split from 06 on 2026-11-12
+**Blocked by:** 06b (Provisional entries are removed when Codex has since said GO; it brings 06a, the list, with it), 22 (A provisional GO on an older head must not merge or be rechecked as the current one; it adds the merged-head box below). Split from 06 on 2026-11-12
 
 **Status:** ready-for-agent
 
