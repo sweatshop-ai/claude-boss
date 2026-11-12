@@ -401,7 +401,7 @@ if [ -n "$CLAUDE_CODE_PLUGIN_DIRS" ]; then echo %s; else echo %s; fi
             self.assertIn(must, names)
         env = dict(os.environ, KEPT_BY_THE_TEST="yes", **{n: "/in/the/checkout" for n in names})
         with mock.patch.dict(os.environ, env, clear=True):
-            result = rc.run_chain("p", words=rc.APPROVE_REJECT, fallback=br.fallback_spec(), cwd=str(self.checkout))
+            result = rc.run_chain("p", words=rc.GO_NOGO, fallback=br.fallback_spec(), cwd=str(self.checkout))
         self.assertEqual(result.reviewer, "opus")
         seen = dict(line.split("=", 1) for line in (self.sb.root / "claude.env").read_text().splitlines() if "=" in line)
         self.assertEqual([n for n in names if n in seen], [])
