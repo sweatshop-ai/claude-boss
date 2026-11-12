@@ -495,6 +495,15 @@ class TheNoGo(Base):
         self.assertEqual([a[0] for a in self.alerts()], ["0"])
         self.assertEqual(self.entries(), [])
 
+    def test_the_blocker_the_pass_writes_is_the_one_list_prints(self):
+        head = self.pr(5, "bad", state="MERGED", answer=NOGO)
+        self.put(self.prov(5, head))
+        self.rounds(5, (1, head, None, {"kind": "provisional"}))
+        self.assertEqual(self.run_pass(), ["DISPATCH owner/repo#5 author=worker-a round=02"])
+        run = subprocess.run([sys.executable, str(HERE / "boss_recheck.py"), "--track", "t", "--list"],
+                             env=dict(os.environ), capture_output=True, text=True, timeout=120)
+        self.assertEqual((run.returncode, run.stdout), (1, "BLOCKER owner/repo#5 round 02\n"), run.stderr)
+
     def test_an_entry_replaced_between_the_read_and_the_removal_stays(self):
         head = self.pr(5, "bad", state="MERGED", answer=NOGO)
         self.put(self.prov(5, head))
@@ -735,6 +744,15 @@ class TheList(Base):
                 contextlib.redirect_stderr(io.StringIO()):
             lines = rk.list_entries("t")
         self.assertEqual(len(lines), 1)
+
+    def test_an_empty_cleared_value_is_not_cleared(self):
+        self.put(blockers=self.BLOCKER % " cleared=")
+        self.assertEqual(self.run_list().returncode, 1)
+
+    def test_without_list_an_unexpected_exception_still_raises(self):
+        with mock.patch.object(rk, "recheck", side_effect=RuntimeError("boom")):
+            with self.assertRaises(RuntimeError):
+                rk.main(["--track", "t", "--repo", REPO, "--checkout", str(self.checkout)])
 
     def test_a_crash_is_exit_7_never_exit_1(self):
         self.put()

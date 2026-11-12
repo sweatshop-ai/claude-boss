@@ -1133,7 +1133,7 @@ before closing**, and the closing after both the state line and the objective.
 1b. **The release stop (ticket 10b).** For each repo that has entries, run `boss_recheck.py --track T --repo OWNER/REPO --checkout DIR`
    if Codex answers, then `boss_recheck.py --track T --list`. While it exits 1 (or fails), wrap-up stops: do steps 2 to 4
    (git check, trim, the state line, with the PRs and blockers it printed as open items), then do not run step 5 (close
-   no pane) and do not set the objective to `met`; tell the owner which PRs hold it.
+   no pane) and do not set the objective to `met`; the recap of step 6 names the PRs and blockers that hold it.
 2. Do not wait on the answers; check git yourself. For each worktree of the project:
    `git status --porcelain` and `git log --branches --not --remotes` (every local commit
    that exists on no remote, whichever branch). An untracked handoff note is not work at risk; uncommitted code and a
