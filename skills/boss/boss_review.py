@@ -427,7 +427,7 @@ def build_brief(head_sha: str, base: str, title: str, body: str, diff: str) -> s
 _ATTEMPT_KEYS = ("reviewer", "reason", "output", "exit_code", "stderr_tail", "model")
 
 
-def _sound(data: dict, code: int) -> bool:
+def _sound(data: dict, code: int, read_answer: bool = True) -> bool:
     """Whether the chain's result is plainly a Codex-only one and agrees with its own exit code:
     one Codex attempt, answered exactly when the result names Codex, with a verdict, and exit 0.
     A malformed value raises KeyError or TypeError; the caller counts that as unsound."""
@@ -447,7 +447,7 @@ def _sound(data: dict, code: int) -> bool:
             and (word in EXIT_FOR_VERDICT) == answered
             and (code == 0) == answered
             and output == (a["output"] if answered else "")
-            and (not answered or _follows(word, a["output"])))
+            and (not (answered and read_answer) or _follows(word, a["output"])))
 
 
 def _follows(word: str, output: str) -> bool:
@@ -462,13 +462,11 @@ def _follows(word: str, output: str) -> bool:
 
 
 def _refused_for_nul(data: dict, code: int) -> bool:
-    """Whether `_sound` would take the result but for the NUL in the answer."""
+    """Whether the result is sound in everything but the reading of its answer, and the answer
+    holds a NUL (the one case `_follows` refuses for want of a reading, not for a contradiction)."""
     try:
-        (a,) = data["attempts"]
-        clean = dict(data, output=data["output"].replace("\0", ""),
-                     attempts=[dict(a, output=a["output"].replace("\0", ""))])
-        return "\0" in a["output"] and _sound(clean, code)
-    except (ValueError, KeyError, TypeError, AttributeError):
+        return "\0" in data["attempts"][0]["output"] and _sound(data, code, read_answer=False)
+    except (ValueError, KeyError, TypeError, AttributeError, IndexError):
         return False
 
 

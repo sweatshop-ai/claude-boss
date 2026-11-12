@@ -974,6 +974,11 @@ class ChainChild(Base):
                                   line["reason"], line["exit_code"]),
                                  ("owner/repo", PR, None, "codex", "answered", 0))
 
+    def test_a_nul_answer_that_also_contradicts_the_result_is_not_logged(self):
+        self.gh.configure()
+        with self.stand_in(0, output="VERDICT: GO", attempt_output="VERDICT: G\u0000O"):
+            self.assertInfraBeforeAnyClaim()
+
     def test_a_nul_answer_from_a_child_that_exited_one_is_not_logged(self):
         self.gh.configure()
         with self.stand_in(1, output="VERDICT: GO\u0000", attempt_output="VERDICT: GO\u0000"):
