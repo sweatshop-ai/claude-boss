@@ -708,18 +708,21 @@ class Choice(Base):
         self.assertEqual(self.cli("--choose", "t", "wait").returncode, 2)
 
     def test_a_symlinked_tracker_is_malformed_for_both_commands_and_the_target_is_not_written(self):
+        self.raised()                                          # an open blocker: a write through the link would show
         real = self.path.with_name("real.md")
-        real.write_text(TRACKER, encoding="utf-8")
+        real.write_text(self.text(), encoding="utf-8")
+        kept = real.read_text(encoding="utf-8")
         self.path.unlink()
         self.path.symlink_to(real)
         run = self.cli("--choice", "t")
         self.assertEqual((run.stdout.strip(), run.returncode), ("malformed", 2))
         run = self.cli("--choose", "t", "wait")
         self.assertEqual(run.returncode, 2)
-        self.assertTrue(run.stderr.strip())
-        self.assertEqual(real.read_text(encoding="utf-8"), TRACKER)
+        self.assertIn("no blocker can be answered", run.stderr)
+        self.assertEqual(real.read_text(encoding="utf-8"), kept)
 
     def test_a_tracker_of_another_owner_is_malformed_for_both_commands_and_is_not_written(self):
+        self.raised()                                          # without the uid check --choose would write
         before = self.text()
         other = os.getuid() + 1
         with mock.patch.object(codex_blocker.os, "getuid", return_value=other), contextlib.redirect_stderr(io.StringIO()):
@@ -728,6 +731,7 @@ class Choice(Base):
         self.assertEqual((status, id_), ("malformed", None))
         self.assertTrue(why)
         self.assertEqual(rc, 2)
+        self.assertEqual(msg, "no usable tracker for t")
         self.assertEqual(self.text(), before)
 
     def test_choice_and_choose_on_an_unusable_tracker_say_what_they_could_not_do_not_a_raise(self):
@@ -821,8 +825,8 @@ class Edges(Base):
         before = self.text()
         real_usable = codex_blocker.usable_tracker
 
-        def swap(track):
-            path = real_usable(track)
+        def swap(track, *rest):
+            path = real_usable(track, *rest)
             self.path.unlink()
             self.path.symlink_to(target)
             return path
