@@ -8,6 +8,8 @@
 
 **Status:** ready-for-agent
 
-- [ ] SKILL.md's Codex routine says, in one or two sentences: on a usage limit or an outage, run the labelled fallback review in the same turn; never wait for the reset, never schedule a wakeup or loop for it
+- [x] SKILL.md's Codex routine says, in one or two sentences: on a usage limit or an outage, run the labelled fallback review in the same turn; never wait for the reset, never schedule a wakeup or loop for it (4e12c0b)
 - [ ] After 02 and 08 merge to `main`: the routine names `boss_review.py`, and no line of SKILL.md tells a worker to run `codex exec` by hand for a PR review (`grep -n 'codex exec' skills/boss/SKILL.md` shows none in the review routine)
 - [ ] The plugin version is bumped and the change is in the marketplace release, so the installed boss skill carries it
+
+Box 2 waits on tickets 02 and 08, not on main yet, so it stays unticked. Box 3 (version bump, release) is not in this PR: the next release PR carries it.
