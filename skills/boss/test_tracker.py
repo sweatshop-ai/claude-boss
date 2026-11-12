@@ -5,9 +5,12 @@ Run: python3 -m pytest skills/boss/test_tracker.py
 """
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -15,6 +18,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import tracker  # noqa: E402
+from hermetic import Sandbox  # noqa: E402
 from tracker import MarkerError, scan_marker, validate  # noqa: E402
 
 BIN = HERE / "bin"
@@ -140,6 +144,274 @@ class OpenBlockers(unittest.TestCase):
     def test_the_lock_is_a_dot_sibling(self):
         self.assertEqual(tracker.lock_path(Path("/x/pm/demo.md")), Path("/x/pm/.demo.md.lock"))
 
+
+
+LINE = ('- ship it [ladder id=ab12 t0=2026-09-18T10:53+02:00 last=0 '
+        'next=2026-09-18T10:58+02:00 pane=20:0.2 ask="put the u2 file on lab-0"]')
+WHEN = datetime(2026, 9, 18, 12, 7, 31, tzinfo=TZ)
+
+
+class MarkCleared(unittest.TestCase):
+    def test_cleared_goes_before_ask_and_nothing_else_moves(self):
+        out = tracker.mark_cleared(LINE, WHEN)
+        self.assertEqual(out, LINE.replace(' ask=', ' cleared=2026-09-18T12:07+02:00 ask='))
+        _, fields = scan_marker(out)
+        m = validate(fields)
+        self.assertEqual(fields["cleared"], "2026-09-18T12:07+02:00")
+        self.assertEqual(m["cleared"], "2026-09-18T12:07+02:00")
+        before = validate(scan_marker(LINE)[1])
+        self.assertEqual((m["last"], m["next"], m["t0"], m["ask"]),
+                         (before["last"], before["next"], before["t0"], before["ask"]))
+
+    def test_a_value_that_holds_the_text_ask_is_not_the_ask_key(self):
+        line = ('- x [ladder id=ab12 t0=2026-09-18T10:53+02:00 last=0 '
+                'next=2026-09-18T10:58+02:00 cost="idle, see ask= below" ask="go"]')
+        out = tracker.mark_cleared(line, WHEN)
+        self.assertEqual(validate(scan_marker(out)[1])["cost"], "idle, see ask= below")
+        self.assertEqual(validate(scan_marker(out)[1])["cleared"], "2026-09-18T12:07+02:00")
+
+    def test_lines_it_leaves_alone(self):
+        for line in ["- a plain blocker, no marker",
+                     "- see [ladderish] elsewhere",
+                     '- broken [ladder id=ab12 ask="x"',
+                     LINE.replace(' ask=', ' cleared=2026-09-18T11:00+02:00 ask='),
+                     '- no ask [ladder id=ab12 t0=2026-09-18T10:53+02:00 last=0 next=2026-09-18T10:58+02:00]']:
+            with self.subTest(line):
+                self.assertEqual(tracker.mark_cleared(line, WHEN), line)
+
+    def test_a_naive_when_is_a_value_error(self):
+        with self.assertRaises(ValueError):
+            tracker.mark_cleared(LINE, datetime(2026, 9, 18, 12, 7))
+
+
+def held_lock(path):
+    """A child process that holds the tracker's lock until its stdin closes."""
+    code = ("import fcntl,sys\nf=open(sys.argv[1],'w')\nfcntl.flock(f,fcntl.LOCK_EX)\n"
+            "print('held',flush=True)\nsys.stdin.read()\n")
+    proc = subprocess.Popen([sys.executable, "-I", "-c", code, str(tracker.lock_path(path))],
+                            stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+    assert proc.stdout.readline().strip() == "held"
+    return proc
+
+
+class Update(unittest.TestCase):
+    def setUp(self):
+        self.dir = Path(tempfile.mkdtemp(prefix="boss-tracker-upd-"))
+        self.path = self.dir / "t.md"
+        self.path.write_text("# T\n\n## Open blockers\n- one\n")
+
+    def tearDown(self):
+        shutil.rmtree(self.dir)
+
+    def far(self):
+        return time.monotonic() + 5
+
+    def temps(self):
+        return sorted(p.name for p in self.dir.glob(".boss-tracker-*"))
+
+    def test_done_writes_the_new_text(self):
+        got = tracker.update(self.path, lambda t: t + "- two\n", self.far())
+        self.assertEqual(got, "done")
+        self.assertEqual(self.path.read_text(), "# T\n\n## Open blockers\n- one\n- two\n")
+        self.assertEqual(self.temps(), [])
+
+    def test_none_is_no_change_and_writes_nothing(self):
+        ino = self.path.stat().st_ino
+        before = self.path.read_bytes()
+        self.assertEqual(tracker.update(self.path, lambda t: None, self.far()), "done (no change)")
+        self.assertEqual((self.path.read_bytes(), self.path.stat().st_ino), (before, ino))
+        self.assertEqual(self.temps(), [])
+
+    def test_the_mode_is_kept(self):
+        self.path.chmod(0o640)
+        tracker.update(self.path, lambda t: t + "x\n", self.far())
+        self.assertEqual(stat.S_IMODE(self.path.stat().st_mode), 0o640)
+
+    def test_line_ends_are_kept(self):
+        self.path.write_bytes(b"# T\r\n- one\r\n")
+        tracker.update(self.path, lambda t: t + "- two\r\n", self.far())
+        self.assertEqual(self.path.read_bytes(), b"# T\r\n- one\r\n- two\r\n")
+
+    def test_a_lock_held_past_the_deadline_fails_without_a_hang(self):
+        holder = held_lock(self.path)
+        calls = []
+        try:
+            t0 = time.monotonic()
+            got = tracker.update(self.path, lambda t: calls.append(1) or t + "x", t0 + 0.2)
+            took = time.monotonic() - t0
+        finally:
+            holder.stdin.close()
+            holder.wait(timeout=10)
+        self.assertTrue(got.startswith("failed: "), got)
+        self.assertLess(took, 3)
+        self.assertEqual(calls, [])
+        self.assertEqual(self.path.read_text(), "# T\n\n## Open blockers\n- one\n")
+        self.assertEqual(self.temps(), [])
+
+    def test_a_lock_released_before_the_deadline_is_taken(self):
+        holder = held_lock(self.path)
+        timer = threading.Timer(0.3, holder.stdin.close)
+        timer.start()
+        try:
+            t0 = time.monotonic()
+            got = tracker.update(self.path, lambda t: t + "x\n", t0 + 10)
+            took = time.monotonic() - t0
+        finally:
+            timer.join()
+            holder.wait(timeout=10)
+        self.assertEqual(got, "done")
+        self.assertGreaterEqual(took, 0.25)
+
+    def test_a_file_that_changes_on_every_try_fails_after_three_calls(self):
+        calls = []
+
+        def fn(text):
+            calls.append(1)
+            # The boss's Edit tool takes no lock: the file moves under us.
+            self.path.write_text(self.path.read_text() + "edit %d\n" % len(calls))
+            return text + "- mine\n"
+        got = tracker.update(self.path, fn, self.far())
+        self.assertTrue(got.startswith("failed: "), got)
+        self.assertEqual(len(calls), 3)
+        self.assertNotIn("- mine", self.path.read_text())
+        self.assertEqual(self.temps(), [])
+
+    def test_a_file_that_changes_once_is_redone_on_the_new_text(self):
+        calls = []
+
+        def fn(text):
+            calls.append(text)
+            if len(calls) == 1:
+                self.path.write_text(text + "- edited\n")
+            return text + "- mine\n"
+        self.assertEqual(tracker.update(self.path, fn, self.far()), "done")
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(self.path.read_text(), "# T\n\n## Open blockers\n- one\n- edited\n- mine\n")
+
+    def test_an_oserror_is_a_return_value_named_for_the_error(self):
+        got = tracker.update(self.dir / "missing.md", lambda t: t, self.far())
+        self.assertEqual(got, "failed: FileNotFoundError")
+        got = tracker.update(self.dir / "no-dir" / "t.md", lambda t: t, self.far())
+        self.assertEqual(got, "failed: FileNotFoundError")
+
+    def test_a_failed_write_leaves_no_temp_file(self):
+        self.dir.chmod(0o500)
+        try:
+            if os.access(self.dir, os.W_OK):
+                self.skipTest("directory permissions are not enforced here")
+            got = tracker.update(self.path, lambda t: t + "x", self.far())
+        finally:
+            self.dir.chmod(0o700)
+        self.assertEqual(got, "failed: PermissionError")
+        self.assertEqual(self.temps(), [])
+
+    def test_an_exception_from_fn_is_not_swallowed_and_changes_nothing(self):
+        before = self.path.read_bytes()
+
+        def fn(text):
+            raise KeyError("boom")
+        with self.assertRaises(KeyError):
+            tracker.update(self.path, fn, self.far())
+        self.assertEqual(self.path.read_bytes(), before)
+        self.assertEqual(self.temps(), [])
+        # and the lock was let go
+        self.assertEqual(tracker.update(self.path, lambda t: None, time.monotonic() + 0.2),
+                         "done (no change)")
+
+    def test_a_naive_when_through_update_leaves_the_file_untouched(self):
+        self.path.write_text("## Open blockers\n" + LINE + "\n")
+        before = self.path.read_bytes()
+        naive = datetime(2026, 9, 18, 12, 7)
+
+        def fn(text):
+            return text.replace(LINE, tracker.mark_cleared(LINE, naive))
+        with self.assertRaises(ValueError):
+            tracker.update(self.path, fn, self.far())
+        self.assertEqual(self.path.read_bytes(), before)
+
+
+class AddLine(unittest.TestCase):
+    def setUp(self):
+        self.dir = Path(tempfile.mkdtemp(prefix="boss-tracker-add-"))
+        self.path = self.dir / "t.md"
+        self.path.write_text("# T\n\n## Open blockers\n- one\n\n## Decisions in force\n- d\n")
+
+    def tearDown(self):
+        shutil.rmtree(self.dir)
+
+    def add(self, line="- two [x1]", tag="[x1]", title="Open blockers"):
+        return tracker.add_line(self.path, title, line, tag, time.monotonic() + 5)
+
+    def test_adds_under_the_section_before_the_blank_line(self):
+        self.assertEqual(self.add(), "done")
+        self.assertIn("- one\n- two [x1]\n\n## Decisions", self.path.read_text())
+
+    def test_the_same_tag_twice_is_one_line(self):
+        self.assertEqual(self.add(), "done")
+        self.assertEqual(self.add(), "done (already there)")
+        self.assertEqual(self.path.read_text().count("[x1]"), 1)
+
+    def test_a_missing_section_is_created(self):
+        self.assertEqual(self.add(title="Pending"), "done")
+        self.assertTrue(self.path.read_text().endswith("\n## Pending\n- two [x1]\n"))
+
+    def test_failures_come_back_as_text(self):
+        self.assertEqual(tracker.add_line(self.dir / "no.md", "T", "- l", "t", time.monotonic() + 1),
+                         "failed: FileNotFoundError")
+
+
+ADD_ONE = """
+import sys, time
+sys.path.insert(0, sys.argv[1])
+import tracker
+print(tracker.add_line(sys.argv[2], "Open blockers", "- the one [ladder id=ab12cd34]",
+                       "id=ab12cd34", time.monotonic() + 60))
+"""
+
+
+class Concurrent(unittest.TestCase):
+    """Eight processes add one tag while boss-tracker append writers run beside them."""
+
+    def setUp(self):
+        self.sb = Sandbox(extra_tools=("flock", "stat"))
+        real_stat = shutil.which("stat")
+        # A stub in front of the real stat: boss-tracker append calls it once per append,
+        # so the test can prove the writers it counts on really ran.
+        self.sb.stub_script("stat", 'exec %s "$@"' % real_stat)
+        self.pm = self.sb.cfg / "pm"
+        self.pm.mkdir()
+        self.path = self.pm / "demo.md"
+        self.path.write_text("# T\n\n## Open blockers\n\n## Decisions in force\n- d\n")
+
+    def tearDown(self):
+        self.sb.cleanup()
+
+    def test_one_line_and_no_append_lost(self):
+        adders = [subprocess.Popen(["python3", "-I", "-c", ADD_ONE, str(HERE), str(self.path)],
+                                   env=self.sb.env, stdout=subprocess.PIPE, text=True)
+                  for _ in range(8)]
+        appenders = []
+        for i in range(12):
+            p = subprocess.Popen([str(BIN / "boss-tracker"), "append", "demo"], env=self.sb.env,
+                                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+            p.stdin.write("- appended %d\n" % i)
+            p.stdin.close()
+            appenders.append(p)
+        results = []
+        for p in adders:
+            results.append(p.communicate(timeout=60)[0].strip())
+        for p in appenders:
+            p.communicate(timeout=60)
+            self.assertEqual(p.returncode, 0)
+        self.assertEqual(sorted(results), ["done"] + ["done (already there)"] * 7)
+        text = self.path.read_text()
+        self.assertEqual(text.count("id=ab12cd34"), 1)
+        for i in range(12):
+            self.assertEqual(text.count("- appended %d\n" % i), 1, i)
+        self.assertEqual(len(self.sb.calls_of("stat")), 12)
+        self.assertEqual(sorted(p.name for p in self.pm.glob(".boss-tracker-*")), [])
+        for name in ("codex", "claude", "gh", "tmux"):
+            self.assertEqual(self.sb.calls_of(name), [])
 
 
 class LadderReadsTheObjective(unittest.TestCase):

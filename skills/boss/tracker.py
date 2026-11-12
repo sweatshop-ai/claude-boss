@@ -27,6 +27,9 @@ what they wrote with this module, so the two cannot drift apart unnoticed.
     blocker_lines(text)         the same, as lines
     open_blockers(text)         its bulleted entries
     insert_in_section(body, title, line)
+    mark_cleared(raw, when)     the line with cleared= before ask=
+    update(path, fn, deadline)  the one locked, stat-checked, renamed write
+    add_line(path, title, line, tag, deadline)   one line under a section, once
 
 Marker, appended to a `## Open blockers` line:
 
@@ -54,9 +57,14 @@ and skipped, never guessed at.
 """
 from __future__ import annotations
 
+import fcntl
+import os
 import re
+import tempfile
+import time
 from datetime import datetime
 from pathlib import Path
+from typing import Callable, Optional
 
 # ---------------------------------------------------------------- the lock
 
@@ -106,10 +114,17 @@ def has_marker(line: str) -> bool:
 
 def scan_marker(line: str):
     """Return (raw_token, fields) for the first [ladder ...] token, or None."""
+    found = _scan(line)
+    return None if found is None else (line[found[0]:found[1]], found[2])
+
+
+def _scan(line: str):
+    """(start, end, fields, keys) for the first token, or None; keys maps a field
+    name to the index in `line` where that key begins."""
     start = _token_at(line)
     if start < 0:
         return None
-    i, fields = start + len(TOKEN), {}
+    i, fields, keys = start + len(TOKEN), {}, {}
     while True:
         while i < len(line) and line[i] in " \t":
             i += 1
@@ -126,6 +141,7 @@ def scan_marker(line: str):
             raise MarkerError(f"bad field name {key!r}")
         if key in fields:
             raise MarkerError(f"duplicate field {key!r}")
+        keys[key] = i
         j = eq + 1
         if j < len(line) and line[j] == '"':
             end = line.find('"', j + 1)
@@ -137,7 +153,7 @@ def scan_marker(line: str):
             while end < len(line) and line[end] not in " \t]":
                 end += 1
             fields[key], i = line[j:end], end
-    return line[start:i], fields
+    return start, i, fields, keys
 
 
 def parse_ts(value: str, field: str) -> datetime:
@@ -204,6 +220,25 @@ def rewrite(raw: str, last: int, nxt: datetime) -> str:
     return re.sub(r"(?<=\bnext=)[^\s\]]*", nxt.isoformat(), out, count=1)
 
 
+def mark_cleared(raw: str, when: datetime) -> str:
+    """`raw` with ` cleared=<when, ISO to the minute>` put before ask=, byte for byte elsewhere.
+
+    A line with no readable marker, no ask= or a cleared= already is returned as it came.
+    `when` must carry a UTC offset: parse_ts refuses a naive one, and the ladder
+    would report the marker malformed.
+    """
+    if when.tzinfo is None:
+        raise ValueError("when has no UTC offset")
+    try:
+        found = _scan(raw)
+    except MarkerError:
+        return raw
+    if found is None or "cleared" in found[2] or "ask" not in found[3]:
+        return raw
+    at = found[3]["ask"]
+    return f"{raw[:at]}cleared={when.isoformat(timespec='minutes')} {raw[at:]}"
+
+
 # ---------------------------------------------------------- Open blockers
 
 BLOCKERS = "Open blockers"
@@ -260,3 +295,68 @@ def insert_in_section(body: str, title: str, line: str) -> str:
         at -= 1
     lines.insert(at, line)
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------- the writer
+
+def update(path: Path, fn: Callable[[str], Optional[str]], deadline: float) -> str:
+    """The one write to a tracker: lock, read, `fn(text)`, temp file, rename.
+
+    Takes the sibling lock until `deadline` (a time.monotonic() value), polling
+    with LOCK_NB so a held lock is a return value and not a hang. `fn` gets the
+    text and returns the new text, or None for no change. The boss's Edit tool
+    takes no lock, so the file's (st_mtime_ns, st_size) is checked between the
+    read and the rename, and the pass is redone on the new text, 3 tries in all
+    (the ladder's process_tracker makes the same check with the same limit).
+
+    Returns "done", "done (no change)" or "failed: <reason>" and never raises
+    for those; an exception from `fn` is not swallowed (the lock is let go, the
+    file is as it was).
+    """
+    path = Path(path)
+    try:
+        with open(lock_path(path), "a") as lf:
+            while True:
+                try:
+                    fcntl.flock(lf, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    if time.monotonic() >= deadline:
+                        return "failed: lock held past the deadline"
+                    time.sleep(0.01)
+            for _ in range(3):
+                before = path.stat()
+                with open(path, newline="") as fh:
+                    text = fh.read()
+                new = fn(text)
+                if new is None:
+                    return "done (no change)"
+                fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".boss-tracker-")
+                try:
+                    with os.fdopen(fd, "w", newline="") as fh:
+                        fh.write(new)
+                    os.chmod(tmp, before.st_mode & 0o7777)
+                    now = path.stat()
+                    if (now.st_mtime_ns, now.st_size) != (before.st_mtime_ns, before.st_size):
+                        continue
+                    os.replace(tmp, path)
+                    return "done"
+                finally:
+                    if os.path.exists(tmp):
+                        os.unlink(tmp)
+            return "failed: file changed on all 3 tries"
+    except OSError as err:
+        return f"failed: {type(err).__name__}"
+
+
+def add_line(path: Path, title: str, line: str, tag: str, deadline: float) -> str:
+    """`line` at the end of section `title` unless `tag` is already in the file.
+
+    One locked step, so eight callers with one tag leave one line. Returns
+    "done", "done (already there)" or "failed: ...".
+    """
+    def fn(text: str) -> Optional[str]:
+        return None if tag in text else insert_in_section(text, title, line)
+
+    got = update(path, fn, deadline)
+    return "done (already there)" if got == "done (no change)" else got
