@@ -10,7 +10,7 @@ What to build, in one line: after N failed Codex attempts in a row the boss's tr
 | [05b](05b-policy-and-codex-health.md) | `CODEX_DOWN_AFTER`, `CODEX_UP_AFTER` and `codex_health.py` | "`policy.py` gains `CODEX_DOWN_AFTER = 3`", "`skills/boss/codex_health.py` derives the state" | 05a, 08 |
 | [05c](05c-raise-and-clear-the-blocker.md) | `track` and `--track` of `review()`, the raise, the clear, the ladder test, the test harness | "`review(..., track: str \| None = None)`", "When the state is down", "After the write a test runs", "Clearing:", "Tests use 01's stub-directory harness" | 05b |
 
-**Where other tickets point:** 06 and 10 call `tracker.update` and `tracker.add_line` (05a) and 06's and 10's `track` rule and health sync are 05c's `review()` box; 09 reuses `mark_cleared` (05a), extends `codex_health.py` (05b) and needs the blocker and its id (05c); 04 and 13 name `BOSS_ALERT` and the attempts counter (05c, 05b).
+**Where other tickets point:** 06 and 10 call `tracker.update` and `tracker.add_line` (05a) and 06's and 10's `track` rule and health sync are 05c's `review()` box; 09a extends `codex_health.py` (05b), 09b writes with `tracker.update` (05a) and needs the blocker and its id (05c); 04 and 13 name `BOSS_ALERT` and the attempts counter (05c, 05b).
 
 **Blocked by:** 05a, 05b, 05c (this file is an index; the work is in the three)
 
