@@ -341,6 +341,23 @@ class Update(unittest.TestCase):
         self.assertEqual(tracker.update(self.path, lambda t: None, time.monotonic() + 0.2),
                          "done (no change)")
 
+    def test_an_exception_from_fn_keeps_its_cause(self):
+        inner = ValueError("inner")
+        def fn(text):
+            try:
+                raise inner
+            except ValueError as err:
+                raise OSError("outer") from err
+        with self.assertRaises(OSError) as got:
+            tracker.update(self.path, fn, self.far())
+        self.assertIs(got.exception.__cause__, inner)
+        def fn2(text):
+            raise UnicodeDecodeError("utf-8", b"\xff", 0, 1, "x") from None
+        with self.assertRaises(UnicodeDecodeError) as got2:
+            tracker.update(self.path, fn2, self.far())
+        self.assertIsNone(got2.exception.__cause__)
+        self.assertTrue(got2.exception.__suppress_context__)
+
     def test_an_oserror_or_decode_error_from_fn_propagates_and_changes_nothing(self):
         before = self.path.read_bytes()
         for exc in (OSError("from fn"), UnicodeDecodeError("utf-8", b"\xff", 0, 1, "from fn")):
@@ -492,6 +509,46 @@ class AddLine(unittest.TestCase):
         self.assertTrue(self.path.read_bytes().endswith(b"- d\r\n\r\n## Pending\r\n- p [p1]\r\n"))
         self.assertNotIn(b"\n", self.path.read_bytes().replace(b"\r\n", b""))
 
+    def test_marker_tag_is_not_found_in_prose_and_a_bare_tag_is_found_in_any_line(self):
+        # Ticket 28: the tag is the caller's. A caller that wants "a marker with this id" passes
+        # marker_tag(id), which holds the token, so a note that only says the id is not "there";
+        # a caller that passes a bare tag gets "any line of the section holding it".
+        marker = ('- b [ladder id=ab12cd34 t0=2026-09-18T10:53+02:00 last=0 '
+                  'next=2026-09-18T10:58+02:00 ask="x"]')
+        self.path.write_text("## Open blockers\n- resolved id=ab12cd34, see PR 90\n")
+        self.assertEqual(self.add(marker, tracker.marker_tag("ab12cd34")), "done")
+        self.assertEqual(self.add(marker, tracker.marker_tag("ab12cd34")), "done (already there)")
+        self.assertEqual(self.path.read_text().count("[ladder id=ab12cd34 "), 1)
+        self.path.write_text("## Open blockers\n- resolved id=ab12cd34, see PR 90\n")
+        self.assertEqual(self.add("- new id=ab12cd34", "id=ab12cd34"), "done (already there)")
+
+    def test_a_malformed_marker_holding_the_tag_is_there(self):
+        # Fail safe: a hand-damaged marker is not a reason to add a second line beside it.
+        broken = "- b [ladder id=ab12cd34 t0=garbage"
+        self.path.write_text("## Open blockers\n%s\n" % broken)
+        self.assertEqual(self.add("- n", tracker.marker_tag("ab12cd34")), "done (already there)")
+
+    def test_a_non_ascii_edge_of_the_tag_gets_no_word_boundary(self):
+        # The boundary class is ASCII; an edge that is a non-ASCII letter must not switch it on.
+        self.path.write_text("## Open blockers\n- xé1\n")
+        self.assertEqual(self.add("- e1", "é1"), "done (already there)")
+        self.path.write_text("## Open blockers\n- xa1\n")
+        self.assertEqual(self.add("- a1", "a1"), "done")
+        self.assertEqual(self.add("- é", "é"), "done")
+        self.assertEqual(self.add("- é", "é"), "done (already there)")
+
+    def test_a_crlf_file_without_a_final_newline_keeps_one_ending(self):
+        self.path.write_bytes(b"## Open blockers\r\n- a")
+        self.assertEqual(self.add(), "done")
+        self.assertEqual(self.path.read_bytes(), b"## Open blockers\r\n- a\r\n- two [x1]")
+        self.assertNotIn(b"\n", self.path.read_bytes().replace(b"\r\n", b""))
+        self.assertEqual(tracker.insert_in_section("## Open blockers\r\n- a", "Open blockers", "new"),
+                         "## Open blockers\r\n- a\r\nnew")
+
+    def test_an_lf_file_without_a_final_newline_is_unchanged(self):
+        self.assertEqual(tracker.insert_in_section("## Open blockers\n- a", "Open blockers", "new"),
+                         "## Open blockers\n- a\nnew")
+
     def test_failures_come_back_as_text(self):
         self.assertEqual(tracker.add_line(self.dir / "no.md", "T", "- l", "t", time.monotonic() + 1),
                          "failed: FileNotFoundError")
@@ -562,6 +619,72 @@ class Concurrent(unittest.TestCase):
         self.assertEqual(sorted(p.name for p in self.pm.glob(".boss-tracker-*")), [])
         for name in ("codex", "claude", "gh", "tmux"):
             self.assertEqual(self.sb.calls_of(name), [])
+
+
+NON_UTF8 = {"LC_ALL": "C", "PYTHONCOERCECLOCALE": "0", "PYTHONUTF8": "0"}
+ROUTINES = HERE.parent.parent / "routines"
+
+
+def under_c_locale(code: str, *args: str) -> subprocess.CompletedProcess:
+    """`code` in a child whose default text encoding is ASCII (locale C, coercion and UTF-8 mode off)."""
+    env = {**os.environ, **NON_UTF8}
+    return subprocess.run([sys.executable, "-X", "utf8=0", "-c", code, *args], env=env,
+                          capture_output=True, text=True, timeout=60)
+
+
+class ReadersPinUtf8(unittest.TestCase):
+    """Ticket 28: `tracker.update` reads and writes UTF-8, so every other reader and writer of a tracker must
+    too, or a non-UTF-8 locale makes the ladder rewrite the file in that encoding and every later `update`
+    fail with UnicodeDecodeError."""
+
+    def setUp(self):
+        self.dir = Path(tempfile.mkdtemp(prefix="boss-tracker-utf8-"))
+        probe = under_c_locale("import locale; print(locale.getpreferredencoding(False))")
+        if probe.stdout.strip().lower().replace("-", "") in ("utf8", "utf8"):
+            self.skipTest("this interpreter cannot be made to default to a non-UTF-8 encoding")
+
+    def tearDown(self):
+        shutil.rmtree(self.dir)
+
+    def test_the_provisional_readers_of_boss_review_read_utf8(self):
+        entry = "- [prov owner/repo#7] head=%s round=01 base=main at=2026-11-12T10:00:00Z" % ("a" * 40)
+        path = self.dir / "t.md"
+        path.write_bytes(("## Open blockers\n- caf\u00e9\n\n## Provisional GO\n%s\n" % entry).encode())
+        code = ("import sys, pathlib; sys.path.insert(0, sys.argv[1]); import boss_review as br\n"
+                "p = pathlib.Path(sys.argv[2])\n"
+                "e = br._entry_of(%r)\n"
+                "print('listed', br._listed(p, e))\n"
+                "br.codex_blocker.usable_tracker = lambda track: p\n"
+                "print('pruned', br.prune_provisional('t', 'other/repo'))\n" % entry)
+        got = under_c_locale(code, str(HERE), str(path))
+        self.assertEqual(got.returncode, 0, got.stderr)
+        self.assertIn("listed True", got.stdout)
+        self.assertNotIn("cannot be read", got.stderr)
+
+    def test_the_ladder_reads_and_writes_utf8(self):
+        t0 = "2026-09-18T10:00+02:00"
+        body = ('## Open blockers\n- note \u2014 caf\u00e9\n'
+                '- b [ladder id=u123 t0=%s last=0 next=2026-09-18T10:05+02:00 ask="sign in"]\n' % t0)
+        (self.dir / "ut.goal.md").write_bytes("# Objective \u2014 ut\n_Status: OPEN_\n".encode())
+        tracker_file = self.dir / "ut.md"
+        tracker_file.write_bytes(body.encode())
+        alert = self.dir / "alert"
+        alert.write_text("#!/bin/sh\nexit 0\n")
+        alert.chmod(0o755)
+        code = ("import sys, pathlib; sys.path.insert(0, sys.argv[1]); import boss_ladder_core as c\n"
+                "from datetime import datetime, timedelta, timezone\n"
+                "d = pathlib.Path(sys.argv[2])\n"
+                "c.PM_DIR, c.STATE, c.BOSS_ALERT, c.DRY_RUN = d, d / 'state.json', sys.argv[3], False\n"
+                "c.post = lambda rung, text: True  # the alert text is not under test, and has a dash\n"
+                "c.run(datetime(2026, 9, 18, 10, 20, tzinfo=timezone(timedelta(hours=2))))\n")
+        got = under_c_locale(code, str(ROUTINES), str(self.dir), str(alert))
+        self.assertEqual(got.returncode, 0, got.stderr)
+        after = tracker_file.read_bytes().decode("utf-8")
+        self.assertIn("caf\u00e9", after)
+        self.assertIn("- note \u2014 caf\u00e9\n", after)
+        self.assertIn("last=15", after)
+        self.assertEqual(tracker.update(tracker_file, lambda t: None, time.monotonic() + 1),
+                         "done (no change)")
 
 
 class LadderReadsTheObjective(unittest.TestCase):

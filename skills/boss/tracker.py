@@ -341,7 +341,13 @@ def insert_in_section(body: str, title: str, line: str) -> str:
     at = end
     while at > head + 1 and not lines[at - 1].strip():
         at -= 1
-    lines.insert(at, line + ("\r" if eol == "\r\n" else ""))
+    cr = "\r" if eol == "\r\n" else ""
+    if cr and at == len(lines) and not lines[-1].endswith("\r"):
+        # The file has no final newline: the last line takes the break and the new one stays bare,
+        # so the file still ends as it did and no ending is mixed.
+        lines[-1] += cr
+        cr = ""
+    lines.insert(at, line + cr)
     return "\n".join(lines)
 
 
@@ -367,6 +373,7 @@ def update(path: Path, fn: Callable[[str], Optional[str]], deadline: float) -> s
     file is as it was).
     """
     path = Path(path)
+    failure = None
     try:
         with open(lock_path(path), "a") as lf:
             while True:
@@ -409,9 +416,11 @@ def update(path: Path, fn: Callable[[str], Optional[str]], deadline: float) -> s
                         os.unlink(tmp)
             return "failed: file changed on all 3 tries"
     except _FromFn as raised:
-        raise raised.args[0] from None
+        failure = raised.args[0]
     except (OSError, UnicodeDecodeError) as err:
         return f"failed: {type(err).__name__}"
+    # Raised outside the handler, so fn's exception keeps its own __cause__ and __context__.
+    raise failure
 
 
 def add_line(path: Path, title: str, line: str, tag: str, deadline: float) -> str:
@@ -420,7 +429,11 @@ def add_line(path: Path, title: str, line: str, tag: str, deadline: float) -> st
     "There" is a line of that section that holds `tag` as a whole token (not inside a
     longer id, so `id=ab12cd34` is not found in `id=ab12cd345`) and carries no
     `cleared=` value, so a cleared blocker does not hide a new one with the same id.
-    Prose and other sections do not count.
+    Other sections do not count. The tag is the caller's: a bare tag is found in any line of the section,
+    prose included (`id=ab12cd34` is found in "- resolved id=ab12cd34, see PR 90"), and a line whose marker
+    is malformed and holds the tag counts as there, so a hand-damaged marker never gets a second line beside
+    it. A caller that means "the marker with this id" passes `marker_tag(id)`, which holds the token and
+    is not found in prose.
 
     One locked step, so eight callers with one tag leave one line. Returns
     "done", "done (already there)" or "failed: ...". An empty `tag` is a ValueError:
@@ -428,9 +441,11 @@ def add_line(path: Path, title: str, line: str, tag: str, deadline: float) -> st
     """
     if not tag:
         raise ValueError("tag is empty")
-    # A tag that starts or ends in a letter or digit may not sit inside a longer word.
-    whole = re.compile("%s%s%s" % (r"(?<![A-Za-z0-9])" if tag[0].isalnum() else "", re.escape(tag),
-                                   r"(?![A-Za-z0-9])" if tag[-1].isalnum() else ""))
+    # A tag that starts or ends in an ASCII letter or digit may not sit inside a longer word. The test and
+    # the boundary class are the same class, so a non-ASCII edge gets no boundary.
+    word = "[A-Za-z0-9]"
+    whole = re.compile("%s%s%s" % ("(?<!%s)" % word if re.fullmatch(word, tag[0]) else "", re.escape(tag),
+                                   "(?!%s)" % word if re.fullmatch(word, tag[-1]) else ""))
 
     def there(text: str) -> bool:
         lines = text.split("\n")

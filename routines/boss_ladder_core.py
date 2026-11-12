@@ -161,7 +161,7 @@ def _attempt(track: str, path: Path, now: datetime, state: dict, counts: dict,
             save_state(state)
 
     stat = path.stat()
-    lines = path.read_text(errors="replace").splitlines(keepends=True)
+    lines = path.read_text(encoding="utf-8", errors="replace").splitlines(keepends=True)
     changed = False
     lo, hi = blockers_range(lines)
     for n in range(lo, hi):
@@ -300,7 +300,7 @@ def process_tracker(track: str, path: Path, now: datetime, state: dict,
             if text is None:
                 return counts
             fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".boss-ladder-")
-            with os.fdopen(fd, "w") as fh:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
                 fh.write(text)
             os.chmod(tmp, path.stat().st_mode & 0o7777)
             os.replace(tmp, path)
