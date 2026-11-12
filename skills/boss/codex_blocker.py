@@ -81,8 +81,9 @@ def default_alert() -> str:
     return os.environ.get("BOSS_ALERT", str(Path(__file__).resolve().parent / "bin" / "boss-alert"))
 
 
-def usable_tracker(track: str) -> Path | None:
-    """pm/<track>.md when it is a regular file the user owns, else None (said on stderr).
+def usable_tracker(track: str, verb: str = "raised") -> Path | None:
+    """pm/<track>.md when it is a regular file the user owns, else None (said on stderr as "no blocker can be
+    <verb>", so --choice and --choose do not word it as a raise).
     A `track` that is not a plain name is a ValueError."""
     path = boss_store.tracker_path(track)
     if path is None:
@@ -92,7 +93,7 @@ def usable_tracker(track: str) -> Path | None:
     except OSError:
         st = None
     if st is None or not stat_.S_ISREG(st.st_mode) or st.st_uid != os.getuid():
-        _say("no blocker can be raised: %s is not a regular file of yours" % path)
+        _say("no blocker can be %s: %s is not a regular file of yours" % (verb, path))
         return None
     return path
 
@@ -213,7 +214,7 @@ def choice(track: str):
     carries its id); `chosen` (choice is the last one recorded); `malformed` (the only `cd` lines cannot be read,
     or more than one is open, or the tracker is not a regular file of yours; the third item is the reason). A bad
     `track` is a ValueError (the command prints `malformed` for it too)."""
-    path = usable_tracker(track)
+    path = usable_tracker(track, "read")
     if path is None:
         return "malformed", None, "pm/%s.md is not a regular file of yours" % track
     try:
@@ -241,7 +242,7 @@ def choose(track: str, value: str, now: datetime | None = None, test_cmd: str | 
         ok, why, _ = consent.check(track, consent.cmd_hash(test_cmd))
         if not ok:
             return 2, "no consent for tests-alone: " + why
-    path = usable_tracker(track)
+    path = usable_tracker(track, "answered")
     if path is None:
         return 2, "no usable tracker for %s" % track
     result = {}
