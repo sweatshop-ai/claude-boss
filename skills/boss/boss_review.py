@@ -947,8 +947,9 @@ def _post(job: _Job, body: str) -> bool:
     return run.code == 0
 
 
-def _log_refused(job: _Job, attempts: list[dict]) -> None:
-    """The attempts of a refused answer, with no round: nothing was claimed, so `round` is null."""
+def _log_refused(job: _Job, attempts: list[dict], what: str = "the attempts of the refused answer") -> None:
+    """The attempts of an answer that ends the run without a round, with `round` null: nothing was claimed.
+    `what` names them in the line said when the log cannot be appended to."""
     reviews = _reviews_dir()
     try:
         reviews.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -956,7 +957,7 @@ def _log_refused(job: _Job, attempts: list[dict]) -> None:
         append_attempts(reviews / "attempts.jsonl",
                         [{"ts": _now(), "repo": job.key, "pr": job.pr, "round": None, **a} for a in attempts])
     except OSError as exc:
-        _say("the attempts of the refused answer are not logged: %s" % exc)
+        _say("%s are not logged: %s" % (what, exc))
 
 
 # ------------------------------------------------------- the list of provisional GOs ----
@@ -1339,7 +1340,8 @@ def review(repo: str, pr: int, checkout: str, author: str, *,
                 if codex["reason"] == "error":
                     label = label._replace(exit_code=codex["exit_code"], stderr=stderr_block(codex["stderr_tail"]))
         except OSError as exc:
-            _log_refused(job, [{k: a[k] for k in ("reviewer", "reason", "exit_code")} for a in chain["attempts"]])
+            _log_refused(job, [{k: a[k] for k in ("reviewer", "reason", "exit_code")} for a in chain["attempts"]],
+                         "the attempts of the answer whose findings could not be made safe")
             _sync_health(track)
             return _failed("the findings cannot be made safe to publish: %s" % exc)
     result = _keep_and_post(job, seen, chain, findings, label, tracker_path=tracker_path)

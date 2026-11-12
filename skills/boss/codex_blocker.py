@@ -60,7 +60,7 @@ ALERT_TIMEOUT = 20      # seconds, as the ladder's post
 LOCK_WAIT = 20.0
 CLEAR_SLACK = 60        # seconds a cleared= may lie after `now` before it is taken as a typo
 ID_RE = re.compile(r"^cd[0-9]{12}$")
-CD_IN_TEXT = re.compile(r"id=cd[0-9]{12}")
+CD_ID = re.compile(r"(?<=\s)id=cd[0-9]{12}(?![0-9A-Za-z])")   # the marker's own id= field: a word of its own
 CHOICES = ("wait", "accept-fallback")                   # what --choose writes; 09c adds "tests-alone"
 READABLE = CHOICES + ("tests-alone",)                   # what the reader accepts
 ASK = "Codex is down: choose wait or accept the fallback review"
@@ -94,6 +94,15 @@ def usable_tracker(track: str) -> Path | None:
     return path
 
 
+def _is_cd(line: str) -> bool:
+    """Does the line carry a marker whose own `id=` field is a `cd` id? Only the text from the `[ladder` token
+    on is looked at, with the quoted values (ask=, cost=) taken out: `xid=cd...`, an id with a thirteenth digit
+    and an id named in another blocker's prose are not this marker's."""
+    if not tracker.has_marker(line):
+        return False
+    return bool(CD_ID.search(re.sub(r'"[^"]*"', '""', line[line.find(tracker.TOKEN):])))
+
+
 def _classify(lines: list[str]):
     """(open_ids, broken) over the Open blockers body: indices of the open valid `cd` lines, and of the
     `cd` lines that cannot be read and are not closed by hand (each with its reason)."""
@@ -101,7 +110,7 @@ def _classify(lines: list[str]):
     opened, broken = [], []
     for i in range(lo, hi):
         line = lines[i]
-        if not tracker.has_marker(line) or not CD_IN_TEXT.search(line):
+        if not _is_cd(line):
             continue
         try:
             found = tracker.scan_marker(line)
@@ -124,7 +133,7 @@ def _newest_clear(lines: list[str], now: datetime, name: str) -> datetime | None
     newest = None
     for i in range(lo, hi):
         line = lines[i]
-        if not tracker.has_marker(line) or not CD_IN_TEXT.search(line):
+        if not _is_cd(line):
             continue
         try:
             found = tracker.scan_marker(line)

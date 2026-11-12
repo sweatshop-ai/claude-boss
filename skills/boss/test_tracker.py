@@ -384,6 +384,33 @@ class Update(unittest.TestCase):
         self.assertEqual(self.path.read_bytes(),
                          "# T\n\n## Open blockers\n- caf\u00e9\n- na\u00efve\n".encode())
 
+    def test_a_symlinked_tracker_is_not_followed(self):
+        real = self.dir / "real.md"
+        real.write_text("# real\n\n## Open blockers\n")
+        self.path.unlink()
+        self.path.symlink_to(real)
+        calls = []
+        got = tracker.update(self.path, lambda t: calls.append(t) or t + "- x\n", self.far())
+        self.assertEqual(got, "failed: the tracker is a symbolic link")
+        self.assertEqual((calls, real.read_text(), self.path.is_symlink(), self.temps()),
+                         ([], "# real\n\n## Open blockers\n", True, []))
+
+    def test_a_symlink_swapped_in_during_the_pass_is_not_written_through(self):
+        real = self.dir / "real.md"
+        real.write_text("# real\n\n## Open blockers\n")
+        calls = []
+
+        def fn(text):
+            calls.append(text)
+            if len(calls) == 1:
+                link = self.dir / "link.md"
+                link.symlink_to(real)
+                os.replace(link, self.path)
+            return text + "- mine\n"
+        got = tracker.update(self.path, fn, self.far())
+        self.assertEqual(got, "failed: the tracker is a symbolic link")
+        self.assertEqual((len(calls), real.read_text(), self.temps()), (1, "# real\n\n## Open blockers\n", []))
+
     def test_a_naive_when_through_update_leaves_the_file_untouched(self):
         self.path.write_text("## Open blockers\n" + LINE + "\n")
         before = self.path.read_bytes()
