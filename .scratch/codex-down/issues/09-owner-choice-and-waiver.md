@@ -1,10 +1,10 @@
 # 09: The owner's choice, and the waiver
 
-**What to build:** when the `Codex down` blocker (05) is open, the boss asks the owner once, through `AskUserQuestion`, what to do: wait, accept the fallback review, or merge on tests alone. The answer is written to the tracker under the blocker's id, so it survives a restart and is asked once. "Merge on tests alone" is never a loose sentence: it is `boss_review.py --waive`, which records a `waived` round only when the owner chose it, the tests pass on the head, and the head has not moved. 04's gate then lets a waived round merge only on a branch the repo lists as non-deploying.
+**What to build:** when the `Codex down` blocker (05c) is open, the boss asks the owner once, through `AskUserQuestion`, what to do: wait, accept the fallback review, or merge on tests alone. The answer is written to the tracker under the blocker's id, so it survives a restart and is asked once. "Merge on tests alone" is never a loose sentence: it is `boss_review.py --waive`, which records a `waived` round only when the owner chose it, the tests pass on the head, and the head has not moved. 04's gate then lets a waived round merge only on a branch the repo lists as non-deploying.
 
-**Scope:** new on 2026-10-04, split out of the original 05 after Codex review 3 of the plan (findings 3, 8, 23) and Codex review 1 (finding 7), with the owner-accepted premortem (R25). Blocked by 05 (the blocker and its id) and 08 (the fallback the second option names, and the merge rule). A waived merge is the owner's explicit acceptance of no review; it is not put on 06's list and Codex does not re-review it.
+**Scope:** new on 2026-10-04, split out of the original 05 (now 05a to 05c) after Codex review 3 of the plan (findings 3, 8, 23) and Codex review 1 (finding 7), with the owner-accepted premortem (R25). Blocked by 05c (the blocker and its id; it brings 05a's `mark_cleared` and 05b's `codex_health.py` with it) and 08 (the fallback the second option names, and the merge rule). A waived merge is the owner's explicit acceptance of no review; it is not put on 06's list and Codex does not re-review it.
 
-**Blocked by:** 05 (A dead reviewer becomes an open blocker), 08 (The fallback review, labelled and provisional)
+**Blocked by:** 05c (A dead reviewer becomes an open blocker), 08 (The fallback review, labelled and provisional)
 
 **Status:** ready-for-agent
 
