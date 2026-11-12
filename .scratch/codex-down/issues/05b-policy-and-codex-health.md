@@ -6,7 +6,7 @@
 
 **Blocked by:** 05a (The tracker writer), 08 (The fallback review, labelled and provisional). Ticket 13 (an attempt of a refused answer is logged) is done; the box reads its `round: null` lines.
 
-**Status:** ready-for-agent
+**Status:** done (merged, PR 94)
 
 What counts, and the numbers (finding 7, R21, R22):
 

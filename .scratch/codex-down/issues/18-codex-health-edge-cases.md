@@ -1,5 +1,7 @@
 # 18: Codex health, edge cases found in the review of 05b
 
+**Blocked by:** 05b (merged, PR 94)
+
 **Status:** ready-for-agent
 
 Found by the fallback review of PR 94 (class c and d, no round blocked on them). Each is a small box.
