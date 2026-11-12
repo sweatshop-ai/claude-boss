@@ -896,7 +896,8 @@ def comment_body(number: int, author: str, head_sha: str, verdict: str, findings
     if findings:
         parts.append(findings)
     if fallback.reason == "error":
-        said = "Codex exited with code %s." % fallback.exit_code
+        said = ("Codex exited with code %s." % fallback.exit_code if fallback.exit_code is not None
+                else "Codex could not be started.")
         parts.append(said + (" Codex said:\n\n" + fallback.stderr if fallback.stderr else " It said nothing."))
     parts.append(FALLBACK_LAST_LINE)
     return "\n\n".join(parts)

@@ -320,6 +320,8 @@ class ChainShape(Base):
                 self.assertEqual((result.exit_code, result.round), (7, None))
                 self.assertEqual(self.comments(), [])
                 self.assertFalse(self.reviews.exists())
+                self.assertEqual((self.sb.calls_of("claude"), self.sb.calls_of("codex")), ([], []))
+                self.assertGhVerbs("view", "diff", "view")
                 self.sb.guard()
 
     def test_a_second_attempt_is_not_accepted_when_the_fallback_is_off(self):
@@ -346,6 +348,11 @@ class Wording(Base):
         self.assertNotIn("Codex review", text)
         self.assertTrue(text.startswith("Fallback review 2 ("))
         self.assertTrue(text.endswith(LAST))
+
+    def test_an_error_with_no_exit_code_says_codex_did_not_start(self):
+        text = br.comment_body(2, "a", "h" * 40, "GO", fallback=br.FallbackLabel(MODEL, "error", None, "    boom"))
+        self.assertIn("Codex could not be started. Codex said:\n\n    boom", text)
+        self.assertNotIn("None", text)
 
     def test_an_error_with_no_stderr_says_so(self):
         text = br.comment_body(2, "a", "h" * 40, "GO", fallback=br.FallbackLabel(MODEL, "error", 9, ""))

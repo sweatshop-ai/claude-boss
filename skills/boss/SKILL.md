@@ -609,8 +609,8 @@ up, a unit restart, an env file — is dispatched by you and executed by the wor
 your dispatch; you answer for it and tell them afterwards, with the acceptance lines.
 Never write "type apply in her pane". Ask them only for what only their hand can do: a
 password, a browser sign-in, Cloudflare, a GitHub token, a purchase — and then say
-exactly what to do and where; a command goes on your session card too (P12). The same holds for merges on a Codex GO, or on a provisional fallback GO where the repo marks
-the branch non-deploying, and for restarts of a worker whose task is finished and whose handoff is on
+exactly what to do and where; a command goes on your session card too (P12). The same holds for merges where nothing deploys, on a Codex GO or on a provisional fallback GO (the repo
+marks the branch non-deploying), and for restarts of a worker whose task is finished and whose handoff is on
 disk: do it, log it, tell them. Before the change, check that the evidence supports it
 (staged files, preflight, rollback tested up to the reload).
 

@@ -63,8 +63,8 @@ class MergeRule(unittest.TestCase):
         self.assertIn("no merge order is given on a GO that exists only in a message", text)
 
     def test_the_sentence_on_production_merges_follows_the_rule(self):
-        self.assertIn("merges on a Codex GO, or on a provisional fallback GO where the repo marks the branch "
-                      "non-deploying", flat())
+        self.assertIn("merges where nothing deploys, on a Codex GO or on a provisional fallback GO (the repo "
+                      "marks the branch non-deploying)", flat())
 
 
 if __name__ == "__main__":
