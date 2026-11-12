@@ -145,7 +145,7 @@ class TheEntry(ListBase):
             "- [prov owner/repo#5] head=a round=01 base=main at=%s" % at,                    # head too short
             "- [prov owner/repo#5] head=%s round=01 base=main at=%s" % ("a" * 41, at),       # head too long
             "- [prov owner/repo#5] head=%s round=1 base=main at=%s" % (sha, at),             # round of one digit
-            "- [prov owner/repo#5] head=%s round=001 base=main at=%s" % (sha, at),           # round of three
+            "- [prov owner/repo#5] head=%s round=1x base=main at=%s" % (sha, at),            # round not a number
             "- [prov owner/repo#5] head=%s round=01 base=main at=x" % sha,                   # at= no date
             "- [prov owner/repo#5] head=%s round=01 base=main at=2026-11-01" % sha,          # at= no time
         ]
@@ -157,6 +157,11 @@ class TheEntry(ListBase):
         self.provisional_go()
         self.assertEqual(self.text(), before + self.line() + "\n")          # all of them stay, the entry is added
         self.assertEqual([e.line for e in self.entries()], [self.line()])
+
+    def test_a_round_of_three_digits_is_written_and_read_back(self):
+        entry = br.ProvEntry("owner/repo", 5, "a" * 40, 100, "main", "2026-11-01T10:00:00Z")
+        self.assertEqual(br.provisional_entries("## Provisional GO\n" + entry.line + "\n"), [entry])
+        self.assertIn("round=100 ", entry.line)
 
     def test_a_head_of_seven_characters_and_a_zone_offset_are_entries(self):
         for line in ("- [prov owner/repo#5] head=abcdef0 round=01 base=main at=2026-11-01T10:00:00Z",

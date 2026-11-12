@@ -967,7 +967,7 @@ def _log_refused(job: _Job, attempts: list[dict], what: str = "the attempts of t
 PROV_SECTION = "Provisional GO"
 # As strict as what `_with_entry` writes: a hand-edited line off that form is no entry and is never replaced.
 PROV_LINE = re.compile(r"- \[prov (?P<repo>[A-Za-z0-9._-]+/[A-Za-z0-9._-]+)#(?P<pr>[0-9]+)\] "
-                       r"head=(?P<head>[0-9a-f]{7,40}) round=(?P<round>[0-9]{2}) base=(?P<base>\S+) "
+                       r"head=(?P<head>[0-9a-f]{7,40}) round=(?P<round>[0-9]{2,}) base=(?P<base>\S+) "
                        r"at=(?P<at>[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:Z|[+-][0-9]{2}:[0-9]{2}))")
 _H2 = re.compile(r"##\s")
 _PROV_H2 = re.compile(r"##\s+%s\s*" % re.escape(PROV_SECTION))

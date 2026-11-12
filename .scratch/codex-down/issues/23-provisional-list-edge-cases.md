@@ -13,7 +13,7 @@
 **Built (Aisha, 2026-11-12):**
 
 - Box 1: `review()` calls `usable_tracker` once whenever `track` is given and hands `_sync_health(track, tracker_path)` the result; a `None` skips the sync. `codex_blocker.sync` keeps its signature (05c's tests record it by name), and its own call is silent for a usable track. `test_a_track_that_is_missing_a_symlink_or_a_directory_does_the_same` counts both lines (one each).
-- Box 2: `PROV_LINE` is `owner/repo` (`[A-Za-z0-9._-]+/[A-Za-z0-9._-]+`), head `{7,40}`, round `{2}`, `at=` an ISO 8601 time with `Z` or an offset. 06b's parser is the same `_entry_of`, so one change covers both. Tests: eight malformed lines are no entry and are not replaced; the 7-character head and the offset are entries.
+- Box 2: `PROV_LINE` is `owner/repo` (`[A-Za-z0-9._-]+/[A-Za-z0-9._-]+`), head `{7,40}`, round `{2,}` (Fallback review 1: `%02d` writes three digits from round 100), `at=` an ISO 8601 time with `Z` or an offset. 06b's parser is the same `_entry_of`, so one change covers both. Tests: eight malformed lines are no entry and are not replaced; the 7-character head and the offset are entries.
 - Box 3: `test_a_pr_that_cannot_be_read_after_the_write_keeps_the_entry_and_posts_nothing`.
 
 **Declined, with evidence:** the sentence "an entry means must recheck, not a comment exists" is not written into `06b-prune-provisional.md` and `10-recheck-and-release-stop.md`: open PR 106 edits both files (and 04, 06, 06b, 09c, 10, 11, 22, 27) and the instruction for this build was not to touch them. It is in `CONTEXT.md` under "Provisional entry" instead; whoever lands after 106 can point those two tickets there.
