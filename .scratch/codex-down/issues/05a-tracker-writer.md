@@ -4,7 +4,7 @@
 
 **Scope:** Split out of the original ticket 05 on 2026-11-12 (Joaquin, task #05X, on Chiara's ruling on finding 12 of spec round 1, `plan-review-codex-05-1.md`): 05 became 05a, 05b and 05c, each one session (about one module plus its tests). Every box of the old 05 is in exactly one of the three, unchanged but for the citations that name another of the three; the old 05 (`05-dead-reviewer-blocker.md`) is now an index. The numbers R21 to R25 and the findings quoted in the boxes are the old 05's. Details of the old 05's scope, kept for the history: the code is `main` 0.23 (`boss-jev.py` and its `tracker_add` were removed in 0.13.0, so nothing is moved into `add_line`; `tracker.update` and `tracker.add_line` are written new, on the pattern of `routines/boss_ladder_core.py` `process_tracker`, the one writer that already takes the lock, checks the stat and renames; `policy.CODEX_DOWN_AFTER`, `policy.CODEX_UP_AFTER`, `codex_health.py` and any `track` handling do not exist on `main`). Tests are in `test_tracker.py`; the box needs no `codex`, `claude` or `gh`, and uses a temp directory and no real `pm/`.
 
-**Blocked by:** nothing (02 is merged). This is why 06 and 10, which need only `update` and `add_line` from this group, are not held by 08 for the writer.
+**Blocked by:** nothing (02 is merged). The writer needs nothing from 08, so it can be built first. 06 and 10 use `update` and `add_line` from here, but they also need 05c's `track` parameter, so they wait for 05c (and 08) as their own Blocked-by lines say.
 
 **Status:** ready-for-agent
 
