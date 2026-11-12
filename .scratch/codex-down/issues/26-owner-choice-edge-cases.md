@@ -2,7 +2,7 @@
 
 **Blocked by:** 09b
 
-**Status:** ready-for-agent
+**Status:** done (Otilia built it, PR 117)
 
 Found by the fallback reviews of PR 104, rounds 1 and 2 (Opus, Codex unavailable: usage limit until 8:02 PM; no class a, b or c finding left; round 2 GO). Review files: the `09b-reviews/` directory beside the 09b worktree.
 
