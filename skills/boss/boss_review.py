@@ -53,7 +53,7 @@ from typing import NamedTuple
 import boss_store
 import policy
 from reviewer_chain import (CODEX_FAILURES, GO_NOGO, STDERR_TAIL, TERM_GRACE, Fallback, _parse, _snapshot,
-                            _stop, claude_argv)
+                            _stop, child_env, claude_argv)
 
 HERE = Path(__file__).resolve().parent
 CHAIN = HERE / "reviewer_chain.py"
@@ -221,21 +221,21 @@ def _stop_below(seen: list[_Seen]) -> None:
             os.close(fd)
 
 
-def _spawn(argv: list[str], timeout: float, cwd: str | None = None) -> _Out:
+def _spawn(argv: list[str], timeout: float, cwd: str | None = None, env: dict | None = None) -> _Out:
     """Run one program with a closed stdin, its output in temporary files, and stop it and
     everything it started, in whatever session, when it outlasts `timeout`. A program that cannot
     be started, or whose output cannot be kept, has no exit code: the caller sees `code` None."""
     try:
         with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
-            return _run_into(argv, timeout, cwd, out, err)
+            return _run_into(argv, timeout, cwd, out, err, env)
     except OSError as exc:
         return _Out(None, b"", str(exc), False)
 
 
-def _run_into(argv: list[str], timeout: float, cwd: str | None, out, err) -> _Out:
+def _run_into(argv: list[str], timeout: float, cwd: str | None, out, err, env: dict | None = None) -> _Out:
     try:
         proc = subprocess.Popen(argv, cwd=cwd, stdin=subprocess.DEVNULL, stdout=out, stderr=err,
-                                start_new_session=True)
+                                start_new_session=True, env=env)
     except OSError as exc:
         return _Out(None, b"", str(exc), False)
     try:
@@ -936,6 +936,7 @@ def review(repo: str, pr: int, checkout: str, author: str, *,
 # ------------------------------------------------------------ the fallback, confined ----
 CHECK_PROMPT = "ok"         # one word: the check reads the init event, not the answer
 CHECK_FLAGS = ("--output-format", "stream-json", "--verbose")   # `claude -p` refuses stream-json without --verbose
+BUILTIN_PLUGIN_PATH = "builtin"     # the `path` claude 2.1.289 gives the plugins that are part of it
 _MISSING = object()
 
 
@@ -943,12 +944,16 @@ def fallback_spec(timeout: int = policy.REVIEW_FALLBACK_TIMEOUT) -> Fallback:
     """The PR gate's fallback reviewer: `claude` on the policy's model, limited to the built-in tools
     Read, Grep and Glob, with every MCP server and every slash command off, and any permission it was
     not given denied rather than asked for. `--tools` alone leaves the MCP tools in (checked with
-    `claude` 2.1.288 and 2.1.289), hence `--strict-mcp-config`. It runs when Codex is absent, hangs or
-    fails, and not after a Codex answer that has no verdict. Not yet run by review(): ticket 08 does that."""
+    `claude` 2.1.288 and 2.1.289), hence `--strict-mcp-config`. `--restricted` keeps every settings file
+    out: `claude -p` skips the workspace trust dialog, so without it the checkout's `.claude/settings.json`
+    runs its hooks (a `SessionStart` hook ran a command there, checked with 2.1.289), as do the owner's
+    own hooks and plugins, and the owner's CLAUDE.md and auto-memory reach the model; it also confines
+    the file tools to the working directory. It runs when Codex is absent, hangs or fails, and not after
+    a Codex answer that has no verdict. Not yet run by review(): ticket 08 does that."""
     return Fallback("opus", policy.REVIEW_FALLBACK_MODEL, timeout=timeout,
-                    when=("absent", "timeout", "error"),
+                    when=("absent", "timeout", "error"), env_unset=policy.REVIEW_FALLBACK_ENV_UNSET,
                     extra_args=("--tools", ",".join(policy.REVIEW_FALLBACK_TOOLS),
-                                "--strict-mcp-config", "--disable-slash-commands",
+                                "--strict-mcp-config", "--disable-slash-commands", "--restricted",
                                 "--permission-mode", policy.REVIEW_FALLBACK_PERMISSION_MODE))
 
 
@@ -956,15 +961,29 @@ def _describe(value) -> str:
     return "absent" if value is _MISSING else json.dumps(value)[:200]
 
 
+def _plugin_label(plugin) -> str:
+    return str(plugin.get("name", "?"))[:60] if isinstance(plugin, dict) else repr(plugin)[:60]
+
+
 def init_problems(events: list[dict]) -> list[str]:
-    """Why the events of a fallback run do not show the tools, MCP servers and model it was asked for;
-    [] when they do. Fail-closed: exactly
-    one init event; its `tools` exactly Glob, Grep and Read (a list of strings, each once, in any
-    order); its `mcp_servers` present and an empty list; its `model` the policy's model id, whole."""
+    """Why the events of a fallback run do not show the confinement it was asked for; [] when they do.
+    Fail-closed. No `system` event whose subtype starts `hook_`: a hook started or answered, so a
+    settings file was loaded. Exactly one init event; its `tools` exactly Glob, Grep and Read (a list of
+    strings, each once, in any order); its `mcp_servers` present and an empty list; its `slash_commands`
+    present and an empty list; its `model` the policy's model id, whole; its `permissionMode` the policy's;
+    its `plugins` a list in which each entry is an object whose `path` is "builtin" (what claude 2.1.289
+    reports for the plugins that are part of it; any other path is an installed plugin). That version's
+    init event has no field for hooks, hence the first rule."""
+    hooks = [e for e in events if e.get("type") == "system" and isinstance(e.get("subtype"), str)
+             and e["subtype"].startswith("hook_")]
+    problems = []
+    if hooks:
+        problems.append("the stream holds %d hook event%s: a settings file was loaded and its hooks ran"
+                        % (len(hooks), "" if len(hooks) == 1 else "s"))
     inits = [e for e in events if e.get("type") == "system" and e.get("subtype") == "init"]
     if len(inits) != 1:
-        return ["expected exactly one init event, found %d" % len(inits)]
-    init, problems = inits[0], []
+        return problems + ["expected exactly one init event, found %d" % len(inits)]
+    init = inits[0]
     tools = init.get("tools", _MISSING)
     wanted = sorted(policy.REVIEW_FALLBACK_TOOLS)
     if not (isinstance(tools, list) and all(isinstance(t, str) for t in tools)):
@@ -974,9 +993,24 @@ def init_problems(events: list[dict]) -> list[str]:
     servers = init.get("mcp_servers", _MISSING)
     if servers != []:
         problems.append("the init event's mcp_servers is %s, not an empty list" % _describe(servers))
+    commands = init.get("slash_commands", _MISSING)
+    if commands != []:
+        problems.append("the init event's slash_commands is %s, not an empty list" % _describe(commands))
     model = init.get("model", _MISSING)
     if not isinstance(model, str) or model != policy.REVIEW_FALLBACK_MODEL:
         problems.append("the init event's model is %s, not %r" % (_describe(model), policy.REVIEW_FALLBACK_MODEL))
+    mode = init.get("permissionMode", _MISSING)
+    if mode != policy.REVIEW_FALLBACK_PERMISSION_MODE:
+        problems.append("the init event's permissionMode is %s, not %r"
+                        % (_describe(mode), policy.REVIEW_FALLBACK_PERMISSION_MODE))
+    plugins = init.get("plugins", _MISSING)
+    if not isinstance(plugins, list):
+        problems.append("the init event's plugins is %s, not a list" % _describe(plugins))
+    else:
+        outside = [_plugin_label(p) for p in plugins
+                   if not (isinstance(p, dict) and p.get("path") == BUILTIN_PLUGIN_PATH)]
+        if outside:
+            problems.append("the init event lists plugins that are not part of claude: %s" % ", ".join(outside))
     return problems
 
 
@@ -1000,13 +1034,13 @@ def _events(out: bytes) -> tuple[list[dict], list[str]]:
 
 def check_fallback(checkout: str, timeout: int = policy.REVIEW_FALLBACK_TIMEOUT) -> list[str]:
     """Run the fallback call once, from `checkout`, with a one-word prompt in stream-JSON mode, and
-    say why what it printed does not show the tools, MCP servers and model it was asked for; [] means
-    it does (the permission mode and slash commands are not read). The argv is the one a
+    say why what it printed does not show the confinement it was asked for (`init_problems`); [] means
+    it does. The argv is the one a
     review sends (`claude_argv` of `fallback_spec`) plus CHECK_FLAGS, so the two cannot drift. A run
     that is stopped, cannot be started or exits non-zero is not a pass, whatever it printed first."""
     spec = fallback_spec(timeout)
     probe = dataclasses.replace(spec, extra_args=spec.extra_args + CHECK_FLAGS)
-    run = _spawn(claude_argv(probe, CHECK_PROMPT), timeout, cwd=checkout)
+    run = _spawn(claude_argv(probe, CHECK_PROMPT), timeout, cwd=checkout, env=child_env(probe))
     if run.timed_out:
         return ["claude ran past %ss and was stopped" % timeout]
     if run.code is None:
@@ -1024,8 +1058,10 @@ def _check_main(checkout: str) -> int:
         _say("check-fallback: " + problem)
     if problems:
         return EXIT_CHECK_FAILED
-    print("fallback check passed: tools %s; no MCP servers; model %s"
-          % (", ".join(sorted(policy.REVIEW_FALLBACK_TOOLS)), policy.REVIEW_FALLBACK_MODEL))
+    print("fallback check passed: tools %s; permission mode %s; model %s; no MCP servers, no slash "
+          "commands, no hooks, no plugins but claude's own"
+          % (", ".join(sorted(policy.REVIEW_FALLBACK_TOOLS)), policy.REVIEW_FALLBACK_PERMISSION_MODE,
+             policy.REVIEW_FALLBACK_MODEL))
     return EXIT_CHECK_PASSED
 
 

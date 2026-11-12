@@ -668,10 +668,16 @@ class FlagsRoundTrip(Base):
                  rc.Fallback("opus", "claude-opus-5-5", timeout=7, allowed_tools=("Read", "Grep"),
                              when=("absent", "error"),
                              extra_args=("--tools", "Read", "--permission-mode", "dontAsk")),
-                 rc.Fallback("x", "m", timeout=1, when=(), extra_args=("--a", "", "b c", '"q"'))]
+                 rc.Fallback("x", "m", timeout=1, when=(), extra_args=("--a", "", "b c", '"q"')),
+                 rc.Fallback("opus", "claude-opus-5-5", env_unset=("CLAUDE_CODE_PLUGIN_DIRS", "X_Y"))]
         for fb in specs:
             with self.subTest(fb=fb):
                 self.assertEqual(self.rebuilt(fb), fb)
+
+    def test_an_env_unset_that_is_not_a_tuple_of_names_is_refused(self):
+        for bad in (["A"], "A", ("A=1",), ("A,B",), ("",), (3,), None):
+            with self.subTest(env_unset=bad), self.assertRaises(ValueError):
+                rc.Fallback("opus", OPUS_ID, env_unset=bad)
 
     def test_a_tool_list_the_command_line_cannot_carry_is_refused_not_changed(self):
         # --fallback-tools is one comma list: a tool with a comma in it would come back as two
@@ -817,6 +823,26 @@ class Cli(Base):
         self.assertEqual(self.sb.calls_of("claude")[0].argv,
                          ["--tools", "Read,Grep", "--strict-mcp-config", "-p", "--model",
                           "claude-sonnet-5-5", "the prompt"])
+
+    def test_env_unset_keeps_the_named_variables_from_the_claude_child_and_only_those(self):
+        self.sb.stub("codex", answer=RAMBLE)
+        self.sb.stub_script("claude", 'env > "$R/claude.env"; echo "VERDICT: APPROVE"')
+        r = self.cli("--words", "APPROVE,REJECT", "--fallback-name", "opus", "--fallback-model", OPUS_ID,
+                     "--fallback-env-unset", "BOSS_TEST_PLUGINS,BOSS_TEST_ABSENT",
+                     env_extra={"BOSS_TEST_PLUGINS": "/somewhere", "BOSS_TEST_KEPT": "yes"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(len(self.sb.calls_of("claude")), 1)
+        env = (self.sb.root / "claude.env").read_text()
+        self.assertNotIn("BOSS_TEST_PLUGINS", env)
+        self.assertIn("BOSS_TEST_KEPT=yes", env)
+        self.assertIn("PATH=", env)
+
+    def test_without_env_unset_the_claude_child_inherits_everything(self):
+        self.sb.stub("codex", answer=RAMBLE)
+        self.sb.stub_script("claude", 'env > "$R/claude.env"; echo "VERDICT: APPROVE"')
+        r = self.cli("--words", "APPROVE,REJECT", "--fallback", "opus", env_extra={"BOSS_TEST_PLUGINS": "/somewhere"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("BOSS_TEST_PLUGINS=/somewhere", (self.sb.root / "claude.env").read_text())
 
     def test_extra_args_that_are_not_a_json_list_of_strings_are_a_usage_error(self):
         base = ["--words", "GO,NO-GO", "--fallback-name", "h", "--fallback-model", "m"]

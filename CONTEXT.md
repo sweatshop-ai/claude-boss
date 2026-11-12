@@ -117,7 +117,8 @@ Codex's answer fails the rule.
 usable verdict always wins, whatever the exit status.
 
 **Fallback**: the spec of the model asked when Codex fails: a name, an exact
-model id, a timeout (twice Codex's unless set), an optional tool restriction, extra `claude` flags
+model id, a timeout (twice Codex's unless set), an optional tool restriction, variables
+the child does not inherit (`env_unset`), extra `claude` flags
 (`extra_args`, put ahead of `-p` because `--tools` and its kind take any number
 of values and `-p` ends them), and which Codex reasons let it run. Optional;
 without one the chain is Codex only. Callers name one by **preset**
@@ -129,12 +130,20 @@ caller that starts the chain as a child process.
 **Read-only fallback**: the PR gate's fallback, `boss_review.fallback_spec()`:
 `claude` on the policy's exact model, `--tools Read,Grep,Glob`,
 `--strict-mcp-config` (without it `--tools` alone leaves every MCP tool in),
-`--disable-slash-commands` and `--permission-mode dontAsk`. The review does not
-run it yet. `boss_review.py --check-fallback --checkout DIR` runs it once from
-DIR with a one-word prompt and passes only if the init event shows exactly
-Glob, Grep and Read, no MCP servers and that model id (it does not read the
-permission mode or the slash commands). It is a smoke test on the real CLI; the
-suite checks the argv and the decision on a stub.
+`--disable-slash-commands`, `--restricted` and `--permission-mode dontAsk`.
+`--restricted` keeps every settings file out (`claude -p` skips the workspace
+trust dialog, so without it a hook in the PR checkout's `.claude/settings.json`
+runs, and so do the owner's own hooks and plugins) and confines the file tools
+to the working directory. The `claude` child also does not inherit
+`CLAUDE_CODE_PLUGIN_DIRS` or `CLAUDE_CODE_PLUGIN_SEED_DIR` (`env_unset` on the
+spec): a plugin directory named there loads its hooks even under `--restricted`
+(found 2026-11-12 by the real check). The review does not run it yet.
+`boss_review.py --check-fallback --checkout DIR` runs it once from DIR with a
+one-word prompt and passes only if the stream holds no hook event and the init
+event shows exactly Glob, Grep and Read, no MCP servers, no slash commands,
+only plugins that are part of claude, that permission mode and that model id.
+It is a smoke test on the real CLI; the suite checks the argv and the decision
+on a stub.
 
 **Review round**: one run of `skills/boss/boss_review.py` on one PR head. The
 review runs first (Codex only, in a child process told `--cwd` the checkout, as

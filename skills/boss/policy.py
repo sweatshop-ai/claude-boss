@@ -58,9 +58,13 @@ STOP_MIN = 24 * 60
 # The fallback reviewer, `claude` in read-only mode (boss_review.fallback_spec). The model is passed by
 # its exact id, so no CLI default is ever accepted; the tools are the built-in set it may use, and
 # `--strict-mcp-config` (with no `--mcp-config`) keeps every MCP server out, which `--tools` alone does not.
+# `--restricted` (no constant: it takes no value) keeps the settings files, so hooks and plugins, out.
 REVIEW_FALLBACK_MODEL = "claude-opus-5-5"
 REVIEW_FALLBACK_TOOLS = ("Read", "Grep", "Glob")
 REVIEW_FALLBACK_PERMISSION_MODE = "dontAsk"
+# Variables the fallback's `claude` does not inherit: the plugin directories named here load their hooks
+# whatever `--restricted` says about settings files (found 2026-11-12 by --check-fallback with 2.1.311).
+REVIEW_FALLBACK_ENV_UNSET = ("CLAUDE_CODE_PLUGIN_DIRS", "CLAUDE_CODE_PLUGIN_SEED_DIR")
 
 # PR review (boss_review.py), seconds. A Codex review of a plan took 8 minutes, so Codex gets 600;
 # the fallback reviewer, once there is one, gets a wait of its own, also 600; a `gh` or `git` call or

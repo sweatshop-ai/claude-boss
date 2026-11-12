@@ -12,8 +12,10 @@ hermetic.Sandbox: `codex`, `claude` and `gh` are stubs that log their argv, stdi
 directory, HOME and CLAUDE_CONFIG_DIR are temporary, TypeSafe has no key to find, and a test fails
 if one of the three names resolves outside the stub directory. The real `claude` is never called.
 """
+import dataclasses
 import json
 import os
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -31,7 +33,7 @@ from hermetic import Sandbox  # noqa: E402
 
 # What the fallback must be, written out here and not read back from the code under test.
 MODEL = "claude-opus-5-5"
-CALL = ["--tools", "Read,Grep,Glob", "--strict-mcp-config", "--disable-slash-commands",
+CALL = ["--tools", "Read,Grep,Glob", "--strict-mcp-config", "--disable-slash-commands", "--restricted",
         "--permission-mode", "dontAsk"]
 GO = "VERDICT: GO\n"
 MISSING = object()
@@ -39,19 +41,27 @@ MISSING = object()
 
 # ---------------------------------------------------------------- stream-JSON fixtures ----
 # The shape of what `claude -p --output-format stream-json --verbose` printed on 2026-10-04
-# (claude 2.1.289): hook events, the init event, the turn, the result. Only the init event's
-# `tools`, `mcp_servers` and `model` matter to the check; the rest is there so that the parser
-# is shown a realistic stream.
+# (claude 2.1.289) under --restricted: the init event, the turn, the result. Without --restricted the
+# stream opens with `hook_started` / `hook_response` events for every SessionStart hook of the owner's
+# and of the checkout's settings files, and the init event lists the installed plugins. The check
+# reads the init event's `tools`, `mcp_servers`, `model`, `permissionMode`, `slash_commands` and
+# `plugins`, and refuses any hook event; the rest is there so that the parser sees a realistic stream.
+BUILTIN_PLUGINS = [{"name": "cc-plugin-agents-md", "path": "builtin", "source": "cc-plugin-agents-md@builtin"},
+                   {"name": "cc-plugin-telemetry", "path": "builtin", "source": "cc-plugin-telemetry@builtin"}]
+
+
 def init_event(**fields):
     event = {"type": "system", "subtype": "init", "cwd": "/work", "session_id": "s-1",
              "tools": ["Glob", "Grep", "Read"], "mcp_servers": [], "model": MODEL,
-             "permissionMode": "dontAsk", "slash_commands": [], "skills": [], "plugins": [],
+             "permissionMode": "dontAsk", "slash_commands": [], "skills": [], "plugins": BUILTIN_PLUGINS,
              "agents": ["Explore"]}
     event.update(fields)
     return {k: v for k, v in event.items() if v is not MISSING}
 
 
 HOOK = {"type": "system", "subtype": "hook_started", "hook_event": "SessionStart"}
+HOOK_DONE = {"type": "system", "subtype": "hook_response", "hook_event": "SessionStart", "exit_code": 0}
+OUTSIDE_PLUGIN = {"name": "some-plugin", "path": "/plugins/cache/some-plugin/1.0", "source": "some-plugin@market"}
 TURN = {"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "ok"}]}}
 RESULT = {"type": "result", "subtype": "success", "is_error": False, "result": "ok"}
 
@@ -60,24 +70,43 @@ def stream(*events):
     return "".join(json.dumps(e) + "\n" for e in events)
 
 
-PASS = [HOOK, init_event(), TURN, RESULT]
+PASS = [init_event(), TURN, RESULT]
 
 # Each of these must fail the check: name -> the events.
 FAILS = {
-    "an extra tool": [HOOK, init_event(tools=["Glob", "Grep", "Read", "Bash"]), TURN, RESULT],
-    "an MCP server": [HOOK, init_event(mcp_servers=[{"name": "mail", "status": "connected"}]), TURN, RESULT],
-    "a wrong model": [HOOK, init_event(model="claude-sonnet-5-5"), TURN, RESULT],
-    "a model with a suffix": [HOOK, init_event(model=MODEL + "[1m]"), TURN, RESULT],
-    "a missing tool": [HOOK, init_event(tools=["Glob", "Read"]), TURN, RESULT],
-    "a duplicated tool": [HOOK, init_event(tools=["Glob", "Grep", "Read", "Read"]), TURN, RESULT],
-    "no mcp_servers key": [HOOK, init_event(mcp_servers=MISSING), TURN, RESULT],
-    "no tools key": [HOOK, init_event(tools=MISSING), TURN, RESULT],
-    "tools that are not a list": [HOOK, init_event(tools="Glob,Grep,Read"), TURN, RESULT],
-    "tools that are not strings": [HOOK, init_event(tools=[1, 2, 3]), TURN, RESULT],
-    "mcp_servers that is not a list": [HOOK, init_event(mcp_servers=None), TURN, RESULT],
-    "a model that is not a string": [HOOK, init_event(model=None), TURN, RESULT],
-    "no init event": [HOOK, TURN, RESULT],
-    "two init events": [HOOK, init_event(), init_event(), TURN, RESULT],
+    "an extra tool": [init_event(tools=["Glob", "Grep", "Read", "Bash"]), TURN, RESULT],
+    "an MCP server": [init_event(mcp_servers=[{"name": "mail", "status": "connected"}]), TURN, RESULT],
+    "a wrong model": [init_event(model="claude-sonnet-5-5"), TURN, RESULT],
+    "a model with a suffix": [init_event(model=MODEL + "[1m]"), TURN, RESULT],
+    "a missing tool": [init_event(tools=["Glob", "Read"]), TURN, RESULT],
+    "a duplicated tool": [init_event(tools=["Glob", "Grep", "Read", "Read"]), TURN, RESULT],
+    "no mcp_servers key": [init_event(mcp_servers=MISSING), TURN, RESULT],
+    "no tools key": [init_event(tools=MISSING), TURN, RESULT],
+    "tools that are not a list": [init_event(tools="Glob,Grep,Read"), TURN, RESULT],
+    "tools that are not strings": [init_event(tools=[1, 2, 3]), TURN, RESULT],
+    "mcp_servers that is not a list": [init_event(mcp_servers=None), TURN, RESULT],
+    "a model that is not a string": [init_event(model=None), TURN, RESULT],
+    "no init event": [TURN, RESULT],
+    "two init events": [init_event(), init_event(), TURN, RESULT],
+    # the settings were loaded: the fallback ran hooks, or has plugins, that nobody chose for it
+    "a hook that started": [HOOK, init_event(), TURN, RESULT],
+    "a hook that answered": [init_event(), HOOK_DONE, TURN, RESULT],
+    "a hook after the init event": [init_event(), HOOK, HOOK_DONE, TURN, RESULT],
+    "a plugin from outside the CLI": [init_event(plugins=BUILTIN_PLUGINS + [OUTSIDE_PLUGIN]), TURN, RESULT],
+    "a plugin that only borrows a built-in's name":
+        [init_event(plugins=[dict(BUILTIN_PLUGINS[0], path="/plugins/cc-plugin-agents-md")]), TURN, RESULT],
+    "no plugins key": [init_event(plugins=MISSING), TURN, RESULT],
+    "plugins that is not a list": [init_event(plugins=None), TURN, RESULT],
+    "a plugin that is not an object": [init_event(plugins=["cc-plugin-telemetry"]), TURN, RESULT],
+    # the permission mode and the slash commands
+    "a permission mode that asks": [init_event(permissionMode="default"), TURN, RESULT],
+    "a permission mode that skips": [init_event(permissionMode="bypassPermissions"), TURN, RESULT],
+    "a permission mode with other case": [init_event(permissionMode="dontask"), TURN, RESULT],
+    "no permissionMode key": [init_event(permissionMode=MISSING), TURN, RESULT],
+    "a permission mode that is not a string": [init_event(permissionMode=["dontAsk"]), TURN, RESULT],
+    "a slash command": [init_event(slash_commands=["review"]), TURN, RESULT],
+    "no slash_commands key": [init_event(slash_commands=MISSING), TURN, RESULT],
+    "slash_commands that is not a list": [init_event(slash_commands="none"), TURN, RESULT],
 }
 
 
@@ -129,7 +158,8 @@ class Spec(Base):
         paragraph = text.split("**Read-only fallback**", 1)[1].split("\n\n", 1)[0]
         flat = " ".join(paragraph.split())
         for quoted in ("--tools " + ",".join(policy.REVIEW_FALLBACK_TOOLS), "--strict-mcp-config",
-                       "--disable-slash-commands", "--permission-mode " + policy.REVIEW_FALLBACK_PERMISSION_MODE):
+                       "--disable-slash-commands", "--restricted",
+                       "--permission-mode " + policy.REVIEW_FALLBACK_PERMISSION_MODE):
             self.assertIn(quoted, flat)
 
 
@@ -157,11 +187,11 @@ class TheCall(Base):
         self.assertEqual(argv[argv.index("--model") + 1], policy.REVIEW_FALLBACK_MODEL)
         self.assertEqual(argv.count("--permission-mode"), 1)
         self.assertEqual(argv[argv.index("--permission-mode") + 1], "dontAsk")
-        for flag in ("--strict-mcp-config", "--disable-slash-commands", "-p"):
+        for flag in ("--strict-mcp-config", "--disable-slash-commands", "--restricted", "-p"):
             self.assertEqual(argv.count(flag), 1, flag)
         for flag in ("--dangerously-skip-permissions", "--allow-dangerously-skip-permissions",
                      "--allowedTools", "--allowed-tools", "--bare", "--mcp-config", "--add-dir",
-                     "--settings", "--agents", "--plugin-dir", "--"):
+                     "--settings", "--setting-sources", "--agents", "--plugin-dir", "--"):
             self.assertNotIn(flag, argv)
         self.assertEqual(argv[-1], "PROMPT TEXT")      # the prompt is the one operand, and the last
 
@@ -208,14 +238,31 @@ class Decision(Base):
 
     def test_a_failure_says_what_was_wrong(self):
         wanted = {"an extra tool": "tools", "an MCP server": "mcp_servers", "a wrong model": "model",
-                  "no init event": "init", "two init events": "init"}
+                  "no init event": "init", "two init events": "init", "a hook that started": "hook",
+                  "a hook that answered": "hook", "a plugin from outside the CLI": "plugins",
+                  "a permission mode that asks": "permissionMode", "a slash command": "slash_commands"}
         for name, word in wanted.items():
             with self.subTest(name):
                 self.assertIn(word, " ".join(br.init_problems(FAILS[name])))
 
     def test_something_that_is_not_an_init_event_is_not_one(self):
-        events = [{"type": "system", "subtype": "hook_started"}, {"type": "init"}, {"subtype": "init"}]
+        events = [{"type": "system", "subtype": "status"}, {"type": "init"}, {"subtype": "init"}]
         self.assertEqual(len(br.init_problems(events)), 1)
+
+    def test_the_built_in_plugins_are_not_a_fault_and_neither_are_none(self):
+        self.assertEqual(br.init_problems([init_event(plugins=[])]), [])
+        self.assertEqual(br.init_problems([init_event(plugins=BUILTIN_PLUGINS)]), [])
+
+    def test_every_hook_event_counts_and_is_counted(self):
+        problems = br.init_problems([HOOK, HOOK_DONE, init_event(), HOOK])
+        self.assertEqual(len(problems), 1)
+        self.assertIn("3 hook events", problems[0])
+
+    def test_an_event_that_only_looks_like_a_hook_is_not_one(self):
+        for event in ({"type": "assistant", "subtype": "hook_started"}, {"type": "system", "subtype": "hooks"},
+                      {"type": "system", "subtype": "status", "hook_event": "SessionStart"}):
+            with self.subTest(event=event):
+                self.assertEqual(br.init_problems([init_event(), event]), [])
 
 
 # --------------------------------------------------------------------- the command ----
@@ -234,7 +281,8 @@ class Check(Base):
         r = self.check()
         self.assertEqual((r.returncode, r.stderr), (0, ""))
         self.assertEqual(r.stdout.count("\n"), 1)
-        self.assertIn(MODEL, r.stdout)
+        for said in (MODEL, "dontAsk", "no hooks"):
+            self.assertIn(said, r.stdout)
 
     def test_each_departure_is_exit_one_with_nothing_on_stdout_and_the_reason_on_stderr(self):
         for name, events in FAILS.items():
@@ -280,6 +328,68 @@ class Check(Base):
         self.assertEqual(call.argv[:i] + call.argv[i + 3:],
                          rc.claude_argv(br.fallback_spec(), br.CHECK_PROMPT)[1:])
         self.assertEqual(len(br.CHECK_PROMPT.split()), 1)      # a one-word prompt
+
+    def settings_reading_claude(self):
+        """A `claude` stub that behaves as 2.1.289 does about settings: it reads ./.claude/settings.json
+        unless `--restricted` is among its arguments, and a SessionStart hook there starts (a hook_started
+        event, and a marker file as proof that the command ran). The init event is the confined one."""
+        init = json.dumps(init_event())
+        hook = json.dumps(HOOK)
+        self.sb.stub_script("claude", """
+if [ -f .claude/settings.json ] && ! printf '%%s\\n' "$@" | grep -qx -- --restricted; then
+    echo ran > "$R/hook-ran"
+    echo %s
+fi
+echo %s
+""" % (shlex.quote(hook), shlex.quote(init)))
+        self.expect["claude"] += 1
+
+    def hostile_checkout(self):
+        (self.checkout / ".claude").mkdir()
+        (self.checkout / ".claude" / "settings.json").write_text(json.dumps(
+            {"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "touch pwned"}]}]}}))
+
+    def test_a_checkout_whose_settings_carry_a_hook_is_not_loaded_by_the_real_call(self):
+        # the PR's own .claude/settings.json: `claude -p` skips the trust dialog, so only --restricted keeps it out
+        self.hostile_checkout()
+        self.settings_reading_claude()
+        r = self.cli("--check-fallback", "--checkout", str(self.checkout))
+        self.assertEqual((r.returncode, r.stderr), (0, ""))
+        self.assertFalse((self.sb.root / "hook-ran").exists(), "the checkout's hook ran")
+
+    def test_the_same_checkout_fails_the_check_when_the_restriction_is_taken_out(self):
+        # the control: without --restricted the stub loads the settings and the check names the hook
+        self.hostile_checkout()
+        self.settings_reading_claude()
+        spec = br.fallback_spec()
+        loose = dataclasses.replace(spec, extra_args=tuple(a for a in spec.extra_args if a != "--restricted"))
+        with mock.patch.object(br, "fallback_spec", return_value=loose):
+            problems = br.check_fallback(str(self.checkout))
+        self.assertTrue((self.sb.root / "hook-ran").exists())
+        self.assertTrue(any("hook event" in p for p in problems), problems)
+
+    def plugin_env_claude(self):
+        """A `claude` stub that loads an inline plugin from CLAUDE_CODE_PLUGIN_DIRS, settings files or
+        not, as 2.1.311 does (found by the real check: the owner's session names a mod there)."""
+        confined, loaded = json.dumps(init_event()), json.dumps(init_event(plugins=BUILTIN_PLUGINS + [OUTSIDE_PLUGIN]))
+        self.sb.stub_script("claude", """
+if [ -n "$CLAUDE_CODE_PLUGIN_DIRS" ]; then echo %s; else echo %s; fi
+""" % (shlex.quote(loaded), shlex.quote(confined)))
+        self.expect["claude"] += 1
+
+    def test_a_plugin_directory_in_our_environment_does_not_reach_the_checked_call(self):
+        self.plugin_env_claude()
+        with mock.patch.dict(os.environ, {"CLAUDE_CODE_PLUGIN_DIRS": "/home/owner/.claude/mods/x"}):
+            self.assertEqual(br.check_fallback(str(self.checkout)), [])
+
+    def test_the_spec_unsets_the_plugin_variables_and_the_check_fails_when_it_does_not(self):
+        self.assertIn("CLAUDE_CODE_PLUGIN_DIRS", br.fallback_spec().env_unset)
+        self.plugin_env_claude()
+        loose = dataclasses.replace(br.fallback_spec(), env_unset=())
+        with mock.patch.dict(os.environ, {"CLAUDE_CODE_PLUGIN_DIRS": "/x"}), \
+                mock.patch.object(br, "fallback_spec", return_value=loose):
+            problems = br.check_fallback(str(self.checkout))
+        self.assertTrue(any("plugins" in p for p in problems), problems)
 
     def test_the_call_runs_in_the_checkout_it_was_given(self):
         self.check()
