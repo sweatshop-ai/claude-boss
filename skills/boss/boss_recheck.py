@@ -21,7 +21,8 @@ Lines printed, for the boss to act on:
 `<name>` is the author of the entry's own round, the worker who got the provisional GO. A Codex NO-GO on a merged
 PR is the one case where a NO-GO removes an entry: an open blocker on the ladder is written first (the ladder
 raises it with no boss turn, whether or not an author session exists), then the entry is removed. A crash between
-the two is resumed, not reviewed again. Any other outcome (no Codex answer, a fetch or a `gh pr view` that fails)
+the two is resumed, not reviewed again. One pass per repo runs at a time (a lock under the reviews directory); a
+second one says so and does nothing. Any other outcome (no Codex answer, a fetch or a `gh pr view` that fails)
 leaves the entry and the pass goes on to the next one; `prune_provisional` runs at the start and after each review,
 so a Codex GO takes its entry off.
 
@@ -32,6 +33,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import fcntl
 import hashlib
 import json
 import re
@@ -244,6 +246,21 @@ def _one(path: Path, track: str, entry: br.ProvEntry, checkout: str, author: str
     return ["NO-GO %s#%d round %02d author=%s" % (entry.repo, entry.pr, result.round, _author_of(pr_dir, entry))]
 
 
+@contextlib.contextmanager
+def _pass_lock(key: str):
+    """One pass per repo at a time, for every track: a second pass would remove the first one's worktree as a
+    leftover. Yields False at once when the lock is held (the kernel lets it go if its holder dies)."""
+    reviews = br._reviews_dir()
+    reviews.mkdir(mode=0o700, parents=True, exist_ok=True)
+    with open(reviews / (".recheck-%s.lock" % key.replace("/", "-")), "a") as fh:
+        try:
+            fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            yield False
+            return
+        yield True
+
+
 def _prune(track: str, repo: str, io_timeout: int) -> None:
     try:
         br.prune_provisional(track, repo, io_timeout)
@@ -263,19 +280,23 @@ def recheck(track: str, repo: str, checkout: str, author: str = DEFAULT_AUTHOR, 
     path = codex_blocker.usable_tracker(track, "rechecked")
     if path is None:
         raise Unusable(track)
-    _prune_leftovers(checkout, io_timeout)
-    _prune(track, key, io_timeout)
-    entries = [e for e in br.provisional_entries(_read(path)) if e.repo == key]
-    lines: list[str] = []
-    for entry in entries:
-        try:
-            lines += _one(path, track, entry, checkout, author, codex_timeout, io_timeout)
-        except _Skip as exc:
-            _say("%s#%d stays on the list: %s" % (entry.repo, entry.pr, exc))
-        except Exception as exc:        # no entry can stop or erase another
-            _say("%s#%d stays on the list: %s: %s" % (entry.repo, entry.pr, type(exc).__name__, exc))
+    with _pass_lock(key) as held:
+        if not held:
+            _say("another recheck of %s is running: nothing done (its worktree must not be pruned as a leftover)" % key)
+            return []
+        _prune_leftovers(checkout, io_timeout)
         _prune(track, key, io_timeout)
-    return lines
+        entries = [e for e in br.provisional_entries(_read(path)) if e.repo == key]
+        lines: list[str] = []
+        for entry in entries:
+            try:
+                lines += _one(path, track, entry, checkout, author, codex_timeout, io_timeout)
+            except _Skip as exc:
+                _say("%s#%d stays on the list: %s" % (entry.repo, entry.pr, exc))
+            except Exception as exc:        # no entry can stop or erase another
+                _say("%s#%d stays on the list: %s: %s" % (entry.repo, entry.pr, type(exc).__name__, exc))
+            _prune(track, key, io_timeout)
+        return lines
 
 
 def main(argv: list[str] | None = None) -> int:

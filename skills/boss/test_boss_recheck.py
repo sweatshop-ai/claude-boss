@@ -11,6 +11,7 @@ asserts the stub call logs; tearDown fails if `codex`, `claude` or `gh` resolves
 (Sandbox.guard) or if the `claude` log is not empty.
 """
 import contextlib
+import fcntl
 import io
 import json
 import os
@@ -340,6 +341,45 @@ class ThePass(Base):
         self.assertEqual(len(self.worktrees()), 2)
         self.assertTrue(mine.exists())
 
+    def test_an_exception_inside_the_review_removes_the_worktree_and_the_pass_goes_on(self):
+        a = self.pr(5, "raises", answer=GO)
+        b = self.pr(6, "fine", answer=GO)
+        self.put(self.prov(5, a), self.prov(6, b))
+        self.rounds(5, (1, a, None, {"kind": "provisional"}))
+        self.rounds(6, (1, b, None, {"kind": "provisional"}))
+        real = br.review
+
+        def review(repo, pr, *args, **kw):
+            if pr == 5:
+                raise RuntimeError("boom")
+            return real(repo, pr, *args, **kw)
+
+        with mock.patch.object(br, "review", review):
+            self.run_pass()
+        self.assertEqual([e.pr for e in self.entries()], [5])
+        self.assertIn("RuntimeError: boom", self.stderr)
+        self.assertEqual(self.codex_heads(), [b])
+        self.assertCheckoutUntouched()
+
+    def test_a_second_pass_on_the_same_repo_does_nothing_and_removes_no_worktree(self):
+        head = self.pr(5, "good", answer=GO)
+        self.put(self.prov(5, head))
+        self.rounds(5, (1, head, None, {"kind": "provisional"}))
+        running = self.sb.tmp / "boss-recheck-running"
+        git(self.sb, self.checkout, "worktree", "add", "-q", "--detach", str(running))
+        self.reviews.mkdir(parents=True, exist_ok=True)
+        with open(self.reviews / ".recheck-owner-repo.lock", "a") as fh:
+            fcntl.flock(fh, fcntl.LOCK_EX)
+            lines = self.run_pass()
+        self.assertEqual(lines, [])
+        self.assertIn("another recheck", self.stderr)
+        self.assertTrue(running.exists())
+        self.assertEqual([e.pr for e in self.entries()], [5])
+        self.assertEqual(self.sb.calls_of("gh") + self.sb.calls_of("codex"), [])
+        self.run_pass()                                  # the lock is let go: the pass runs
+        self.assertEqual(self.entries(), [])
+        self.assertFalse(running.exists())
+
     def test_a_pass_with_no_list_does_nothing(self):
         self.assertEqual(self.run_pass(), [])
         self.assertEqual(self.sb.calls_of("gh") + self.sb.calls_of("codex"), [])
@@ -459,7 +499,7 @@ class TheNoGo(Base):
         head = self.pr(5, "bad", state="MERGED", answer=NOGO)
         self.put(self.prov(5, head))
         self.rounds(5, (1, head, None, {"kind": "provisional"}))
-        newer = self.prov(5, head, round=7)
+        newer = self.prov(5, head).replace(AT, "2026-11-12T11:00:00Z")      # differs in at= only: a whole-line compare
         real = rk._add_blocker
 
         def add_then_replace(*args, **kw):
@@ -468,9 +508,10 @@ class TheNoGo(Base):
             return got
 
         with mock.patch.object(rk, "_add_blocker", add_then_replace):
-            self.run_pass()
+            lines = self.run_pass()
         self.assertEqual([e.line for e in self.entries()], [newer])
         self.assertEqual(len(self.blockers()), 1)
+        self.assertEqual(lines, ["DISPATCH owner/repo#5 author=worker-a round=02"])
 
     def test_a_blocker_write_that_fails_leaves_the_entry(self):
         head = self.pr(5, "bad", state="MERGED", answer=NOGO)

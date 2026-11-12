@@ -34,3 +34,10 @@ Built (Otilia, 2026-11-12), box by box; every box is done with a test in `skills
 - The post-merge NO-GO: `TheNoGo` (open PR prints `NO-GO`; merged PR blocker passes `scan_marker`, `validate` and `blockers_range` and is raised by `boss_ladder_core.py` at rung 5; crash with the blocker present, `post-failed` round, retry after `mark_cleared`, second NO-GO after a clear, entry replaced between read and removal, failed blocker write, failed alert).
 - The merged-head box: `test_a_merged_pr_is_reviewed_at_the_merged_head_not_the_entrys`, `test_a_pr_closed_without_a_merge_...`, `test_a_state_that_cannot_be_read_...`. Its `--list` sentences and `--list` test rows are 10b's, as the note above says.
 - Tests: real `git` with a local bare origin, stubs for `codex`, `claude`, `gh`, `boss-alert`, `Sandbox.guard` in `tearDown`.
+
+Review round 1 (Opus fallback, Codex unavailable), triage:
+
+- Fixed: two passes on one repo (class b): a per-repo flock under `pm/reviews/`, with a test. Two test gaps (class d): an exception inside `review()` and an entry replaced in `at=` only.
+- Declined, evidence: the main worktree's `FETCH_HEAD` is overwritten by the fetch (class c, a millisecond window; the box asks for the FETCH_HEAD check). An archived blocker loses its id, so a resume after an archive could write a second one, and a hand note quoting an id counts as handled (class c, each needs a failed removal plus an archive, or a hand-typed id).
+- Not 10a's, ticket 06b's rule 1: `_prunable` applies rule 1 before it looks at the state, so case B plus a Codex GO on B and a merge back on A removes the entry before the recheck sees the merged head (class a, pre-existing, `boss_review.py:1182`). To be filed as its own ticket.
+
