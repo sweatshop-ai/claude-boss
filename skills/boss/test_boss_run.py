@@ -313,6 +313,8 @@ class HardRules(Base):
             ("gh api graphql -f query='mutation { mergePullRequest(input: {}) { clientMutationId } }'",),
             ("GH PR MERGE 5",),
             ("echo gh pr merge",),
+            ("gh api -X PUT repos/$R/pulls/$N/merge",),
+            ("gh api -X PUT 'repos/{owner}/{repo}/pulls/{n}/merge'",),
             ("bash -c \"gh pr merge 5\"",),
             ("true;gh pr merge 5",),
             ("cd x&&gh pr merge 5",),
@@ -322,6 +324,7 @@ class HardRules(Base):
             ("gh pr merge 5 --auto",),
             ("gh api graphql -f query='mutation { enablePullRequestAutoMerge(input: {}) { clientMutationId } }'",),
         ]
+        self.sb.stub("gh")      # a logging stub: a refused command must leave no call on it
         for (command,) in cases:
             with self.subTest(command):
                 r = self.dry(command)
@@ -333,6 +336,7 @@ class HardRules(Base):
         self.assertNotCalled("codex", "claude", "gh")
 
     def test_the_merge_rule_works_on_an_argument_list_as_on_a_string(self):
+        self.sb.stub("gh")
         for args in (("gh", "pr", "merge", "5"), ("gh", "pr", "--repo", "o/r", "merge", "5"),
                      ("gh", "api", "-X", "PUT", "repos/o/r/pulls/5/merge")):
             with self.subTest(args):
