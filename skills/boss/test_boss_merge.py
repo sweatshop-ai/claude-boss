@@ -394,6 +394,19 @@ class DecideRows(unittest.TestCase):
                     self.assertDecides(self.decide(self.rec(1, kind=kind), self.rec(2, status=status, kind=kind)),
                                        3, "superseded-go", 1)
 
+    def test_a_later_round_on_another_base_supersedes_a_provisional_go(self):
+        # a provisional GO on main (round 1), then a round for the same head on a release base (a retarget)
+        for kind in ("provisional", "waived"):
+            with self.subTest(kind=kind):
+                got = self.decide(self.rec(1, kind=kind), self.rec(2, kind=kind, base="release"))
+                self.assertDecides(got, 3, "superseded-go", 1)
+
+    def test_a_later_post_failed_go_on_the_same_head_supersedes_a_provisional_go(self):
+        for kind in ("provisional", "waived"):
+            with self.subTest(kind=kind):
+                got = self.decide(self.rec(1, kind=kind), self.rec(2, kind=kind, status="post-failed"))
+                self.assertDecides(got, 3, "superseded-go", 1)
+
     def test_a_later_post_failed_go_on_another_head_supersedes_a_provisional_go(self):
         # a provisional GO on A (round 1), a provisional GO on B post-failed (round 2), a force-push back to A
         got = self.decide(self.rec(1, kind="provisional"),
