@@ -390,7 +390,8 @@ def claude_launch(fb: Fallback, prompt: str, cwd: str | None = None) -> tuple[li
 
     For every spec, the confined one and the OPUS/FABLE presets alike, `claude` is looked up on a PATH
     without the entries a PR checkout could supply (empty or relative ones, and any inside `cwd`, or
-    the current directory when `cwd` is None), refused when the `claude` found is a link into that
+    the current directory when `cwd` is None and the spec is the confined one; a preset with no `cwd`
+    loses only its empty and relative entries), refused when the `claude` found is a link into that
     directory, and started by its absolute path: a bare name is resolved after the process has changed into the
     checkout, where `PATH=.:...` or a checkout-local `.venv/bin` would run the PR's own `claude`
     before any confinement flag is read. The environment is the spec's (`child_env`), or ours as it

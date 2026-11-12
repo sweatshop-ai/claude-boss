@@ -665,14 +665,17 @@ class PresetLaunch(Base):
         # boss-run passes no --cwd: the caller's directory (say $HOME) may hold a per-user install
         self.sb.stub("claude", answer=GO)
         self.expect["claude"] = 1
+        self.planted(self.sb.root)
         self.chdir_to(self.sb.root)
         with mock.patch.dict(os.environ, {"PATH": ".:" + os.environ["PATH"]}):
             launch = rc.claude_launch(rc.OPUS, "p")       # stubs live under self.sb.root, below the cwd
             self.assertIsNotNone(launch)
+            self.assertEqual(launch[0][0], str(self.sb.stubs / "claude"))
             self.assertNotIn(".", launch[1]["PATH"].split(os.pathsep))
             result = rc.run_chain("p", words=rc.GO_NOGO, fallback=rc.OPUS)
         self.assertEqual(result.reviewer, "opus")
         self.assertEqual(len(self.claude_calls()), 1)
+        self.assertFalse((self.sb.root / "planted-ran").exists(), "the current directory's claude ran")
 
     def chdir_to(self, where):
         before = os.getcwd()
