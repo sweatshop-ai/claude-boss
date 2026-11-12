@@ -13,4 +13,4 @@ What to build, in one line: every PR that holds only a provisional GO is kept in
 
 **Blocked by:** 06a, 06b (this file is an index; the work is in the two)
 
-**Status:** index only (the work is in 06a and 06b; frontier counts this file done once both are)
+**Status:** done (06a and 06b are merged: PR 101, 53abb32, and PR 103, b045291).
