@@ -17,7 +17,7 @@ What makes an answer usable is one of two rules: a `VERDICT:` line in `words`, o
 kept on `Result.attempts` with a reason from a closed set:
 
     answered   a usable VERDICT line (or enough labelled lines) was in the answer
-    absent     the reviewer is not on PATH
+    absent     the reviewer is not on PATH, or only on entries a checkout could supply
     timeout    it ran past its timeout and gave no usable verdict
     error      it exited non-zero (or could not be started) and gave none
     noverdict  it exited 0 and its answer has no usable VERDICT line
@@ -397,15 +397,18 @@ def claude_launch(fb: Fallback, prompt: str, cwd: str | None = None) -> tuple[li
     is for a spec that unsets nothing, with that PATH in place of ours."""
     argv = claude_argv(fb, prompt)
     env = child_env(fb)
+    # With no cwd there is no checkout to keep out. The confined spec still excludes the current
+    # directory (ticket 14); a preset only loses its empty and relative entries, because the caller's
+    # directory may be an ancestor of a per-user install (`$HOME` holding ~/.local/bin/claude).
+    base = os.path.realpath(cwd or os.getcwd()) if cwd or env is not None else None
     if env is None:
         env = dict(os.environ)
-    base = os.path.realpath(cwd or os.getcwd())
     keep = []
     for entry in os.environ.get("PATH", "").split(os.pathsep):
         if not entry or not os.path.isabs(entry):
             continue
         real = os.path.realpath(entry)
-        if real == base or real.startswith(base + os.sep):
+        if base and (real == base or real.startswith(base + os.sep)):
             continue
         keep.append(entry)
     env["PATH"] = os.pathsep.join(keep)
@@ -413,7 +416,7 @@ def claude_launch(fb: Fallback, prompt: str, cwd: str | None = None) -> tuple[li
     if exe is None:
         return None
     real_exe = os.path.realpath(exe)    # a symlink in a safe directory may lead into the checkout
-    if real_exe.startswith(base + os.sep):
+    if base and real_exe.startswith(base + os.sep):
         return None
     argv[0] = exe
     return argv, env

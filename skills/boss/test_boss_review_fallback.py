@@ -661,6 +661,33 @@ class PresetLaunch(Base):
         self.assertNotIn("", seen["PATH"].split(os.pathsep))
         self.assertNotIn(".", seen["PATH"].split(os.pathsep))
 
+    def test_without_a_cwd_a_preset_under_the_current_directory_is_still_started(self):
+        # boss-run passes no --cwd: the caller's directory (say $HOME) may hold a per-user install
+        self.sb.stub("claude", answer=GO)
+        self.expect["claude"] = 1
+        self.chdir_to(self.sb.root)
+        with mock.patch.dict(os.environ, {"PATH": ".:" + os.environ["PATH"]}):
+            launch = rc.claude_launch(rc.OPUS, "p")       # stubs live under self.sb.root, below the cwd
+            self.assertIsNotNone(launch)
+            self.assertNotIn(".", launch[1]["PATH"].split(os.pathsep))
+            result = rc.run_chain("p", words=rc.GO_NOGO, fallback=rc.OPUS)
+        self.assertEqual(result.reviewer, "opus")
+        self.assertEqual(len(self.claude_calls()), 1)
+
+    def chdir_to(self, where):
+        before = os.getcwd()
+        os.chdir(where)
+        self.addCleanup(os.chdir, before)
+
+    def test_an_entry_inside_the_checkout_is_not_on_the_childs_path(self):
+        self.sb.stub_script("claude", 'echo "$PATH" > "$R/claude.path"; echo "VERDICT: GO"')
+        self.expect["claude"] = 1
+        inside = self.checkout / "tools"
+        inside.mkdir()
+        self.run_preset(rc.OPUS, os.pathsep.join([str(inside), os.environ["PATH"]]))
+        seen = (self.sb.root / "claude.path").read_text().strip().split(os.pathsep)
+        self.assertNotIn(str(inside), seen)
+
     def test_when_the_only_claude_is_the_checkouts_the_preset_is_absent(self):
         self.planted(self.checkout)
         path = os.pathsep.join([".", str(self.checkout)])
