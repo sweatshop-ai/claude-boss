@@ -6,7 +6,7 @@
 
 **Blocked by:** 08 (The fallback review, labelled and provisional), 09c (The waiver, which writes the `waived` record; merged, PR 116), 22 (A provisional GO on an older head must not merge or be rechecked as the current one; it adds the highest-numbered-round box below, 2026-11-12)
 
-**Status:** done (Otilia built it, PR <N>)
+**Status:** done (Otilia built it, PR 118)
 
 The command:
 
