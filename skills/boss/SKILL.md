@@ -655,7 +655,7 @@ Codex alone, never with Claude, in a worktree of its own, and prints lines for y
 file as the brief), and a `DISPATCH <repo>#<N> author=<name> round=<NN>` line is a Codex NO-GO on a merged PR: the
 blocker is already open on the ladder and the entry is gone, so dispatch the author, or any free worker, with the
 round file as the brief (`pm/reviews/<repo>/pr<N>/round<NN>.out`). The blocker stays open until the fix has merged
-on a Codex GO; then you set its `cleared=` and post `boss-alert clear`.
+on a Codex GO; then you mark it cleared and post `boss-alert clear`.
 
 **While `boss_recheck.py --track T --list` exits 1, wrap-up (Phase E) and any release request stop**: a version
 bump, a tag, a publish, a reinstall. `--list` prints `PROVISIONAL <repo>#<N> round <NN> state=<S> head=<sha>` for each
