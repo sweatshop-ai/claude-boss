@@ -31,6 +31,11 @@ class CodexUsageLimit(unittest.TestCase):
         self.assertLess(start, text.index(self.SENTENCE))
         self.assertLess(text.index(self.SENTENCE), text.index("How many rounds"))
 
+    def test_the_fallback_is_posted_under_its_own_heading(self):
+        text = flat()
+        self.assertEqual(text.count('"Fallback review N (Opus, Codex unavailable: <reason>; run by <name>)"'), 1)
+        self.assertEqual(text.count('"Codex review N (run by <name>)" for a Codex answer'), 1)
+
     def test_no_line_tells_anyone_to_wait_for_the_reset(self):
         found = re.findall(r"\b(?:wait(?:s|ing)?|hold(?:s|ing)?|sleep(?:s|ing)?)\s+(?:for|until|till)\s+(?:the|its|a)?\s*"
                            r"(?:codex\s+)?(?:limit\s+)?reset", flat(), re.I)
