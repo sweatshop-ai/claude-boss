@@ -385,18 +385,20 @@ def child_env(fb: Fallback) -> dict[str, str] | None:
     return {k: v for k, v in os.environ.items() if k not in fb.env_unset} if fb.env_unset else None
 
 
-def claude_launch(fb: Fallback, prompt: str, cwd: str | None = None) -> tuple[list[str], dict | None] | None:
+def claude_launch(fb: Fallback, prompt: str, cwd: str | None = None) -> tuple[list[str], dict] | None:
     """The argv and environment to start the fallback's `claude` with, or None when it is not there.
 
-    A spec that unsets variables is the confined one, and for it `claude` is looked up on a PATH
+    For every spec, the confined one and the OPUS/FABLE presets alike, `claude` is looked up on a PATH
     without the entries a PR checkout could supply (empty or relative ones, and any inside `cwd`, or
     the current directory when `cwd` is None), refused when the `claude` found is a link into that
     directory, and started by its absolute path: a bare name is resolved after the process has changed into the
     checkout, where `PATH=.:...` or a checkout-local `.venv/bin` would run the PR's own `claude`
-    before any confinement flag is read. Any other spec runs as it always did."""
-    argv, env = claude_argv(fb, prompt), child_env(fb)
+    before any confinement flag is read. The environment is the spec's (`child_env`), or ours as it
+    is for a spec that unsets nothing, with that PATH in place of ours."""
+    argv = claude_argv(fb, prompt)
+    env = child_env(fb)
     if env is None:
-        return (argv, None) if shutil.which("claude") else None
+        env = dict(os.environ)
     base = os.path.realpath(cwd or os.getcwd())
     keep = []
     for entry in os.environ.get("PATH", "").split(os.pathsep):
