@@ -98,6 +98,7 @@ def health(path=None):
     skipped = 1 if lines[-1] else 0         # no closing newline: the last write was torn
     lines = lines[:-1]
     state, failures, answers = "up", 0, 0
+    recovered = False       # an answered streak of CODEX_UP_AFTER was read since the last down period
     streak, last = [], None
     for raw in lines:
         e = _entry(raw)
@@ -108,6 +109,8 @@ def health(path=None):
             continue
         if e["reason"] == "answered":
             answers, failures, streak = answers + 1, 0, []
+            if answers >= policy.CODEX_UP_AFTER:
+                recovered = True
             if state == "down" and answers >= policy.CODEX_UP_AFTER:
                 state = "up"
         elif e["reason"] in FAILURES:
@@ -116,7 +119,8 @@ def health(path=None):
             streak.append("%s#%d" % (e["repo"], e["pr"]))
             if failures >= policy.CODEX_DOWN_AFTER:
                 state = "down"
-    return {"state": state, "failures": failures, "answers": answers, "skipped": skipped,
+                recovered = False
+    return {"state": state, "failures": failures, "answers": answers, "recovered": recovered, "skipped": skipped,
             "last_repo": last["repo"] if last else None, "last_pr": last["pr"] if last else None,
             "last_reason": last["reason"] if last else None,
             "last_ts": _ts(last) if last else None, "prs": len(set(streak))}

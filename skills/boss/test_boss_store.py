@@ -92,6 +92,24 @@ class FrontierCache(unittest.TestCase):
             self.assertEqual(boss_store.frontier_cache("t", "s").parent, Path.home() / ".claude/pm/.pulse")
 
 
+class Validators(unittest.TestCase):
+    """Ticket 34: `$` matches before a final newline, so a name checked with `.match` and `^...$` let one through."""
+
+    def test_a_track_with_a_trailing_newline_is_not_a_track(self):
+        self.assertTrue(boss_store.valid_track("prod"))
+        for bad in ("prod\n", "prod\n\n", "\n", "pro\nd", ""):
+            self.assertFalse(boss_store.valid_track(bad), repr(bad))
+
+    def test_a_session_id_with_a_trailing_newline_is_refused_by_every_user_of_it(self):
+        import consent
+        for bad in (SID + "\n", "\n"):
+            self.assertFalse(boss_store.SID_RE.match(bad), repr(bad))
+            self.assertIsNone(boss_store._marker(bad, None), repr(bad))
+            self.assertIsNone(consent.token_path(bad), repr(bad))
+            with self.assertRaises(ValueError):
+                boss_store.state_path(bad, "guard")
+
+
 class StateFiles(unittest.TestCase):
     """Per-session state: one locked read-modify-write, safe against a crash."""
 

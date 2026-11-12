@@ -385,7 +385,7 @@ class Wording(Base):
                    "```", "ctrl\x01 and ‮ override and   separator", "bearer %s" % TOKEN]
         block = br.stderr_block("\n".join(hostile))
         lines = block.split("\n")
-        self.assertEqual(len(lines), 5)                 # the last five non-blank lines
+        self.assertEqual(len(lines), 5)                 # the five final physical lines
         for line in lines:
             self.assertTrue(line.startswith("    "), line)
         self.assertNotIn(TOKEN, block)
@@ -398,6 +398,16 @@ class Wording(Base):
         self.assertEqual({l[:4] for l in everything.split("\n")}, {"    "})
         self.assertEqual(br.stderr_block(""), "")
         self.assertEqual(br.stderr_block("\n  \n"), "")
+
+    def test_blank_lines_do_not_pull_an_older_line_into_the_block(self):
+        """Ticket 33: the five final physical lines are published, not the last five non-blank ones, so a
+        sensitive line behind five blank ones stays out of a public comment."""
+        block = br.stderr_block("sensitive line\n\n\n\n\n\nlogin failed")
+        self.assertNotIn("sensitive", block)
+        self.assertIn("login failed", block)
+        self.assertEqual(br.stderr_block("a\nb\nc\nd\ne\nf\ng").split("\n"),
+                         ["    " + c for c in "cdefg"])
+        self.assertEqual(br.stderr_block("a\nb\n"), "    a\n    b")      # the closing newline is no line
 
     def test_long_lines_are_cut_or_not_shown(self):
         cut = br.stderr_block("x" * 1000)
@@ -418,7 +428,8 @@ class Wording(Base):
             self.assertTrue(line in fixed or line.startswith("    "), repr(line))
         self.assertNotIn(TOKEN, body)
         self.assertNotIn("\x01", body)
-        self.assertIn("    ![i](u)", body)
+        self.assertIn("    <img>", body)                 # within the five final physical lines, indented
+        self.assertNotIn("![i](u)", body)                 # older than those five: not published (ticket 33)
 
 
 if __name__ == "__main__":

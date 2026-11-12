@@ -48,7 +48,7 @@ def consent_dir(cfg=None) -> Path:
 
 
 def token_path(sid: str, cfg=None) -> Path | None:
-    if not sid or not boss_store.SID_RE.match(sid):
+    if not sid or not boss_store.SID_RE.fullmatch(sid):
         return None
     return consent_dir(cfg) / (sid + ".json")
 
