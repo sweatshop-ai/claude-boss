@@ -591,5 +591,114 @@ class ElapsedBound(Base):
         self.assertEqual((policy.REVIEW_CODEX_TIMEOUT, policy.REVIEW_FALLBACK_TIMEOUT), (600, 600))
 
 
+# ------------------------------------------------------ the presets resolve claude too ----
+class PresetLaunch(Base):
+    """OPUS and FABLE unset nothing, and they take the same resolution as the confined fallback."""
+
+    def planted(self, where):
+        where.mkdir(parents=True, exist_ok=True)
+        planted = where / "claude"
+        planted.write_text("#!/bin/sh\ntouch %s\n" % (self.sb.root / "planted-ran"))
+        planted.chmod(0o755)
+
+    def run_preset(self, preset, path, cwd=None):
+        with mock.patch.dict(os.environ, {"PATH": path}):
+            return rc.run_chain("p", words=rc.GO_NOGO, fallback=preset, cwd=cwd or str(self.checkout))
+
+    def test_a_normal_path_still_starts_the_real_claude(self):
+        for n, preset in enumerate(rc.PRESETS.values(), 1):
+            with self.subTest(preset=preset.name):
+                self.sb.stub("claude", answer=GO)
+                result = self.run_preset(preset, os.environ["PATH"])
+                self.expect["claude"] = n
+                self.assertEqual(result.reviewer, preset.name)
+                self.assertEqual(len(self.claude_calls()), n)
+                self.assertFalse((self.sb.root / "planted-ran").exists())
+
+    def test_a_dot_an_empty_entry_and_a_relative_entry_do_not_run_the_checkouts_claude(self):
+        self.planted(self.checkout)
+        self.planted(self.checkout / "bin")
+        for n, lead in enumerate((".", "", "bin"), 1):
+            with self.subTest(lead=lead):
+                self.sb.stub("claude", answer=GO)
+                result = self.run_preset(rc.OPUS, os.pathsep.join([lead, os.environ["PATH"]]))
+                self.expect["claude"] = n
+                self.assertEqual(result.reviewer, "opus")
+                self.assertEqual(len(self.claude_calls()), n)
+                self.assertFalse((self.sb.root / "planted-ran").exists(), "the checkout's claude ran")
+
+    def test_a_checkout_venv_bin_first_in_path_is_skipped(self):
+        self.planted(self.checkout / ".venv" / "bin")
+        path = os.pathsep.join([str(self.checkout / ".venv" / "bin"), os.environ["PATH"]])
+        self.sb.stub("claude", answer=GO)
+        self.expect["claude"] = 1
+        result = self.run_preset(rc.FABLE, path)
+        self.assertEqual(result.reviewer, "fable")
+        self.assertEqual(len(self.claude_calls()), 1)
+        self.assertFalse((self.sb.root / "planted-ran").exists(), "the checkout's claude ran")
+
+    def test_a_symlink_into_the_checkout_is_refused(self):
+        self.planted(self.checkout)
+        self.sb.stub("claude", answer=GO)          # behind the link: reaching it would be a fall-through
+        safe = self.sb.root / "safe-bin"
+        safe.mkdir()
+        (safe / "claude").symlink_to(self.checkout / "claude")
+        path = os.pathsep.join([str(safe), os.environ["PATH"]])
+        with mock.patch.dict(os.environ, {"PATH": path}):
+            result = rc.run_chain("p", words=rc.GO_NOGO, fallback=rc.OPUS, cwd=str(self.checkout))
+        self.assertEqual([a.reason for a in result.attempts if a.reviewer == "opus"], ["absent"])
+        self.assertFalse((self.sb.root / "planted-ran").exists(), "the checkout's claude ran")
+
+    def test_the_preset_is_started_by_its_absolute_path_with_the_rest_of_our_environment(self):
+        self.sb.stub_script("claude", 'echo "$0" > "$R/claude.argv0"; env > "$R/claude.env"; echo "VERDICT: GO"')
+        self.expect["claude"] = 1
+        with mock.patch.dict(os.environ, {"KEPT_BY_THE_TEST": "yes", "PATH": ".:" + os.environ["PATH"]}):
+            result = rc.run_chain("p", words=rc.GO_NOGO, fallback=rc.OPUS, cwd=str(self.checkout))
+        self.assertEqual(result.reviewer, "opus")
+        self.assertTrue((self.sb.root / "claude.argv0").read_text().strip().startswith("/"))
+        seen = dict(l.split("=", 1) for l in (self.sb.root / "claude.env").read_text().splitlines() if "=" in l)
+        self.assertEqual(seen.get("KEPT_BY_THE_TEST"), "yes")
+        self.assertNotIn("", seen["PATH"].split(os.pathsep))
+        self.assertNotIn(".", seen["PATH"].split(os.pathsep))
+
+    def test_without_a_cwd_a_preset_under_the_current_directory_is_still_started(self):
+        # boss-run passes no --cwd: the caller's directory (say $HOME) may hold a per-user install
+        self.sb.stub("claude", answer=GO)
+        self.expect["claude"] = 1
+        self.planted(self.sb.root)
+        self.chdir_to(self.sb.root)
+        with mock.patch.dict(os.environ, {"PATH": ".:" + os.environ["PATH"]}):
+            launch = rc.claude_launch(rc.OPUS, "p")       # stubs live under self.sb.root, below the cwd
+            self.assertIsNotNone(launch)
+            self.assertEqual(launch[0][0], str(self.sb.stubs / "claude"))
+            self.assertNotIn(".", launch[1]["PATH"].split(os.pathsep))
+            result = rc.run_chain("p", words=rc.GO_NOGO, fallback=rc.OPUS)
+        self.assertEqual(result.reviewer, "opus")
+        self.assertEqual(len(self.claude_calls()), 1)
+        self.assertFalse((self.sb.root / "planted-ran").exists(), "the current directory's claude ran")
+
+    def chdir_to(self, where):
+        before = os.getcwd()
+        os.chdir(where)
+        self.addCleanup(os.chdir, before)
+
+    def test_an_entry_inside_the_checkout_is_not_on_the_childs_path(self):
+        self.sb.stub_script("claude", 'echo "$PATH" > "$R/claude.path"; echo "VERDICT: GO"')
+        self.expect["claude"] = 1
+        inside = self.checkout / "tools"
+        inside.mkdir()
+        self.run_preset(rc.OPUS, os.pathsep.join([str(inside), os.environ["PATH"]]))
+        seen = (self.sb.root / "claude.path").read_text().strip().split(os.pathsep)
+        self.assertNotIn(str(inside), seen)
+
+    def test_when_the_only_claude_is_the_checkouts_the_preset_is_absent(self):
+        self.planted(self.checkout)
+        path = os.pathsep.join([".", str(self.checkout)])
+        with mock.patch.dict(os.environ, {"PATH": path}):
+            result = rc.run_chain("p", words=rc.GO_NOGO, fallback=rc.OPUS, cwd=str(self.checkout))
+        self.assertEqual([a.reason for a in result.attempts if a.reviewer == "opus"], ["absent"])
+        self.assertFalse((self.sb.root / "planted-ran").exists())
+
+
 if __name__ == "__main__":
     unittest.main()

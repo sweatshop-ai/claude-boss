@@ -6,4 +6,10 @@
 
 **Blocked by:** none
 
-**Status:** open
+**Status:** done (PR 98; Opus fallback reviews, Codex re-review owed; edge cases ticketed as 21)
+
+- [x] Decision: every `claude` launch goes through `claude_launch`'s resolution (absolute path, filtered PATH, refused when its realpath is inside the checkout); the presets keep the rest of our environment
+- [x] A planted `./claude` is not run with `.` in PATH, an empty PATH entry, or a relative entry; tested for OPUS
+- [x] A planted checkout `.venv/bin/claude` first in PATH is not run; tested for FABLE
+- [x] A symlink into the checkout in a safe PATH directory is refused (attempt "absent"); a normal PATH still starts the stub for both presets
+- [x] The preset's `claude` is started by absolute path with the rest of the environment kept
