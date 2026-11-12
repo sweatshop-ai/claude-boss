@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """The merge gate (ticket 04): check the review record of one PR and merge it only if the record allows it.
 
-    boss_merge.py --repo OWNER/REPO --pr N [--dry-run]       the command
-    merge(repo, pr, dry_run=False) -> int                    the same, returning the exit code
+    boss_merge.py --repo OWNER/REPO --pr N [--dry-run] [--test-only-since SHA]       the command
+    merge(repo, pr, dry_run=False, since=None) -> int        the same, returning the exit code
     decide(rounds, head, base, non_deploying, owner) -> Decision      the rule, pure
     read_rounds(pr_dir) -> list[Round]            the PR's round<NN>.json files, as 02 wrote them
     read_deploy(repo, base) -> Deploy             the repo's own list of branches that do not deploy
@@ -25,12 +25,22 @@ branches that do not deploy is `.boss/deploy.json` as committed on the PR's base
 from the PR's head; a file that is missing or invalid means every branch deploys. Every decision appends one line to
 pm/reviews/merges.jsonl, and a merge writes a `merging` line before it runs `gh pr merge`. The PR's lock (the one a
 review takes to claim a round) is held from the read of the rounds to the return of `gh pr merge`. Standard library only (and boss_review, which owns the record).
+
+`--test-only-since SHA` (ticket 11b) is the owner's rule that fixes after the last GO which touch only tests need no
+new review. It is looked at only when the live head has no round that decides (`no-round`); any other answer for the
+live head stands. Then SHA must be the head of a GO that `decide` allows with SHA as the head (so a provisional or
+waived GO a later round supersedes, or one on a deploying base, does not qualify), no NO-GO may stand above that
+round, and every file `gh api repos/R/compare/SHA...head` lists, a rename by both names, must match an entry of the
+base branch's `test_paths` (`fnmatch.fnmatchcase` on the whole path, so `*` also crosses `/`). A compare that fails,
+is not `ahead` or `identical`, or fills a page of 300 files refuses (3). A SHA that is not 40 lowercase hex digits is
+exit 2. The `merges.jsonl` lines carry `since`, and the reason of a merge ends `-test-only`.
 """
 from __future__ import annotations
 
 import argparse
 import base64
 import binascii
+import fnmatch
 import json
 import math
 import os
@@ -49,6 +59,7 @@ import policy
 EXIT_MERGED, EXIT_USAGE, EXIT_REFUSED, EXIT_DEPLOYING, EXIT_MERGE_FAILED, EXIT_GH_READ = 0, 2, 3, 4, 5, 7
 
 ALERT_TIMEOUT = 20      # seconds, as codex_blocker's
+COMPARE_FILES = 300     # the most files a compare answers with: a page this long may have more behind it
 
 FIELDS = ("repo", "pr", "round", "head_sha", "base", "kind", "verdict", "status")     # what the walk reads
 KINDS = ("codex", "provisional", "waived")
@@ -57,6 +68,7 @@ STATUSES = ("posted", "head-moved", "no-verdict", "post-failed", "list-failed")
 NOT_A_REVIEW = ("head-moved", "no-verdict", "list-failed")      # rounds that decide nothing
 
 _ROUND_FILE = re.compile(r"round([0-9]+)\.json")
+_SINCE = re.compile(r"[0-9a-f]{40}")        # goes into an endpoint: nothing but a full lowercase SHA-1
 
 
 def _say(message: str) -> None:
@@ -166,11 +178,19 @@ def decide(rounds: list[Round], head: str, base: str, non_deploying, owner: tupl
     return Decision(EXIT_REFUSED, "no-round")
 
 
+def no_go_above(rounds: list[Round], number: int, owner: tuple[str, int]) -> int | None:
+    """The number of the lowest valid round above `number`, on any head, that holds a NO-GO (posted or not), else None.
+    A GO was the last word only if nothing said no after it."""
+    found = [r.number for r in rounds if r.number is not None and r.number > number
+             and (rec := _valid(r, owner)) is not None and rec["verdict"] == "NO-GO"]
+    return min(found) if found else None
+
+
 # ------------------------------------------------------------------- the deploy list ----
 class Deploy(NamedTuple):
     state: str                       # "ok", or why the file counts as invalid
     non_deploying: frozenset
-    test_paths: tuple | None         # for ticket 11
+    test_paths: tuple | None         # the patterns of `--test-only-since` (ticket 11b)
 
 
 def _strings(value) -> bool:
@@ -258,6 +278,40 @@ def read_pr(repo: str, pr: int, io_timeout: float) -> Pr:
     return Pr(number, path, head, base, state)
 
 
+class Compare(NamedTuple):
+    problem: str | None         # None, or the reason the compare cannot be used
+    files: tuple = ()           # every name a changed file had, before and after a rename
+    note: str = ""
+
+
+def read_compare(repo: str, since: str, head: str, io_timeout: float) -> Compare:
+    """The files changed from `since` to `head`. Both are full SHAs already checked, so nothing here needs quoting."""
+    run = boss_review._spawn(["gh", "api", "repos/%s/compare/%s...%s" % (repo, since, head)], io_timeout)
+    if run.timed_out or run.code != 0:
+        why = "ran past %ss" % io_timeout if run.timed_out else "failed (%s): %s" % (run.code, run.err.strip()[-200:])
+        return Compare("compare-failed", note="gh api compare " + why)
+    try:
+        data = json.loads(run.out.decode("utf-8"))
+    except (ValueError, RecursionError):
+        return Compare("compare-failed", note="gh api compare gave no JSON")
+    files = data.get("files") if isinstance(data, dict) else None
+    if not isinstance(files, list):
+        return Compare("compare-failed", note="gh api compare listed no files")
+    if data.get("status") not in ("ahead", "identical"):
+        return Compare("compare-not-ahead", note="the compare says %r" % (data.get("status"),))
+    if not files and data["status"] == "ahead":       # commits ahead and no file listed: not trusted
+        return Compare("compare-no-files", note="the compare is ahead and lists no file")
+    if len(files) >= COMPARE_FILES:
+        return Compare("compare-truncated", note="%d files is the API's limit, there may be more" % len(files))
+    names = []
+    for f in files:
+        if not isinstance(f, dict) or not isinstance(f.get("filename"), str) \
+                or not isinstance(f.get("previous_filename", ""), str):
+            return Compare("compare-failed", note="a file entry I cannot read")
+        names += [f["filename"]] + ([f["previous_filename"]] if f.get("previous_filename") else [])
+    return Compare(None, tuple(names))
+
+
 # ----------------------------------------------------------------------- the command ----
 def _alert(text: str) -> None:
     """`boss-alert 0 text`, as codex_blocker does it: a failure of it is said and changes nothing."""
@@ -284,13 +338,41 @@ def _log(fields: dict) -> bool:
     return True
 
 
-def merge(repo: str, pr: int, *, dry_run: bool = False, io_timeout: float = policy.REVIEW_IO_TIMEOUT) -> int:
-    """Check, then merge. Raises ValueError for a `repo` or `pr` that is not a plain one (the command says exit 2)."""
+def test_only(rounds: list[Round], since: str, seen: Pr, deploy: Deploy, owner: tuple[str, int], repo: str,
+              io_timeout: float) -> tuple[Decision, str]:
+    """The `--test-only-since` rule for a PR whose live head has no deciding round: the decision, and a note for the
+    refusal line. Allowed (exit 0) only if SHA is a GO `decide` allows as the head, nothing says no after it, and
+    every file changed since matches `test_paths`."""
+    got = decide(rounds, since, seen.base, deploy.non_deploying, owner)
+    if got.exit != EXIT_MERGED:
+        return (got, "") if got.reason != "no-round" else (got, "%s is the head of no GO round" % since)
+    no = no_go_above(rounds, got.round, owner)
+    if no is not None:
+        return Decision(EXIT_REFUSED, "no-go-after-since", got.round, got.kind), "round %d says NO-GO" % no
+    if deploy.test_paths is None:
+        return Decision(EXIT_REFUSED, "no-test-paths", got.round, got.kind), "deploy list " + deploy.state
+    cmp = read_compare(repo, since, seen.head, io_timeout)
+    if cmp.problem:
+        return Decision(EXIT_REFUSED, cmp.problem, got.round, got.kind), cmp.note
+    stray = [n for n in cmp.files if not any(fnmatch.fnmatchcase(n, pat) for pat in deploy.test_paths)]
+    if stray:
+        return Decision(EXIT_REFUSED, "not-test-only", got.round, got.kind), "outside test_paths: " + ", ".join(stray[:5])
+    return Decision(EXIT_MERGED, got.reason + "-test-only", got.round, got.kind), ""
+
+
+def merge(repo: str, pr: int, *, dry_run: bool = False, since: str | None = None,
+          io_timeout: float = policy.REVIEW_IO_TIMEOUT) -> int:
+    """Check, then merge. Raises ValueError for a `repo`, `pr` or `since` that is not a plain one (the command says
+    exit 2). `since` is the head of the last GO, for the test-only exception."""
     key = boss_review.repo_key(repo)
     if type(pr) is not int or pr < 1:
         raise ValueError("pr must be a positive integer: %r" % (pr,))
+    if since is not None and (not isinstance(since, str) or not _SINCE.fullmatch(since)):
+        raise ValueError("--test-only-since must be 40 lowercase hex digits: %r" % (since,))
     line = {"ts": boss_review._now(), "repo": key, "pr": pr, "head": None, "base": None, "round": None,
             "kind": None, "decision": None, "exit": None, "reason": None, "config": None, "dry_run": dry_run}
+    if since is not None:
+        line["since"] = since
 
     def finish(code: int, reason: str, decision: str, note: str = "") -> int:
         line.update(decision=decision, exit=code, reason=reason)
@@ -323,11 +405,14 @@ def merge(repo: str, pr: int, *, dry_run: bool = False, io_timeout: float = poli
     except OSError as exc:
         return finish(EXIT_GH_READ, "lock-failed", "refused", "cannot take the lock of %s: %s" % (pr_dir, exc))
     try:
-        got = decide(read_rounds(pr_dir), seen.head, seen.base, deploy.non_deploying, (key, pr))
+        everything = read_rounds(pr_dir)
+        got = decide(everything, seen.head, seen.base, deploy.non_deploying, (key, pr))
+        note = "deploy list " + deploy.state if got.exit == EXIT_DEPLOYING else ""
+        if since is not None and got.reason == "no-round":      # any other answer for the live head stands
+            got, note = test_only(everything, since, seen, deploy, (key, pr), repo, io_timeout)
         line.update(round=got.round, kind=got.kind)
         if got.exit != EXIT_MERGED:
-            return finish(got.exit, got.reason, "refused",
-                          "deploy list " + deploy.state if got.exit == EXIT_DEPLOYING else "")
+            return finish(got.exit, got.reason, "refused", note)
         if dry_run:
             return finish(EXIT_MERGED, got.reason, "allowed")
         # the intent first: a merge that GitHub accepted and a crash then hid would leave no line at all; no line, no merge
@@ -371,9 +456,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--repo", metavar="OWNER/REPO", required=True, help="never inferred from the directory")
     ap.add_argument("--pr", type=boss_review._pr_number, metavar="N", required=True)
     ap.add_argument("--dry-run", action="store_true", help="decide and log, but do not run gh pr merge")
+    ap.add_argument("--test-only-since", metavar="SHA", dest="since",
+                    help="the head of the last GO: allow the merge if every file changed since matches the base "
+                         "branch's test_paths (40 lowercase hex digits)")
     args = ap.parse_args(argv)
     try:
-        return merge(args.repo, args.pr, dry_run=args.dry_run)
+        return merge(args.repo, args.pr, dry_run=args.dry_run, since=args.since)
     except ValueError as exc:
         _say(str(exc))
         return EXIT_USAGE
