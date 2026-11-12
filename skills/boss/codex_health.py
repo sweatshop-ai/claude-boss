@@ -23,6 +23,19 @@ count together: there is one Codex per config dir. `absent`, `timeout` and
 `round` field is never read. The state starts `up`; policy.CODEX_DOWN_AFTER
 failures in a row make it `down`; from `down`, policy.CODEX_UP_AFTER answers in
 a row make it `up` again.
+
+A line is skipped and counted when it is not one JSON object with a usable shape: a blank or whitespace-only
+line (the writer never writes one, so it is a hand edit), a torn or unparseable line, and a line that names a
+key twice (json would keep the last value, so a hand-edited line could change its reviewer). A skipped line is
+never a failure and never an answer.
+
+Accepted: a write that tears without its newline (a full disk) is followed by the next append on the same
+line. The merged line is not parseable, so it is skipped and the one real attempt after the tear goes
+uncounted; `down` can come one attempt late. The reader does not resynchronise: guessing where a line
+starts could count a line twice, and a wrong count raises a false blocker or hides an outage.
+
+An unreadable log other than a missing one (permission, a directory, a parent that is a file) raises
+OSError from health(), so the blocker's sync reports it; the command prints it on stderr and exits 2.
 """
 import json
 import sys
@@ -40,10 +53,17 @@ def default_path():
     return boss_store.pm_dir() / "reviews" / "attempts.jsonl"
 
 
+def _no_duplicates(pairs):
+    keys = [k for k, _ in pairs]
+    if len(set(keys)) != len(keys):
+        raise ValueError("duplicate key")
+    return dict(pairs)
+
+
 def _entry(raw):
     """The decoded line when it has a usable shape, else None."""
     try:
-        e = json.loads(raw.decode("utf-8"))
+        e = json.loads(raw.decode("utf-8"), object_pairs_hook=_no_duplicates)
     except (UnicodeDecodeError, ValueError):
         return None
     if not isinstance(e, dict):
@@ -80,8 +100,6 @@ def health(path=None):
     state, failures, answers = "up", 0, 0
     streak, last = [], None
     for raw in lines:
-        if not raw.strip():
-            continue
         e = _entry(raw)
         if e is None or (e["reviewer"] == "codex" and e["reason"] not in REASONS):
             skipped += 1
@@ -105,7 +123,11 @@ def health(path=None):
 
 
 def main():
-    h = health()
+    try:
+        h = health()
+    except OSError as e:
+        print("codex_health: cannot read %s: %s" % (e.filename or default_path(), e.strerror or e), file=sys.stderr)
+        return 2
     print(json.dumps({k: h[k] for k in ("state", "failures", "answers", "skipped")}))
     return 0
 
