@@ -904,6 +904,22 @@ class Edges(Base):
                 self.assertEqual(self.text(), before)             # no second blocker beside the broken one
                 self.assertEqual(self.alerts("0"), [])
 
+    def test_a_stray_quote_does_not_make_another_blockers_line_a_cd_line(self):
+        """Ticket 31 round 1: a broken marker of another blocker that names a cd id in its prose is not a cd line."""
+        for line in ('- x [ladder id=abcd t0=bad last=0 next=x ask="wait for id=cd261112090000"] 5" screen',
+                     '- x [ladder id=abcd t0=bad ask="Codex down id=cd261112090000 is 5" tall"]',
+                     '- x [ladder id=abcd t0=bad ask="Codex down id=cd261112090000 is "stuck" again" cost="5""]'):
+            with self.subTest(line=line):
+                self.path.write_text(TRACKER.replace("## Open blockers\n", "## Open blockers\n%s\n" % line),
+                                     encoding="utf-8")
+                self.assertEqual(codex_blocker._classify(self.text().split("\n")), ([], []))
+
+    def test_an_even_quote_unbalanced_line_with_the_id_first_is_still_a_broken_cd_line(self):
+        line = '- x [ladder id=cd261112090000 t0=bad ask="say "hi" next=x cost="5" mins"]'
+        self.path.write_text(TRACKER.replace("## Open blockers\n", "## Open blockers\n%s\n" % line), encoding="utf-8")
+        opened, broken = codex_blocker._classify(self.text().split("\n"))
+        self.assertEqual((opened, [i for i, _ in broken]), ([], [3]))
+
     def test_a_repo_with_marker_characters_gives_one_valid_marker(self):
         repo = 'a]b"c[ladder x\nd'
         self.add(F, F, F, repo=repo)

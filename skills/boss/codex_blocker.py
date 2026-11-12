@@ -111,12 +111,15 @@ def _require_offset(now: datetime, message: str) -> None:
 def _is_cd(line: str) -> bool:
     """Does the line carry a marker whose own `id=` field is a `cd` id? Only the text from the `[ladder` token
     on is looked at, with the quoted values (ask=, cost=) taken out: `xid=cd...`, an id with a thirteenth digit
-    and an id named in another blocker's prose are not this marker's. A line with an odd number of quotes
-    is unbalanced (a stray quote pairs the rest left to right and can swallow the id=): it is searched
-    unstripped, so a broken marker is still seen as one."""
+    and an id named in another blocker's prose are not this marker's. `render_marker` writes `id=` before any
+    quote, so an `id=` field there decides alone; without one, a line with an odd number of quotes is
+    unbalanced (a stray quote pairs the rest left to right and can swallow the id=) and is searched unstripped."""
     if not tracker.has_marker(line):
         return False
     text = line[line.find(tracker.TOKEN):]
+    head = text.split('"', 1)[0]
+    if re.search(r"(?<=\s)id=", head):
+        return bool(CD_ID.search(head))
     if text.count('"') % 2:
         return bool(CD_ID.search(text))
     return bool(CD_ID.search(re.sub(r'"[^"]*"', '""', text)))
