@@ -910,7 +910,7 @@ class Cli(Base):
         r = self.cli("--words", "APPROVE,REJECT", "--fallback", "opus", "--fallback-tools", "Read")
         self.assertEqual(json.loads(r.stdout)["attempts"][1]["model"], OPUS_ID)
         self.assertEqual(self.sb.calls_of("claude")[1].argv[:2], ["--allowedTools", "Read"])
-        for name, args in [("unknown preset", ["--fallback", "opus"]),
+        for name, args in [("unknown preset", ["--fallback", "haiku"]),
                            ("preset and a name", ["--fallback", "opus", "--fallback-name", "x"]),
                            ("preset and a model", ["--fallback", "opus", "--fallback-model", "m"]),
                            ("preset and no-fallback", ["--fallback", "opus", "--no-fallback"])]:
