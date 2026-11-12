@@ -296,6 +296,56 @@ class HardRules(Base):
                     "hard rule: %s (matched /" % name))
         self.assertNotCalled("codex", "claude")
 
+    def test_a_merge_typed_by_hand_is_refused_in_every_shape(self):
+        """Ticket 11a: `PR merge outside boss_merge`, a repo option on either side of `pr`, a path to gh, the REST PUT
+        and the GraphQL mutation; every one exits 5 with --dry-run and asks no reviewer."""
+        cases = [
+            ("gh pr merge 5 --merge",),
+            ("gh --repo o/r pr merge 5",),
+            ("gh -R o/r pr merge 5",),
+            ("gh pr --repo o/r merge 5",),
+            ("gh pr -R o/r merge 5",),
+            ("gh pr --repo=o/r merge 5",),
+            ("/usr/bin/gh pr merge 5",),
+            ("gh api -X PUT repos/o/r/pulls/5/merge",),
+            ("gh api repos/o/r/pulls/5/merge --method PUT",),
+            ("gh api --method=PUT repos/o/r/pulls/5/merge",),
+            ("gh api graphql -f query='mutation { mergePullRequest(input: {}) { clientMutationId } }'",),
+            ("GH PR MERGE 5",),
+            ("echo gh pr merge",),
+        ]
+        for (command,) in cases:
+            with self.subTest(command):
+                r = self.dry(command)
+                self.assertEqual(r.returncode, 5, r.stdout + r.stderr)
+                self.assertTrue(r.stderr.startswith(
+                    "boss-run: REFUSED by hard rule — PR merge outside boss_merge\n"), r.stderr)
+                self.assertTrue(self.sb.log_lines()[-1]["reason"].startswith(
+                    "hard rule: PR merge outside boss_merge (matched /"))
+        self.assertNotCalled("codex", "claude", "gh")
+
+    def test_the_merge_rule_works_on_an_argument_list_as_on_a_string(self):
+        for args in (("gh", "pr", "merge", "5"), ("gh", "pr", "--repo", "o/r", "merge", "5"),
+                     ("gh", "api", "-X", "PUT", "repos/o/r/pulls/5/merge")):
+            with self.subTest(args):
+                self.assertEqual(self.dry(*args).returncode, 5)
+        self.assertNotCalled("codex", "claude", "gh")
+
+    def test_what_is_not_a_merge_is_not_refused(self):
+        """The gate, a view, a comment that says the word, and the GET that asks whether a PR is merged."""
+        self.sb.stub("codex", answer=approve())
+        for command in ("python3 skills/boss/boss_merge.py --repo o/r --pr 5",
+                        "python3 skills/boss/boss_merge.py --repo o/r --pr 5 --dry-run",
+                        "gh pr view 5",
+                        "gh pr comment 5 --body 'merge when green'",
+                        "gh pr checks 5 --repo o/r",
+                        "gh api repos/o/r/pulls/5/merge",
+                        "gh api repos/o/r/pulls/5/merge --method GET"):
+            with self.subTest(command):
+                r = self.dry(command)
+                self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+                self.assertNotIn("REFUSED by hard rule", r.stderr)
+
     def test_the_owners_own_rules_in_the_config_dir_are_checked_too(self):
         (self.sb.cfg / "boss-hard-rules.tsv").write_text("our host\tsecret-host\n")
         r = self.dry("scp file secret-host:/srv")

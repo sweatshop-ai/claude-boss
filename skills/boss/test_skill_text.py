@@ -85,6 +85,50 @@ class MergeRule(unittest.TestCase):
                       "marks the branch non-deploying)", flat())
 
 
+class MergeGate(unittest.TestCase):
+    """Ticket 11a: the skill names the merge command, its outcomes, and the three things the gate does not cover."""
+
+    COMMAND = "python3 ${CLAUDE_PLUGIN_ROOT}/skills/boss/boss_merge.py --repo OWNER/REPO --pr N"
+    OUTCOMES = ("Its exit codes: 0 merged, 3 and 4 refused, 5 failed or unverified (the merge or the check after it), "
+                "7 a read failed.")
+    REFUSAL = ("A refusal (3 or 4) is an instruction to get the right review, not to work around it.")
+    LIMITS = (
+        "A `gh pr merge` typed by hand in a worker's or the owner's own shell is outside the gate, and only branch "
+        "protection on the repo closes that, which the plugin cannot set.",
+        "A base retargeted between the check and the merge is detected after the fact (exit 5, `base-changed`) and "
+        "not prevented.",
+        "The gate trusts the repo's `.boss/deploy.json`, so a listed branch that later starts to deploy is outside "
+        "what the gate can see.",
+    )
+
+    def section(self):
+        """From the sentence that ends P14's merge paragraph to the next heading."""
+        text = flat()
+        start = text.index("no merge order is given on a GO that exists only in a message")
+        return text[start:text.index("### P15", start)]
+
+    def test_the_command_is_named_once_with_its_flags(self):
+        sec = self.section()
+        self.assertEqual(sec.count(self.COMMAND), 1)
+        self.assertIn("`--dry-run`", sec)
+        self.assertIn("`--test-only-since SHA`", sec)
+
+    def test_the_outcomes_are_named(self):
+        self.assertEqual(self.section().count(self.OUTCOMES), 1)
+
+    def test_a_refusal_is_an_instruction_not_an_obstacle(self):
+        self.assertEqual(self.section().count(self.REFUSAL), 1)
+
+    def test_each_of_the_three_limits_is_one_plain_sentence(self):
+        sec = self.section()
+        for limit in self.LIMITS:
+            with self.subTest(limit):
+                self.assertEqual(sec.count(limit), 1)
+
+    def test_the_hard_rule_is_named(self):
+        self.assertEqual(self.section().count("`PR merge outside boss_merge`"), 1)
+
+
 class CodexDownChoice(unittest.TestCase):
     """Ticket 09b: the boss asks the owner once, records the answer, and does not ask twice."""
 
