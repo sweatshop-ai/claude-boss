@@ -197,6 +197,17 @@ that PR (the recheck of ticket 10 included) clears the entry it kept; the newest
 An entry of a PR closed without a merge lives until the owner deletes its line from the tracker by hand (ticket 27): there
 is no age limit, because a reopened PR must still find its entry, and each recheck pass reads such a PR once.
 
+**Recheck**: `skills/boss/boss_recheck.py --track T --repo OWNER/REPO --checkout DIR [--author NAME]` (ticket 10a), the pass
+that has Codex alone review again each entry of a repo under `## Provisional GO`. It runs `prune_provisional` first and after
+each review, and reviews each entry in a detached worktree of its own (`boss-recheck-*` in the temp dir, fetched from
+`refs/pull/<N>/head`, never `--checkout` itself): an open PR at its live head, a merged PR at its merged `headRefOid`
+(not the entry's `head=`), a PR closed without a merge not at all. A Codex NO-GO on an open PR prints `NO-GO <repo>#<N>
+round <NN> author=<name>` and keeps the entry. A Codex NO-GO on a merged PR writes an open blocker (`fx` and 8 hex of the
+sha1 of "<repo>#<N> round <NN>", so one id per round; `boss-alert 0` once), removes that exact entry line, and prints
+`DISPATCH <repo>#<N> author=<name> round=<NN>`; a crash between the two is resumed from the round on disk, with no new review,
+no second blocker and no second alert, even after the blocker was cleared. No Codex answer leaves the entry. `--list` and
+the release stop are ticket 10b.
+
 **Round record**: `round<NN>.json`, what a gate reads. A round is `posted` only
 after `gh pr comment` returned success, so a comment on the PR with no `posted`
 record behind it authorizes nothing. A round claimed and never finished is an
