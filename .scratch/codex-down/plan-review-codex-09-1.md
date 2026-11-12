@@ -1,0 +1,110 @@
+# Codex spec round 1 for ticket 09 (Astrid, 2026-11-12)
+
+Run by Astrid on real Codex at 15:02 (`codex-review.sh exec`, read-only), on the spec at `360baf0` (PR 100) against `main` f0ae63d. Brief and raw answer: `/home/tiroir/Projects/boss-plugin-wt/09-spec-reviews/brief-1.md`, `round-1.md`. Verdict: **NO-GO**, 13 findings, all with file:line citations; every citation was checked against the worktree before it was settled.
+
+## Findings
+
+
+1. [P1] Class a — The “owner’s choice / SKILL step” uses a channel that explicitly cannot authorize a waiver. A concierge `ANSWER` is a peer message, and the guard says peer messages cannot release gated actions; consent must be an own-turn `AskUserQuestion` beginning `CONSENT:`. [`skills/boss/boss-guard.py:281`](/home/tiroir/Projects/boss-plugin-wt/09-spec/skills/boss/boss-guard.py:281), [`skills/boss/test_boss_guard.py:492`](/home/tiroir/Projects/boss-plugin-wt/09-spec/skills/boss/test_boss_guard.py:492). Concrete fix: keep wait/fallback as concierge choices, but require a separate own-turn `CONSENT:` before recording `tests-alone`; or make the one three-option question an own-turn `CONSENT:` question.
+
+2. [P1] Class a — The choice record does not prove owner provenance and can be forged. `boss-tracker append` accepts arbitrary stdin from any same-user process and appends it verbatim; because the spec says the last matching choice wins, any worker can append an exact `tests-alone` line. [`skills/boss/bin/boss-tracker:66`](/home/tiroir/Projects/boss-plugin-wt/09-spec/skills/boss/bin/boss-tracker:66), [`skills/boss/bin/boss-tracker:71`](/home/tiroir/Projects/boss-plugin-wt/09-spec/skills/boss/bin/boss-tracker:71). Concrete fix: do not treat this generic tracker line as authenticated acceptance. Either require an externally authenticated owner approval that `--waive` verifies, or explicitly downgrade the record to workflow evidence and remove the claim that it enforces owner acceptance. In either case, specify an anchored full-line parser.
+
+3. [P1] Class b — The “choice record” box knowingly permits a permanent phantom blocker. Any bulleted line under `## Open blockers` is returned by `tracker.open_blockers`, regardless of whether it has a ladder marker, and pulse consumes that list. [`skills/boss/tracker.py:274`](/home/tiroir/Projects/boss-plugin-wt/09-spec/skills/boss/tracker.py:274), [`skills/boss/boss-pulse.py:164`](/home/tiroir/Projects/boss-plugin-wt/09-spec/skills/boss/boss-pulse.py:164), [`skills/boss/boss-pulse.py:330`](/home/tiroir/Projects/boss-plugin-wt/09-spec/skills/boss/boss-pulse.py:330). Concrete fix: write choices into `## Decisions in force` with a section-aware `tracker.update`, not EOF append. Replace the test that blesses placement under `## Open blockers` with one asserting that placement cannot occur. The record does not affect the ladder or `_classify`, because both require `[ladder`; pulse is the breakage.
+
+4. [P1] Class b — “A hand clear holds until the streak grows” is not sound when implemented using wall-clock `ts`. Health currently defines streak order by JSONL file order, and its test explicitly pins that timestamps do not order the streak. [`skills/boss/codex_health.py:67`](/home/tiroir/Projects/boss-plugin-wt/09-spec/skills/boss/codex_health.py:67), [`skills/boss/test_codex_health.py:92`](/home/tiroir/Projects/boss-plugin-wt/09-spec/skills/boss/test_codex_health.py:92). Concurrent writers can therefore append a newly grown failure whose precomputed timestamp is older than the clear. Additionally, attempts have second resolution while `cleared=` has minute resolution; “later than” fails for an attempt exactly at `HH:MM:00`, contradicting “same minute counts as new.” [`skills/boss/boss_review.py:543`](/home/tiroir/Projects/boss-plugin-wt/09-spec/skills/boss/boss_review.py:543), [`skills/boss/tracker.py:223`](/home/tiroir/Projects/boss-plugin-wt/09-spec/skills/boss/tracker.py:223). Concrete fix: persist an append-order cursor or last-attempt fingerprint when clearing and compare that, preferably through a dedicated clear command. If timestamps are retained as an accepted approximation, specify `last_ts >= cleared`, document the concurrent out-of-order limitation, and test it.
+
+5. [P1] Class a — The SKILL instruction “type `cleared=`” does not actually clear a valid marker when followed literally. `validate` leaves an empty value as `""`, and `_classify` treats that as open. [`skills/boss/tracker.py:195`](/home/tiroir/Projects/boss-plugin-wt/09-spec/skills/boss/tracker.py:195), [`skills/boss/codex_blocker.py:84`](/home/tiroir/Projects/boss-plugin-wt/09-spec/skills/boss/codex_blocker.py:84). Concrete fix: say `cleared=<ISO-8601 time with UTC offset>`, or provide a command that inserts the field correctly.
+
+6. [P2] Class b — The hand-clear box incorrectly says `boss-tracker archive` leaves no live line to compare. The command only copies stdin into the archive; it never edits or removes the live tracker. [`skills/boss/bin/boss-tracker:74`](/home/tiroir/Projects/boss-plugin-wt/09-spec/skills/boss/bin/boss-tracker:74). Concrete fix: say “removing the line from the live tracker—optionally after separately copying it with `boss-tracker archive`—causes a re-raise.”
+
+7. [P2] Class c — `open_ids(lines)` is not “open means what 05c means” if it returns only valid IDs. Main treats an unreadable `cd` marker as an open blocker and suppresses a second raise, while valid-open indices and broken lines are separate outputs. [`skills/boss/codex_blocker.py:68`](/home/tiroir/Projects/boss-plugin-wt/09-spec/skills/boss/codex_blocker.py:68), [`skills/boss/codex_blocker.py:126`](/home/tiroir/Projects/boss-plugin-wt/09-spec/skills/boss/codex_blocker.py:126). Concrete fix: when `_classify` reports a broken `cd` line and no usable ID, `--choice` must exit 2 with a malformed-blocker reason, not print `no-blocker`.
+
+8. [P1] Class b — The waiver checks the blocker and choice only before a test run lasting up to 900 seconds. Meanwhile the owner can append a later choice or recovery can clear the blocker. The tracker lock and the per-PR review lock are entirely separate. [`skills/boss/bin/boss-tracker:69`](/home/tiroir/Projects/boss-plugin-wt/09-spec/skills/boss/bin/boss-tracker:69), [`skills/boss/boss_review.py:571`](/home/tiroir/Projects/boss-plugin-wt/09-spec/skills/boss/boss_review.py:571). Concrete fix: either define the initial choice as an irrevocable authorization snapshot, or revalidate the same open blocker ID and latest `tests-alone` choice after tests while holding a specified tracker/PR lock order through the round claim.
+
+9. [P1] Class b — The waiver race check omits re-reading checkout HEAD after the tests. Existing `_keep_and_post` re-reads both the PR and checkout under the PR lock and marks the round moved if any of live head, live base, or checkout HEAD changed. [`skills/boss/boss_review.py:981`](/home/tiroir/Projects/boss-plugin-wt/09-spec/skills/boss/boss_review.py:981), [`skills/boss/boss_review.py:1001`](/home/tiroir/Projects/boss-plugin-wt/09-spec/skills/boss/boss_review.py:1001). The merged test specifically covers a checkout that moves during review. [`skills/boss/test_boss_review.py:489`](/home/tiroir/Projects/boss-plugin-wt/09-spec/skills/boss/test_boss_review.py:489). Concrete fix: require `_checkout_of(job).head == pretest_head` in the under-lock re-read and make mismatch exit 6 with a `head-moved` round.
+
+10. [P2] Class d — The waiver box says a moved round has `verdict: null “as in 02”`, but 02 keeps the attempted verdict even when status is `head-moved`. [`skills/boss/boss_review.py:991`](/home/tiroir/Projects/boss-plugin-wt/09-spec/skills/boss/boss_review.py:991), [`skills/boss/test_boss_review.py:464`](/home/tiroir/Projects/boss-plugin-wt/09-spec/skills/boss/test_boss_review.py:464). Concrete fix: specify `verdict: "GO"` with `status: "head-moved"`; 04 skips that status, so it still cannot authorize a merge.
+
+11. [P1] Class a — `--test-cmd "<cmd>"` does not define how the string becomes the argv expected by `_spawn`; `_spawn` takes `list[str]` and passes it directly to `Popen`. [`skills/boss/boss_review.py:235`](/home/tiroir/Projects/boss-plugin-wt/09-spec/skills/boss/boss_review.py:235), [`skills/boss/boss_review.py:246`](/home/tiroir/Projects/boss-plugin-wt/09-spec/skills/boss/boss_review.py:246). Concrete fix: specify either `["/bin/sh", "-c", cmd]` exactly, including environment/stdin behavior, or replace the string option with an explicit repeated argv option. Also state whether spawn failure is refusal 5 or infrastructure 7.
+
+12. [P2] Class d — The hand-clear test edit list is slightly wrong. The first two tests need a later failure; `test_an_id_on_a_cleared_line_is_never_reused` duplicates the same-now uniqueness case and ticket 20 already says to drop it. [`skills/boss/test_codex_blocker.py:147`](/home/tiroir/Projects/boss-plugin-wt/09-spec/skills/boss/test_codex_blocker.py:147), [`skills/boss/test_codex_blocker.py:156`](/home/tiroir/Projects/boss-plugin-wt/09-spec/skills/boss/test_codex_blocker.py:156), [`skills/boss/test_codex_blocker.py:164`](/home/tiroir/Projects/boss-plugin-wt/09-spec/skills/boss/test_codex_blocker.py:164). No other existing `clear_by_hand` test needs a changed expectation; the shorter-streak case already appends an answer and expects no raise. [`skills/boss/test_codex_blocker.py:179`](/home/tiroir/Projects/boss-plugin-wt/09-spec/skills/boss/test_codex_blocker.py:179). Concrete fix: update two, delete the duplicate third, and add valid-Z, offset, missing/invalid, exact-minute, and out-of-file-order `last_ts` coverage.
+
+13. [P2] Class d — Ticket 09 remains too large. The proposed 09a still changes health derivation, blocker classification/sync/CLI, SKILL text, and three test modules; 09b changes the review writer/CLI and policy. The relevant implementation centers are separate modules. [`skills/boss/codex_health.py:56`](/home/tiroir/Projects/boss-plugin-wt/09-spec/skills/boss/codex_health.py:56), [`skills/boss/codex_blocker.py:109`](/home/tiroir/Projects/boss-plugin-wt/09-spec/skills/boss/codex_blocker.py:109), [`skills/boss/boss_review.py:971`](/home/tiroir/Projects/boss-plugin-wt/09-spec/skills/boss/boss_review.py:971), [`skills/boss/boss_review.py:1230`](/home/tiroir/Projects/boss-plugin-wt/09-spec/skills/boss/boss_review.py:1230). Concrete fix: use three tickets: 09a hand-clear persistence; 09b choice parser/record and consent workflow; 09c waiver, timeout constant, and activation text.
+
+## Split and consumer assessment
+
+The proposed two-way cut is code-dependency-clean in one direction but not delivery-clean as written.
+
+09b needs from 09a:
+
+- The exact anchored record grammar and choice values.
+- The active blocker-ID reader.
+- A programmatic `choice(track)` result contract that distinguishes no blocker, no choice, malformed/multiple blockers, and a recorded choice.
+- `open_ids` only indirectly if `choice(track)` encapsulates it.
+
+It does not need `health.last_ts` or the hand-clear hold. `usable_tracker` already exists in 05c.
+
+09a’s code does not need 09b, but its proposed SKILL step promises and names `--waive`, which would not exist until 09b. Move activation of the `tests-alone` option and `--waive` instruction into the waiver ticket, or land both atomically.
+
+After a split:
+
+- 04 must be blocked by 08 and the waiver ticket—09b under the proposed names, or 09c under the cleaner three-way cut. Its real-writer end-to-end test must point there.
+- 11 remains blocked by 04. References to the origin of `waived` records should name the waiver ticket, not choice/hand-clear 09a.
+- `plan.md` build order and `coverage.md` finding 7 must name the waiver ticket. Coverage finding 4 should name whichever ticket finally activates the SKILL workflow.
+
+As specified, 04 would accept the successful record: `kind: waived`, `verdict: GO`, `status: posted`, matching head/base, with the additional `tests` key. Exit 5 is also free relative to merged `boss_review.py`. The blocking problems are authorization, stale-choice/checkout races, and command execution—not the successful record’s gate shape.
+
+NO-GO
+## Settled
+
+Every finding has a disposition. "Spec" means the text of the tickets in this PR (09 is now an index of 09a, 09b, 09c).
+
+| # | Class | Disposition |
+|---|---|---|
+| 1 | a | **Accepted.** `boss-guard.py:281` `is_consent` confirms a peer message is never consent. 09c: a concierge `ANSWER` of tests alone is not a choice; the boss asks once more in its own turn with `CONSENT:` and runs `--choose TRACK tests-alone` only on yes. wait and accept-fallback stay concierge answers (09b). |
+| 2 | a | **Accepted in part.** Any same-user process can edit a tracker; no record in a file can authenticate. The spec now says so (09b, to go into `coverage.md` at build): the record is workflow evidence, what makes it the owner's is the question that produced it. The parser is anchored on the full line and on `## Decisions in force`. Not solved: an authenticated approval channel does not exist in this track. |
+| 3 | b | **Accepted.** 09b writes with `--choose` through `tracker.update`/`insert_in_section` into `## Decisions in force`; a test asserts a tracker whose last section is `## Open blockers` gets the line in Decisions and `open_blockers` unchanged. |
+| 4 | b | **Accepted as the approximation.** The dropped alternative (a cursor) cannot exist for a hand clear. 09a: compare against the clear's minute start with `>=` (the `HH:MM:00` case), pin `last_ts` in `test_codex_health.py` including file order vs `ts` order, and document the out-of-order concurrent writer as accepted. |
+| 5 | a (graded b by Astrid: the instruction text, not code) | **Accepted.** The SKILL sentence and 09a say `cleared=<ISO-8601 time with UTC offset>` with an example, never a bare `cleared=`. |
+| 6 | b | **Accepted.** `boss-tracker archive` only copies stdin (checked, `bin/boss-tracker:74`); 09a says removing the line from the live tracker re-raises. |
+| 7 | c | **Accepted.** `choice` returns `malformed` (exit 2 with reason) when only broken `cd` lines exist or two valid ones are open; `open_ids` is not public. |
+| 8 | b | **Accepted.** 09c re-reads head, base, checkout HEAD and `choice(T)` under the PR lock after the tests; PR lock outer, tracker only read. A changed choice or blocker is exit 5 with nothing recorded. |
+| 9 | b | **Accepted.** Checkout HEAD is re-read under the lock; a mismatch is exit 6 with a `head-moved` round. |
+| 10 | d | **Accepted.** A moved round keeps `verdict` `GO` with status `head-moved`, as 02 does; 04 skips that status. |
+| 11 | a (graded b: the build would have chosen) | **Accepted.** The command is `["/bin/sh", "-c", cmd]` through `_spawn`, cwd the checkout, stdin closed; a command that cannot be started is exit 7, a failing or timed-out one 5. |
+| 12 | d | **Accepted.** 09a updates two tests and drops `test_an_id_on_a_cleared_line_is_never_reused` (20 already says so); new `last_ts` tests listed. |
+| 13 | d | **Accepted, and it overturns Chiara's two-way cut** (her ruling allowed it). Three tickets: 09a hand-clear hold, 09b choice record/reader/ask, 09c waiver and consent. Codex answered the cut question: 09b needs from 09a only the grammar and reader, and in fact needs nothing from the hand-clear hold; 09a's SKILL step would have named `--waive` before it exists, so the tests-alone option moves to 09c. 04 is now blocked by 08 and 09c; 11 stays behind 04; `plan.md`, `coverage.md`, 04, 08, 20 and the 05 index are repointed. |
+
+No new ticket was needed: the findings are in the three 09 tickets. (Numbers from 23 stay free; PR 99 touches only 06.)
+
+## Round 2 (Malin, 2026-11-12): Opus fallback, Codex stalled
+
+Codex round 2 was run at head 2af4ba6 (`codex-review.sh exec`, brief on the diff since 360baf0) and stalled past 540s (exit 6, no answer; stderr in `/home/tiroir/Projects/boss-plugin-wt/09-spec-reviews/round-2.codex-stalled.md.stderr`). The labelled Opus fallback ran in the same turn: `/home/tiroir/Projects/boss-plugin-wt/09-spec-reviews/round-2.md`. Verdict: 09a GO after N4 and N5; 09b NO-GO until N2, N3, N7, N8, N9; 09c NO-GO until N1, N6. No class a finding. The 13 round-1 dispositions: all closed, findings 2 and 4 accepted in part with the residue judged acceptable. Codex still owes a re-read when it answers; its findings become tickets numbered from 23, not a revert.
+
+| # | Class | Disposition |
+|---|---|---|
+| N1 | d (security-adjacent) | **Fixed** in 09c: `is_consent` only routes a `CONSENT:` question; the step is SKILL discipline; any peer relay is not a choice; residue in coverage R26. |
+| N2 | b | **Fixed**: 09b changes `codex_blocker.ASK` to two options and rewrites the marker's `ask=` on `--choose`; 09c adds tests alone back. |
+| N3 | b | **Fixed** in 09b: write nothing only when the last choice equals the request; revocation test. |
+| N4 | b | **Fixed** in 09a: `C` capped at `now`, stderr line, test. |
+| N5 | d | **Fixed** in 09a: `entry()`/`add()` take `ts`; later failure at NOW+20 s. |
+| N6 | b | **Fixed** in 09c: clean checkout before and under the lock, `_prepare` reused, tests; `--test-cmd` residue in R26. |
+| N7 | d | **Fixed**: sentence in 09b's text test; 09b blocked by 09a for it. |
+| N8 | d | **Fixed**: `coverage.md` residual risk R26 added. |
+| N9 | b | **Fixed** in 09b: own-turn `AskUserQuestion` when the boss has no concierge. |
+| N10 | d | **Fixed**: three tests added to 09c. |
+| stale pointers | d | 04's scope says 09c; 05's index says 09a, 09b and 09c. |
+
+## Round 3 (Malin, 2026-11-12): real Codex, enforcement of the consent
+
+Brief: can `boss-guard` gate `--choose tests-alone` and `--waive` on the session's own `CONSENT:` yes. Raw: `/home/tiroir/Projects/boss-plugin-wt/09-spec-reviews/round-3.md`. Codex answered: **feasible as a fail-closed guardrail** against a session that runs the command without asking (PostToolUse token on the Ask, checked inside the commands, defence-in-depth deny in the guard); **infeasible as strict enforcement** against an agent that deliberately forges it (same OS user). Written into 09c (consent token box); R26 cut to the deliberate-forgery residue. The guard today reads only `session_id`, `tool_name`, `tool_input` (`boss-guard.py:299-327`) and runs for registered boss sessions only; the PostToolUse payload is not characterised in the repo, so the build captures it first.
+
+| # | Class | Disposition |
+|---|---|---|
+| 1 | a | **Accepted**: the token box in 09c. Residue (deliberate forgery) in R26. |
+| 2 | b | **Accepted**: 09a ignores a future `cleared=` beyond `now` + 60 s as invalid, not capped; boundary tests. |
+| 3 | b | **Accepted**: 09b's revocation test uses `accept-fallback`; 09c repeats it with `tests-alone`. |
+| 4 | d | **Accepted**: capturing the real PostToolUse payload is the first step of 09c's build. |
+| 5 | d | **Accepted**: dirty-after-tests is exit 6, a `head-moved` round with `GO`, nothing posted. |
+
+Codex verdict NO-GO on the text as read; findings 1 to 5 are fixed in the spec.
