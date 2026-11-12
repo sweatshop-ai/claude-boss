@@ -40,6 +40,20 @@ and write memories without seeing the first user's.
 3. close out the merge inventory: compute-node #8, acme-docs #18
 ```
 
+A track that works local tickets names them in its criteria as `<feature>/<NN>`
+(the folder under `.scratch/`), one line or one range per run of tickets:
+
+```markdown
+## Done when
+- [ ] paste/12 at Status done: the copy button shows while a question is open
+- [ ] paste/23 to 26 at Status done
+- [ ] the full suite is green on t-compute at the final head
+```
+
+FleetView reads those names to show each line as worked on, waiting or planned
+(SKILL.md, "Name the local tickets"); "every ticket in the folder" gives it nothing
+to read.
+
 Every line of that was already known at 23:15. None of it was written down where
 anything could read it — and the first two criteria are now things `boss-goal
 verify` answers by itself, without anyone forming an opinion.

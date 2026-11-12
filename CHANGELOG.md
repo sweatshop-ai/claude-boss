@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- **A Done when line names its local tickets as `<feature>/<NN>`, or a range `<feature>/<NN> to <MM>`.** SKILL.md,
+  `references/objective.md` and the hand-to-boss brief template say so. FleetView (agentview PR 33) shows each Done when
+  line as a row on the track's card, worked on, waiting, planned or done, and finds the line's tickets by that name
+  only; a goal that says "ticket 26" or "every ticket in the folder" shows every open line as planned.
+
 ## 0.23.0 — 2026-11-11
 
 - **`/boss wrap-up` saves the state, then closes every pane the boss owns (ticket 01).** Phase E checks git itself
