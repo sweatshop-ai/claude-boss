@@ -296,6 +296,8 @@ class Command(unittest.TestCase):
         d.mkdir()
         with self.assertRaises(IsADirectoryError):
             codex_health.health(d)
+        for name in ("codex", "claude", "gh"):      # reading a log makes no tool call
+            self.sb.expect_unused(name)
 
 
 if __name__ == "__main__":

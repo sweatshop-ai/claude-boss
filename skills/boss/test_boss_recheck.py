@@ -184,7 +184,10 @@ class Base(unittest.TestCase):
 
     def codex_heads(self):
         path = self.sb.side / "codex-heads"
-        return path.read_text().split() if path.exists() else []
+        heads = path.read_text().split() if path.exists() else []
+        calls = self.sb.calls_of("codex")       # the stub's own log must agree with the heads it noted
+        self.assertEqual(len(calls), len(heads), [c.argv for c in calls])
+        return heads
 
     def run_pass(self, **kw):
         out, err = io.StringIO(), io.StringIO()
@@ -333,6 +336,7 @@ class ThePass(Base):
         self.run_pass()
         self.assertEqual(len(self.worktrees()), 1)
         self.assertFalse(leftover.exists())
+        self.sb.expect_unused("codex")
 
     def test_a_worktree_that_is_not_the_recheck_s_is_not_touched(self):
         mine = self.sb.work / "someone-elses"
@@ -340,6 +344,7 @@ class ThePass(Base):
         self.run_pass()
         self.assertEqual(len(self.worktrees()), 2)
         self.assertTrue(mine.exists())
+        self.sb.expect_unused("codex")
 
     def test_an_exception_inside_the_review_removes_the_worktree_and_the_pass_goes_on(self):
         a = self.pr(5, "raises", answer=GO)
@@ -395,6 +400,7 @@ class TheNoGo(Base):
         self.assertEqual([e.pr for e in self.entries()], [5])
         self.assertEqual((self.blockers(), self.alerts()), ([], []))
         self.assertEqual(json.loads((self.reviews / "owner/repo/pr5/round02.json").read_text())["author"], "recheck")
+        self.assertEqual(self.codex_heads(), [head])
 
     def test_a_no_go_on_a_merged_pr_is_a_blocker_the_ladder_raises_and_a_dispatch_line(self):
         head = self.pr(5, "bad", state="MERGED", answer=NOGO)
@@ -427,6 +433,7 @@ class TheNoGo(Base):
         self.assertEqual(run.returncode, 0, run.stderr)
         self.assertEqual([c.argv[0] for c in self.sb.calls_of("boss-alert-ladder")], ["5"], run.stdout)
         self.assertEqual(self.sb.calls_of("claude"), [])
+        self.assertEqual(self.codex_heads(), [head])
 
     def blocker_id(self, n, round):
         return rk.blocker_id(REPO, n, round)
@@ -441,6 +448,7 @@ class TheNoGo(Base):
         ids = {self.blocker_id(5, 2), self.blocker_id(5, 3), self.blocker_id(6, 2)}
         self.assertEqual(len(ids), 3)
         self.assertTrue(all(re.fullmatch(r"fx[0-9a-f]{8}", i) for i in ids))
+        self.sb.expect_unused("codex")
 
     def crashed(self, n, head, no_go_status="posted", blocker=None):
         """A pass that wrote its NO-GO round (2) and died before the entry was removed."""
@@ -494,6 +502,7 @@ class TheNoGo(Base):
         self.assertNotEqual(tracker.scan_marker(found[0])[1]["id"], tracker.scan_marker(found[1])[1]["id"])
         self.assertEqual([a[0] for a in self.alerts()], ["0"])
         self.assertEqual(self.entries(), [])
+        self.assertEqual(self.codex_heads(), [head])
 
     def test_the_blocker_the_pass_writes_is_the_one_list_prints(self):
         head = self.pr(5, "bad", state="MERGED", answer=NOGO)
@@ -503,6 +512,7 @@ class TheNoGo(Base):
         run = subprocess.run([sys.executable, str(HERE / "boss_recheck.py"), "--track", "t", "--list"],
                              env=dict(os.environ), capture_output=True, text=True, timeout=120)
         self.assertEqual((run.returncode, run.stdout), (1, "BLOCKER owner/repo#5 round 02\n"), run.stderr)
+        self.assertEqual(self.codex_heads(), [head])
 
     def test_an_entry_replaced_between_the_read_and_the_removal_stays(self):
         head = self.pr(5, "bad", state="MERGED", answer=NOGO)
@@ -521,6 +531,7 @@ class TheNoGo(Base):
         self.assertEqual([e.line for e in self.entries()], [newer])
         self.assertEqual(len(self.blockers()), 1)
         self.assertEqual(lines, ["DISPATCH owner/repo#5 author=worker-a round=02"])
+        self.assertEqual(self.codex_heads(), [head])
 
     def test_a_blocker_write_that_fails_leaves_the_entry(self):
         head = self.pr(5, "bad", state="MERGED", answer=NOGO)
@@ -531,6 +542,7 @@ class TheNoGo(Base):
         self.assertEqual([e.pr for e in self.entries()], [5])
         self.assertEqual((self.blockers(), self.alerts(), lines), ([], [], []))
         self.assertIn("lock held past the deadline", self.stderr)
+        self.assertEqual(self.codex_heads(), [head])
 
     def test_a_failed_alert_does_not_undo_the_blocker(self):
         head = self.pr(5, "bad", state="MERGED", answer=NOGO)
@@ -540,6 +552,7 @@ class TheNoGo(Base):
         self.run_pass()
         self.assertEqual(len(self.blockers()), 1)
         self.assertEqual(self.entries(), [])
+        self.assertEqual(self.codex_heads(), [head])
 
 
 class TheCommand(Base):
@@ -555,6 +568,7 @@ class TheCommand(Base):
         run = self.run_cli("--author", "rita")
         self.assertEqual((run.returncode, run.stdout), (0, "DISPATCH owner/repo#5 author=worker-z round=02\n"), run.stderr)
         self.assertEqual(json.loads((self.reviews / "owner/repo/pr5/round02.json").read_text())["author"], "rita")
+        self.assertEqual(self.codex_heads(), [head])
 
     def test_the_author_defaults_to_recheck(self):
         head = self.pr(5, "good", answer=GO)
@@ -562,12 +576,14 @@ class TheCommand(Base):
         self.rounds(5, (1, head, None, {"kind": "provisional"}))
         self.assertEqual(self.run_cli().returncode, 0)
         self.assertEqual(json.loads((self.reviews / "owner/repo/pr5/round02.json").read_text())["author"], "recheck")
+        self.assertEqual(self.codex_heads(), [head])
 
     def test_an_unusable_track_is_exit_2_and_says_no_blocker_can_be_rechecked(self):
         run = self.run_cli(track="nope")
         self.assertEqual(run.returncode, 2)
         self.assertIn("no blocker can be rechecked", run.stderr)
         self.assertEqual(self.sb.calls_of("gh"), [])
+        self.sb.expect_unused("codex")
 
     def test_a_symlinked_tracker_is_unusable(self):
         real = self.sb.cfg / "pm" / "real.md"
@@ -576,6 +592,7 @@ class TheCommand(Base):
         run = self.run_cli(track="ln")
         self.assertEqual(run.returncode, 2)
         self.assertIn("no blocker can be rechecked", run.stderr)
+        self.sb.expect_unused("codex")
 
     def test_bad_arguments_are_exit_2(self):
         base = {"--track": "t", "--repo": REPO, "--checkout": str(self.checkout)}
@@ -588,16 +605,19 @@ class TheCommand(Base):
                 run = subprocess.run([sys.executable, str(HERE / "boss_recheck.py"), *args], env=dict(os.environ),
                                      capture_output=True, text=True, timeout=60)
                 self.assertEqual(run.returncode, 2, run.stderr)
+        self.sb.expect_unused("codex")
 
     def test_a_missing_option_is_exit_2(self):
         run = subprocess.run([sys.executable, str(HERE / "boss_recheck.py"), "--track", "t"], env=dict(os.environ),
                              capture_output=True, text=True, timeout=60)
         self.assertEqual(run.returncode, 2)
+        self.sb.expect_unused("codex")
 
     def test_a_tracker_that_cannot_be_read_as_text_is_exit_7(self):
         self.tracker.write_bytes(b"\xff\xfe\x00bad")
         run = self.run_cli()
         self.assertEqual(run.returncode, 7)
+        self.sb.expect_unused("codex")
 
 
 class TheList(Base):
