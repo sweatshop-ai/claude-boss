@@ -627,6 +627,23 @@ verdict, 6 the head or base moved (nothing posted), 2 usage or wrong checkout, 7
 infrastructure. Codex counts as down after 3 failed attempts in a row (`absent`, `timeout`, `error`;
 all repos together) and as back after 2 answered ones in a row (`codex_health.py` reads the attempts log).
 Pass `--track T` (the track from your dispatch header) and the same command raises a `Codex down` blocker in `pm/T.md` after the 3rd failure, with a ladder marker and a `boss-alert 0`, and clears it after the 2nd answer (`codex_blocker.py`); without it nothing is written to a tracker.
+
+**When a `Codex down` blocker is open, ask the owner once what to do** (ticket 09b). Run
+`python3 skills/boss/codex_blocker.py --choice T`: `none` means nobody has chosen yet; `wait` or
+`accept-fallback` is the owner's recorded choice and you ask nothing; `no-blocker` (exit 2) means there
+is nothing to ask; `malformed` (exit 2) means the blocker's line cannot be read, so you report it and ask nothing.
+On `none`, ask through your concierge (`SendMessage` with `ASK q<n>:`, the blocker's id written on its
+line first; `references/concierge.md`), or with `AskUserQuestion` in your own turn only when you have no
+concierge, never in prose. One self-contained question, your name and your track first, your
+recommendation first, two options: wait for Codex; or accept the fallback review (a provisional GO merges only
+where nothing deploys). Add the sentence: to close this blocker by hand, type
+`cleared=<ISO-8601 time with UTC offset>` on its line (for example `cleared=2026-11-12T10:30+01:00`), do not
+delete it. An `ANSWER q<n>` is recorded with `python3 skills/boss/codex_blocker.py --choose T wait` or
+`--choose T accept-fallback`, which writes `- [codex-choice <blocker id>] <choice> - <ts>` under
+`## Decisions in force` (never under Open blockers) and sets the marker's `ask=` to what was chosen. A later
+`--choose` replaces the choice, and going back to `wait` needs no new consent. A `NO ANSWER` writes nothing and
+the blocker stays open. The question is the owner's whatever they once said about asking less: it is never
+recorded as a `boss-unask` kind.
 A plan is reviewed by hand: `codex exec -s read-only ... < /dev/null`,
 briefed to read and not execute, output checked in the first minute. On a usage limit or an outage, a plan's review is the labelled fallback review (Opus, read-only), run
 the same turn, with the reset time Codex gave in the review file's header; the

@@ -239,6 +239,26 @@ def mark_cleared(raw: str, when: datetime) -> str:
     return f"{raw[:at]}cleared={when.isoformat(timespec='minutes')} {raw[at:]}"
 
 
+def set_ask(raw: str, ask: str) -> str:
+    """`raw` with the marker's ask= value replaced, byte for byte elsewhere.
+
+    A line with no readable marker or no quoted ask= is returned as it came; `ask` may not hold a '"'.
+    """
+    if '"' in ask:
+        raise MarkerError('ask= may not contain \'"\'')
+    try:
+        found = _scan(raw)
+    except MarkerError:
+        return raw
+    if found is None or "ask" not in found[3]:
+        return raw
+    at = found[3]["ask"] + len("ask=")
+    if raw[at:at + 1] != '"':
+        return raw
+    end = raw.find('"', at + 1)
+    return f'{raw[:at]}"{ask}"{raw[end + 1:]}'
+
+
 # ---------------------------------------------------------- Open blockers
 
 BLOCKERS = "Open blockers"

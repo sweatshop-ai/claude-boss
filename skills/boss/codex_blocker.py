@@ -2,6 +2,8 @@
 """The "Codex down" blocker: raised when codex_health says down, cleared when it says up.
 
     sync(track, now=None)    one locked step on pm/<track>.md, then at most one boss-alert
+    choice(track)            (status, id, choice): what the owner chose for the open blocker
+    choose(track, value)     write that choice under Decisions in force, under the tracker lock
 
 boss_review.review(..., track=T) calls it once after a review's attempts are logged. The state is
 codex_health's, read inside the tracker's lock, so raise and clear act on the file as it is when the lock
@@ -22,6 +24,19 @@ approximation: attempts.jsonl is ordered by file position, not by `ts`, so a wri
 whose `ts` was taken before the clear can be read as old, and that failure does not raise. A `cleared=`
 more than CLEAR_SLACK seconds after `now` (a local time read as UTC, a mistyped month) is ignored as
 invalid, said on stderr, and holds nothing. Deleting the line from the tracker leaves nothing to compare.
+
+The owner's choice (ticket 09b) is the line `- [codex-choice <blocker id>] <choice> - <ts>` in `## Decisions in
+force`, never under Open blockers (where `tracker.open_blockers` would count it as a blocker for good).
+The last matching line for the open blocker's id wins, so a later `--choose` revokes an earlier one; a line for
+a cleared blocker's id means nothing to a new one. The line is workflow evidence, not proof of who wrote it: any
+process of the same user can edit the tracker. What makes a choice the owner's is the question that produced it
+(SKILL.md).
+
+    codex_blocker.py TRACK                    sync (as boss_review does after a review)
+    codex_blocker.py --choose TRACK CHOICE    exit 0 written or already so; 2 with a reason: no or more than one
+                                              open blocker, a choice not offered, a bad TRACK; 1 lock or write failed
+    codex_blocker.py --choice TRACK           prints no-blocker (exit 2), none (1), malformed (2, reason on stderr)
+                                              or the recorded choice (0)
 
 Failures (a missing tracker, a failed update, a failed alert) go to stderr and raise nothing.
 """
@@ -46,7 +61,12 @@ LOCK_WAIT = 20.0
 CLEAR_SLACK = 60        # seconds a cleared= may lie after `now` before it is taken as a typo
 ID_RE = re.compile(r"^cd[0-9]{12}$")
 CD_IN_TEXT = re.compile(r"id=cd[0-9]{12}")
-ASK = "Codex is down: choose wait, accept the fallback review, or merge on tests alone"
+CHOICES = ("wait", "accept-fallback")                   # what --choose writes; 09c adds "tests-alone"
+READABLE = CHOICES + ("tests-alone",)                   # what the reader accepts
+ASK = "Codex is down: choose wait or accept the fallback review"
+DECISIONS = "Decisions in force"
+DECISIONS_RE = re.compile(r"^##\s+%s\b" % DECISIONS)
+CHOICE_RE = re.compile(r"^- \[codex-choice (cd[0-9]{12})\] (%s) - \S+$" % "|".join(READABLE))
 UNSAFE = re.compile(r"[^A-Za-z0-9._/#-]")
 
 
@@ -131,6 +151,93 @@ def _new_id(text: str, now: datetime) -> tuple[str, datetime]:
         now += timedelta(seconds=1)
 
 
+def _open_cd(lines: list[str]):
+    """(ids, broken): the ids of the open valid `cd` lines and the broken ones, as _classify finds them."""
+    opened, broken = _classify(lines)
+    ids = [tracker.validate(tracker.scan_marker(lines[i])[1])["id"] for i in opened]
+    return ids, broken
+
+
+def _choices_of(lines: list[str], id_: str) -> list[str]:
+    """The choices recorded for `id_`, oldest first, from the first Decisions in force body only."""
+    head = next((i for i, ln in enumerate(lines) if DECISIONS_RE.match(ln)), None)
+    if head is None:
+        return []
+    out = []
+    for ln in lines[head + 1:]:
+        if tracker.NEXT_H2_RE.match(ln):
+            break
+        m = CHOICE_RE.match(ln.rstrip("\r"))
+        if m and m.group(1) == id_:
+            out.append(m.group(2))
+    return out
+
+
+def _state(lines: list[str]):
+    """(status, id, choice) over the text: choice() without the file. `choice` holds the reason when malformed."""
+    ids, broken = _open_cd(lines)
+    if not ids and not broken:
+        return "no-blocker", None, None
+    if len(ids) + len(broken) > 1 or broken:
+        why = ("%d open Codex down lines" % (len(ids) + len(broken)) if ids
+               else "; ".join("line %d: %s" % (i + 1, w) for i, w in broken))
+        return "malformed", None, why
+    got = _choices_of(lines, ids[0])
+    return ("chosen", ids[0], got[-1]) if got else ("none", ids[0], None)
+
+
+def choice(track: str):
+    """(status, id, choice) for `track`'s open Codex down blocker. status: `no-blocker`; `none` (open, no line
+    carries its id); `chosen` (choice is the last one recorded); `malformed` (the only `cd` lines cannot be read,
+    or more than one is open; the third item is the reason). A bad `track` is a ValueError; a tracker that is not
+    a regular file of yours is `no-blocker`, said on stderr."""
+    path = usable_tracker(track)
+    if path is None:
+        return "no-blocker", None, None
+    try:
+        with open(path, encoding="utf-8", newline="") as fh:
+            text = fh.read()
+    except (OSError, UnicodeDecodeError) as exc:
+        return "malformed", None, "%s cannot be read: %s" % (path.name, type(exc).__name__)
+    return _state(text.split("\n"))
+
+
+def choose(track: str, value: str, now: datetime | None = None) -> tuple[int, str]:
+    """Record `value` for the open blocker: (exit code, message). Nothing is written when the last choice
+    for its id already equals `value`; otherwise the line is added (so a revocation is never dropped by an
+    earlier identical line) and the marker's ask= says what was chosen, so the ladder's repeats do not look lost."""
+    if value not in CHOICES:
+        raise ValueError("choice must be one of %s, not %r" % (", ".join(CHOICES), value))
+    if now is None:
+        now = datetime.now().astimezone()
+    if now.tzinfo is None:
+        raise ValueError("now has no UTC offset")
+    path = usable_tracker(track)
+    if path is None:
+        return 2, "no usable tracker for %s" % track
+    result = {}
+
+    def fn(text: str):
+        result.clear()
+        lines = text.split("\n")
+        status, id_, got = _state(lines)
+        if status in ("no-blocker", "malformed"):
+            result["rc"], result["msg"] = 2, "%s: %s" % (status, got or "no Codex down blocker is open")
+            return None
+        result["rc"], result["msg"] = 0, "%s: %s" % (id_, value)
+        if status == "chosen" and got == value:
+            return None
+        opened, _ = _classify(lines)
+        lines[opened[0]] = tracker.set_ask(lines[opened[0]], "Codex down; owner chose " + value)
+        return tracker.insert_in_section(
+            "\n".join(lines), DECISIONS, "- [codex-choice %s] %s - %s" % (id_, value, now.isoformat(timespec="seconds")))
+
+    got = tracker.update(path, fn, time.monotonic() + LOCK_WAIT)
+    if got.startswith("failed"):
+        return 1, "%s: %s" % (path.name, got)
+    return result["rc"], result["msg"]
+
+
 def _post(alert: str, rung: str, text: str) -> None:
     try:
         run = subprocess.run([alert, rung, text], capture_output=True, text=True, timeout=ALERT_TIMEOUT)
@@ -198,15 +305,29 @@ def sync(track: str, now: datetime | None = None, health_path=None) -> None:
 
 
 def main() -> int:
-    if len(sys.argv) != 2:
-        print("usage: codex_blocker.py TRACK", file=sys.stderr)
-        return 2
+    argv = sys.argv[1:]
     try:
-        sync(sys.argv[1])
+        if len(argv) == 3 and argv[0] == "--choose":
+            rc, msg = choose(argv[1], argv[2])
+            print(msg, file=sys.stderr if rc else sys.stdout)
+            return rc
+        if len(argv) == 2 and argv[0] == "--choice":
+            status, id_, got = choice(argv[1])
+            if status == "chosen":
+                print(got)
+                return 0
+            print(status)
+            if status == "malformed":
+                _say(got)
+            return {"none": 1}.get(status, 2)
+        if len(argv) == 1 and not argv[0].startswith("--"):
+            sync(argv[0])
+            return 0
     except ValueError as exc:
         _say(str(exc))
         return 2
-    return 0
+    print("usage: codex_blocker.py TRACK | --choose TRACK wait|accept-fallback | --choice TRACK", file=sys.stderr)
+    return 2
 
 
 if __name__ == "__main__":
