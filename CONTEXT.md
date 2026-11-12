@@ -196,6 +196,8 @@ and has a later round above it is a dead claim, not an unreadable record: the pr
 that PR (the recheck of ticket 10 included) clears the entry it kept; the newest round left empty still keeps it.
 A merged PR's entry is cleared by a Codex GO on the head it merged at (rule 4) or, when that is the entry's
 own head, by rule 1; a Codex GO on the entry's head never clears it when the PR merged at another head (ticket 35).
+An entry of a PR closed without a merge lives until the owner deletes its line from the tracker by hand (ticket 27): there
+is no age limit, because a reopened PR must still find its entry, and each recheck pass reads such a PR once.
 
 **Recheck**: `skills/boss/boss_recheck.py --track T --repo OWNER/REPO --checkout DIR [--author NAME]` (ticket 10a), the pass
 that has Codex alone review again each entry of a repo under `## Provisional GO`. It runs `prune_provisional` first and after
