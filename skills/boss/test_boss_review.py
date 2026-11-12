@@ -937,10 +937,6 @@ class ChainChild(Base):
             "a GO the answer contradicts": (0, {"output": "VERDICT: NO-GO",
                                                 "attempt_output": "VERDICT: NO-GO"}),
             "a GO the answer does not carry": (0, {"output": "all fine", "attempt_output": "all fine"}),
-            "a GO in an answer that holds a NUL": (0, {"output": "VERDICT: GO\u0000",
-                                                       "attempt_output": "VERDICT: GO\u0000"}),
-            "a GO that only a NUL makes": (0, {"output": "VERDICT: G\u0000O",
-                                               "attempt_output": "VERDICT: G\u0000O"}),
             "a GO beside a NO-GO in the answer": (0, {"output": "VERDICT: GO\nVERDICT: NO-GO",
                                                       "attempt_output": "VERDICT: GO\nVERDICT: NO-GO"}),
             "two attempts": (0, {"attempts": [self.GOOD["attempts"][0]] * 2}),
@@ -958,6 +954,35 @@ class ChainChild(Base):
                 self.setUp_clean()
                 with self.stand_in(code, **over):
                     self.assertInfraBeforeAnyClaim()
+
+    def test_an_answer_refused_for_a_nul_is_exit_seven_with_nothing_claimed_and_its_attempt_logged(self):
+        for what, text in (("a NUL after the verdict", "VERDICT: GO\u0000"),
+                           ("a verdict that only a NUL makes", "VERDICT: G\u0000O")):
+            with self.subTest(what=what):
+                self.setUp_clean()
+                self.gh.configure()
+                with self.stand_in(0, output=text, attempt_output=text):
+                    self.assertEqual(self.review(codex_timeout=1), INFRA)
+                self.assertEqual(self.comments(), [])
+                self.assertEqual(list(self.reviews.glob("*/*/pr*/round*")), [])
+                (line,) = self.attempts_log()
+                self.assertRegex(line["ts"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
+                self.assertEqual(stat.S_IMODE(self.reviews.stat().st_mode), 0o700)
+                self.assertEqual(stat.S_IMODE((self.reviews / "attempts.jsonl").stat().st_mode), 0o600)
+                self.assertEqual(set(line), {"ts", "repo", "pr", "round", "reviewer", "reason", "exit_code"})
+                self.assertEqual((line["repo"], line["pr"], line["round"], line["reviewer"],
+                                  line["reason"], line["exit_code"]),
+                                 ("owner/repo", PR, None, "codex", "answered", 0))
+
+    def test_a_nul_answer_that_also_contradicts_the_result_is_not_logged(self):
+        self.gh.configure()
+        with self.stand_in(0, output="VERDICT: GO", attempt_output="VERDICT: G\u0000O"):
+            self.assertInfraBeforeAnyClaim()
+
+    def test_a_nul_answer_from_a_child_that_exited_one_is_not_logged(self):
+        self.gh.configure()
+        with self.stand_in(1, output="VERDICT: GO\u0000", attempt_output="VERDICT: GO\u0000"):
+            self.assertInfraBeforeAnyClaim()
 
     def test_a_child_that_exits_with_anything_but_zero_or_one_is_exit_seven(self):
         good = json.dumps({"reviewer": "none", "output": "", "parsed": None, "attempts": [
