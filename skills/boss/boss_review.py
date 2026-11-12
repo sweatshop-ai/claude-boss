@@ -96,6 +96,15 @@ class _Infra(Exception):
     """A tool or a file did not do its part: exit 7."""
 
 
+class _Refused(_Infra):
+    """The chain ran and answered, and its answer is refused. `attempts` are the ones it made,
+    still owed to attempts.jsonl although no round is claimed."""
+
+    def __init__(self, message: str, attempts: list[dict]):
+        super().__init__(message)
+        self.attempts = attempts
+
+
 def _say(message: str) -> None:
     print("boss_review: " + message, file=sys.stderr)
 
@@ -452,6 +461,17 @@ def _follows(word: str, output: str) -> bool:
     return found is not None and found.word == word
 
 
+def _refused_for_nul(data: dict) -> bool:
+    """Whether `_sound` would take the result but for the NUL in the answer."""
+    try:
+        (a,) = data["attempts"]
+        clean = dict(data, output=data["output"].replace("\0", ""),
+                     attempts=[dict(a, output=a["output"].replace("\0", ""))])
+        return "\0" in a["output"] and _sound(clean, 0)
+    except (ValueError, KeyError, TypeError, AttributeError):
+        return False
+
+
 def _chain_result(run: _Out) -> dict:
     """The chain's JSON, once it is plainly a Codex-only result; else _Infra. A child that
     crashed, was killed or printed something else says nothing about Codex, so it is no outage."""
@@ -465,6 +485,9 @@ def _chain_result(run: _Out) -> dict:
     except (ValueError, KeyError, TypeError) as exc:
         raise _Infra("the chain printed no result I can read: %s: %s" % (type(exc).__name__, exc))
     if not sound:
+        if _refused_for_nul(data):
+            raise _Refused("the chain's answer holds a NUL: it cannot be read as the chain read it",
+                           [{k: a[k] for k in ("reviewer", "reason", "exit_code")} for a in data["attempts"]])
         raise _Infra("the chain printed a result that is not a consistent Codex-only one")
     return data
 
@@ -840,6 +863,18 @@ def _post(job: _Job, body: str) -> bool:
     return run.code == 0
 
 
+def _log_refused(job: _Job, attempts: list[dict]) -> None:
+    """The attempts of a refused answer, with no round: nothing was claimed, so `round` is null."""
+    reviews = _reviews_dir()
+    try:
+        reviews.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        _private_dir(reviews)
+        append_attempts(reviews / "attempts.jsonl",
+                        [{"ts": _now(), "repo": job.key, "pr": job.pr, "round": None, **a} for a in attempts])
+    except OSError as exc:
+        _say("the attempts of the refused answer are not logged: %s" % exc)
+
+
 def _keep_and_post(job: _Job, seen: _Pr, chain: dict, findings: str) -> ReviewResult:
     """Under the PR's lock: look at the PR and the checkout again, claim the next round, keep what
     the review said, post, and make the claimed file the full record."""
@@ -914,6 +949,8 @@ def review(repo: str, pr: int, checkout: str, author: str, *,
         chain = _ask_codex(checkout, build_brief(seen.head, seen.base, seen.title, seen.body, diff),
                            codex_timeout)
     except _Infra as exc:
+        if isinstance(exc, _Refused):
+            _log_refused(job, exc.attempts)
         return _failed(str(exc))
     findings = ""
     if chain["parsed"]:

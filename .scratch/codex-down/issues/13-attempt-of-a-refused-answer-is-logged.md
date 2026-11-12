@@ -6,4 +6,8 @@
 
 **Blocked by:** 02 (merged)
 
-**Status:** open
+**Status:** done
+
+**Decision** (Piotr, 2026-11-12): no round is claimed and the exit stays 7. The attempts of the refused result are appended to `attempts.jsonl` with `"round": null` (05 reads `reviewer` and `reason`, which are present). Only the NUL refusal is covered: a result `_sound` takes once NULs are removed. Other inconsistent results say nothing trustworthy about Codex and are still not logged.
+
+- [x] a chain answer refused for a NUL reaches `attempts.jsonl` (reviewer, reason, exit_code, `round` null), exit 7, no round file, no comment. Evidence: `test_an_answer_refused_for_a_nul_is_exit_seven_with_nothing_claimed_and_its_attempt_logged` (both NUL cases moved out of the "nothing written" table); CI is the gate.
