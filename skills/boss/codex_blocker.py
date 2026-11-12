@@ -309,7 +309,7 @@ def sync(track: str, now: datetime | None = None, health_path=None) -> None:
             line = "- Codex down: %s - T+0 %s %s" % (what, at.isoformat(timespec="minutes"), marker)
             done["raise"] = "%s: Codex down: %s. %s" % (track, what, ASK)
             return tracker.insert_in_section(text, tracker.BLOCKERS, line)
-        if h["state"] == "up" and h["answers"] >= policy.CODEX_UP_AFTER and opened:   # a missing or cut log says "up" with no answers
+        if h["state"] == "up" and h["recovered"] and opened:   # a missing or cut log says "up" with no answers read
             for i in opened:
                 lines[i] = tracker.mark_cleared(lines[i], now)
             after, still = _classify(lines)

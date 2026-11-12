@@ -11,9 +11,10 @@ failures=1, answers=0`) cleared it. A missing or truncated log is not evidence o
 
 ## What to build
 
-`codex_blocker.sync` clears only when `state == "up"` and `answers >= policy.CODEX_UP_AFTER`: the streak of
-answered attempts is read from the log, not assumed.
+`codex_blocker.sync` clears only when `state == "up"` and `codex_health.health()['recovered']`: an answered
+streak of `policy.CODEX_UP_AFTER` was read in the log since the last down period. (`answers` alone is the
+newest streak, and one failure after the recovery resets it: PR 119 round 1.)
 
 - [x] A test that fails on main: with a blocker open, a deleted log, an empty log and a log of one failure each
-  leave it open and post no `clear`; two answered attempts then clear it once.
+  leave it open and post no `clear`; two answered attempts then clear it once; answered, answered, failed still clears.
 - [x] The condition in `codex_blocker.sync`; CHANGELOG.md.
