@@ -13,3 +13,5 @@
 - [ ] **Case C skips the reopened state (class d).** Go CLOSED, OPEN, MERGED and prune at each step.
 - [ ] **04's override list is shorter than its rule (class d).** The box names three overridden rows; add a test row for a later round on another base and for a later `post-failed` GO.
 - [ ] **A Codex GO under a later provisional round (class d).** Codex GO on A in round 1, provisional GO on A in round 2, any round 3: the gate refuses `superseded-go` without reaching round 1. Say in 04 whether that is intended (it fails closed).
+- [ ] **A recheck whose `gh pr view` fails (class c, Opus fallback review 2).** 10 branches merged, CLOSED and open and never says what it does when the state cannot be read. Say: skip, leave the entry (06b keeps it), go on to the next, and add the test row.
+- [ ] **04's exit-3 line does not name `superseded-go` (class d).** 04's exit-code list says "none, a NO-GO, or a record that cannot be read"; add the superseded GO to it.
