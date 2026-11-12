@@ -17,7 +17,7 @@ What makes an answer usable is one of two rules: a `VERDICT:` line in `words`, o
 kept on `Result.attempts` with a reason from a closed set:
 
     answered   a usable VERDICT line (or enough labelled lines) was in the answer
-    absent     the reviewer is not on PATH
+    absent     the reviewer is not on PATH, or only on entries a checkout could supply
     timeout    it ran past its timeout and gave no usable verdict
     error      it exited non-zero (or could not be started) and gave none
     noverdict  it exited 0 and its answer has no usable VERDICT line
@@ -385,25 +385,31 @@ def child_env(fb: Fallback) -> dict[str, str] | None:
     return {k: v for k, v in os.environ.items() if k not in fb.env_unset} if fb.env_unset else None
 
 
-def claude_launch(fb: Fallback, prompt: str, cwd: str | None = None) -> tuple[list[str], dict | None] | None:
+def claude_launch(fb: Fallback, prompt: str, cwd: str | None = None) -> tuple[list[str], dict] | None:
     """The argv and environment to start the fallback's `claude` with, or None when it is not there.
 
-    A spec that unsets variables is the confined one, and for it `claude` is looked up on a PATH
+    For every spec, the confined one and the OPUS/FABLE presets alike, `claude` is looked up on a PATH
     without the entries a PR checkout could supply (empty or relative ones, and any inside `cwd`, or
-    the current directory when `cwd` is None), refused when the `claude` found is a link into that
+    the current directory when `cwd` is None and the spec is the confined one; a preset with no `cwd`
+    loses only its empty and relative entries), refused when the `claude` found is a link into that
     directory, and started by its absolute path: a bare name is resolved after the process has changed into the
     checkout, where `PATH=.:...` or a checkout-local `.venv/bin` would run the PR's own `claude`
-    before any confinement flag is read. Any other spec runs as it always did."""
-    argv, env = claude_argv(fb, prompt), child_env(fb)
+    before any confinement flag is read. The environment is the spec's (`child_env`), or ours as it
+    is for a spec that unsets nothing, with that PATH in place of ours."""
+    argv = claude_argv(fb, prompt)
+    env = child_env(fb)
+    # With no cwd there is no checkout to keep out. The confined spec still excludes the current
+    # directory (ticket 14); a preset only loses its empty and relative entries, because the caller's
+    # directory may be an ancestor of a per-user install (`$HOME` holding ~/.local/bin/claude).
+    base = os.path.realpath(cwd or os.getcwd()) if cwd or env is not None else None
     if env is None:
-        return (argv, None) if shutil.which("claude") else None
-    base = os.path.realpath(cwd or os.getcwd())
+        env = dict(os.environ)
     keep = []
     for entry in os.environ.get("PATH", "").split(os.pathsep):
         if not entry or not os.path.isabs(entry):
             continue
         real = os.path.realpath(entry)
-        if real == base or real.startswith(base + os.sep):
+        if base and (real == base or real.startswith(base + os.sep)):
             continue
         keep.append(entry)
     env["PATH"] = os.pathsep.join(keep)
@@ -411,7 +417,7 @@ def claude_launch(fb: Fallback, prompt: str, cwd: str | None = None) -> tuple[li
     if exe is None:
         return None
     real_exe = os.path.realpath(exe)    # a symlink in a safe directory may lead into the checkout
-    if real_exe.startswith(base + os.sep):
+    if base and real_exe.startswith(base + os.sep):
         return None
     argv[0] = exe
     return argv, env
