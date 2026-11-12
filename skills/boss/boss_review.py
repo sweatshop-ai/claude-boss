@@ -1096,6 +1096,113 @@ def _list_and_post(job: _Job, seen: _Pr, number: int, ts: str, verdict: str, fin
     return "post-failed", EXIT_INFRA
 
 
+# ----------------------------------------------------------- pruning the list (ticket 06b) ----
+class _Round(NamedTuple):
+    number: int
+    head: str
+    verdict: str | None
+
+
+def _codex_rounds(pr_dir: Path) -> list[_Round] | None:
+    """The posted `kind: codex` rounds of one PR, or None when a round file cannot be read as a record. A
+    round that is claimed and not yet recorded is an empty file: the prune takes no PR lock, so it can see
+    one, and what that round will say is not known, so the PR keeps its entries."""
+    try:
+        names = [(int(m.group(1)), e) for e in pr_dir.iterdir() if (m := re.fullmatch(r"round(\d+)\.json", e.name))]
+    except FileNotFoundError:
+        return []
+    except OSError:
+        return None
+    found = []
+    for number, entry in sorted(names):
+        try:
+            data = json.loads(entry.read_text(encoding="utf-8"))
+            status, kind, head, verdict = (data[k] for k in ("status", "kind", "head_sha", "verdict"))
+        except (OSError, ValueError, KeyError, TypeError):
+            return None
+        if status == "posted" and kind == "codex" and isinstance(head, str):
+            found.append(_Round(number, head, verdict))
+    return found
+
+
+def _live_state(entry: ProvEntry, io_timeout: float) -> tuple[str, str] | None:
+    """(state, headRefOid) of the entry's PR, or None when `gh pr view` fails or gives no PR I can read."""
+    run = _spawn(["gh", "pr", "view", str(entry.pr), "--repo", entry.repo, "--json", "state,headRefOid"], io_timeout)
+    if run.timed_out or run.code != 0:
+        return None
+    try:
+        data = json.loads(run.out.decode("utf-8"))
+        state, head = data["state"], data["headRefOid"]
+    except (ValueError, KeyError, TypeError):
+        return None
+    return (state, head) if isinstance(state, str) and isinstance(head, str) and _SHA.fullmatch(head) else None
+
+
+def _latest_codex_says_go(rounds: list[_Round], head: str) -> _Round | None:
+    """The highest posted Codex round on `head` when it is a GO, else None."""
+    on_head = [r for r in rounds if r.head == head]
+    return on_head[-1] if on_head and on_head[-1].verdict == "GO" else None
+
+
+def _prunable(entry: ProvEntry, io_timeout: float) -> bool:
+    """True when ticket 06b's rules remove `entry`. Anything that cannot be read keeps it."""
+    live = _live_state(entry, io_timeout)
+    if live is None:
+        return False
+    state, live_head = live
+    if state not in ("OPEN", "MERGED"):         # CLOSED keeps its entry (rule 3): a reopened PR is on a loan again
+        return False
+    rounds = _codex_rounds(_reviews_dir() / entry.repo / ("pr%d" % entry.pr))
+    if rounds is None:
+        return False
+    first = _latest_codex_says_go(rounds, entry.head)
+    if first and first.number > entry.round:    # rule 1
+        return True
+    if live_head == entry.head:
+        return False
+    return _latest_codex_says_go(rounds, live_head) is not None     # rule 2 (open) and rule 4 (merged)
+
+
+def prune_provisional(track: str, repo: str, io_timeout: float = policy.REVIEW_IO_TIMEOUT) -> list[str]:
+    """Remove from `track`'s `## Provisional GO` list the entries of `repo` that Codex has since cleared, and
+    return their tags. The PR states and the round records are read first; the one `tracker.update` then
+    removes only the lines that are still exactly the ones that were read (a newer provisional GO of the same
+    PR replaced its line meanwhile and stays). It takes the tracker's lock and never a PR's lock. An exception
+    reaches the caller, with the tracker unchanged."""
+    key = repo_key(repo)
+    path = codex_blocker.usable_tracker(track)
+    if path is None:
+        return []
+    try:
+        with open(path, newline="") as fh:
+            read = [e for e in provisional_entries(fh.read()) if e.repo == key]
+    except (OSError, UnicodeDecodeError) as exc:
+        _say("the list of %s cannot be read: %s" % (path, exc))
+        return []
+    gone = [e for e in read if _prunable(e, io_timeout)]
+    if not gone:
+        return []
+    removed: list[ProvEntry] = []
+
+    def fn(text: str) -> str | None:
+        removed.clear()
+        lines = text.split("\n")
+        found = _section(lines)
+        if found is None:
+            return None
+        drop = [i for i in range(*found) if (e := _entry_of(lines[i])) and e in gone]
+        removed.extend(_entry_of(lines[i]) for i in drop)
+        for i in reversed(drop):
+            del lines[i]
+        return "\n".join(lines) if drop else None
+
+    got = tracker.update(path, fn, time.monotonic() + io_timeout)
+    if not got.startswith("done"):
+        _say("the list of %s was not pruned (%s)" % (path, got))
+        return []
+    return [e.tag for e in removed]
+
+
 def _sync_health(track: str | None) -> None:
     """Raise or clear the "Codex down" blocker in `track`'s tracker. A failure is said and changes nothing."""
     if track is None:
