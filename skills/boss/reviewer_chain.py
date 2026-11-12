@@ -385,6 +385,13 @@ def child_env(fb: Fallback) -> dict[str, str] | None:
     return {k: v for k, v in os.environ.items() if k not in fb.env_unset} if fb.env_unset else None
 
 
+def _within(base: str):
+    """A test for "is this realpath `base` or below it". The prefix is `base` with one trailing
+    separator, so a base of `/` (whose `base + os.sep` is `//`) keeps out everything."""
+    prefix = base if base.endswith(os.sep) else base + os.sep
+    return lambda path: path == base or path.startswith(prefix)
+
+
 def claude_launch(fb: Fallback, prompt: str, cwd: str | None = None) -> tuple[list[str], dict] | None:
     """The argv and environment to start the fallback's `claude` with, or None when it is not there.
 
@@ -394,14 +401,21 @@ def claude_launch(fb: Fallback, prompt: str, cwd: str | None = None) -> tuple[li
     loses only its empty and relative entries), refused when the `claude` found is a link into that
     directory, and started by its absolute path: a bare name is resolved after the process has changed into the
     checkout, where `PATH=.:...` or a checkout-local `.venv/bin` would run the PR's own `claude`
-    before any confinement flag is read. The environment is the spec's (`child_env`), or ours as it
+    before any confinement flag is read. The first `claude` on the filtered PATH is the only candidate:
+    when it is refused (a link into that directory), the result is None, "absent", and no later PATH
+    entry is tried. With no `cwd` and a current directory that no longer exists, the confined spec is
+    None too: there is no base to keep out. The environment is the spec's (`child_env`), or ours as it
     is for a spec that unsets nothing, with that PATH in place of ours."""
     argv = claude_argv(fb, prompt)
     env = child_env(fb)
     # With no cwd there is no checkout to keep out. The confined spec still excludes the current
     # directory (ticket 14); a preset only loses its empty and relative entries, because the caller's
     # directory may be an ancestor of a per-user install (`$HOME` holding ~/.local/bin/claude).
-    base = os.path.realpath(cwd or os.getcwd()) if cwd or env is not None else None
+    try:
+        base = os.path.realpath(cwd or os.getcwd()) if cwd or env is not None else None
+    except OSError:         # no cwd and the current directory was deleted: nothing to keep out, nothing safe to start
+        return None
+    inside = _within(base) if base else (lambda path: False)
     if env is None:
         env = dict(os.environ)
     keep = []
@@ -409,7 +423,7 @@ def claude_launch(fb: Fallback, prompt: str, cwd: str | None = None) -> tuple[li
         if not entry or not os.path.isabs(entry):
             continue
         real = os.path.realpath(entry)
-        if base and (real == base or real.startswith(base + os.sep)):
+        if inside(real):
             continue
         keep.append(entry)
     env["PATH"] = os.pathsep.join(keep)
@@ -417,7 +431,7 @@ def claude_launch(fb: Fallback, prompt: str, cwd: str | None = None) -> tuple[li
     if exe is None:
         return None
     real_exe = os.path.realpath(exe)    # a symlink in a safe directory may lead into the checkout
-    if base and real_exe.startswith(base + os.sep):
+    if inside(real_exe):
         return None
     argv[0] = exe
     return argv, env
