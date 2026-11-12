@@ -51,6 +51,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 import boss_store
+import codex_blocker
 import policy
 from reviewer_chain import (CODEX_FAILURES, GO_NOGO, STDERR_TAIL, TERM_GRACE, Fallback, _parse, _snapshot,
                             _stop, claude_launch, fallback_flags)
@@ -957,6 +958,16 @@ def _log_refused(job: _Job, attempts: list[dict]) -> None:
         _say("the attempts of the refused answer are not logged: %s" % exc)
 
 
+def _sync_health(track: str | None) -> None:
+    """Raise or clear the "Codex down" blocker in `track`'s tracker. A failure is said and changes nothing."""
+    if track is None:
+        return
+    try:
+        codex_blocker.sync(track)
+    except Exception as exc:      # the review's exit code stands whatever the sync did
+        _say("the Codex health sync failed: %s: %s" % (type(exc).__name__, exc))
+
+
 def _keep_and_post(job: _Job, seen: _Pr, chain: dict, findings: str,
                    label: FallbackLabel | None = None) -> ReviewResult:
     """Under the PR's lock: look at the PR and the checkout again, claim the next round, keep what
@@ -1012,16 +1023,23 @@ def review(repo: str, pr: int, checkout: str, author: str, *,
            codex_timeout: int = policy.REVIEW_CODEX_TIMEOUT,
            io_timeout: int = policy.REVIEW_IO_TIMEOUT,
            fallback_timeout: int = policy.REVIEW_FALLBACK_TIMEOUT,
-           allow_fallback: bool = False) -> ReviewResult:
+           allow_fallback: bool = False,
+           track: str | None = None) -> ReviewResult:
     """Review one PR head. With `allow_fallback`, a Codex that does not answer (absent, timeout, error)
     runs the confined fallback and its verdict is recorded as provisional; the command line leaves it
-    off until the track's list of provisional verdicts exists (ticket 06)."""
+    off until the track's list of provisional verdicts exists (ticket 06).
+
+    With `track`, the Codex health is synced into that track's tracker once the chain has returned
+    (codex_blocker.sync: the "Codex down" blocker is raised or cleared); a failed sync is said on stderr
+    and the exit code stays the review's."""
     key = repo_key(repo)
     check_name(author, "author")
     if type(pr) is not int or pr < 1:
         raise ValueError("pr must be a positive integer: %r" % (pr,))
     if not os.path.isdir(checkout):
         raise ValueError("checkout is not a directory: %r" % (checkout,))
+    if track is not None and not (isinstance(track, str) and boss_store.valid_track(track)):
+        raise ValueError("track must match %s and hold no '..': %r" % (boss_store.TRACK_RE.pattern, track))
     job = _Job(repo, key, pr, checkout, author, io_timeout)
     seen = _prepare(job)
     if isinstance(seen, ReviewResult):
@@ -1043,6 +1061,7 @@ def review(repo: str, pr: int, checkout: str, author: str, *,
     except _Infra as exc:
         if isinstance(exc, _Refused):
             _log_refused(job, exc.attempts)
+            _sync_health(track)
         return _failed(str(exc))
     findings, label = "", None
     if chain["parsed"]:
@@ -1054,8 +1073,12 @@ def review(repo: str, pr: int, checkout: str, author: str, *,
                 if codex["reason"] == "error":
                     label = label._replace(exit_code=codex["exit_code"], stderr=stderr_block(codex["stderr_tail"]))
         except OSError as exc:
+            _log_refused(job, [{k: a[k] for k in ("reviewer", "reason", "exit_code")} for a in chain["attempts"]])
+            _sync_health(track)
             return _failed("the findings cannot be made safe to publish: %s" % exc)
-    return _keep_and_post(job, seen, chain, findings, label)
+    result = _keep_and_post(job, seen, chain, findings, label)
+    _sync_health(track)      # outside the PR's lock, which _keep_and_post has let go
+    return result
 
 
 # ------------------------------------------------------------ the fallback, confined ----
@@ -1216,13 +1239,17 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--checkout", metavar="DIR",
                     help="a checkout standing on the PR head (with --check-fallback: where the fallback runs)")
     ap.add_argument("--author", metavar="NAME", help="who runs the review, as the comment says")
+    ap.add_argument("--track", metavar="T",
+                    help="the track from the dispatch header: after the review, raise or clear the "
+                         "\"Codex down\" blocker in pm/T.md (without it nothing is written to a tracker)")
     ap.add_argument("--check-fallback", action="store_true",
                     help="instead of a review: run the read-only fallback once, in --checkout, and check "
                          "its init event (one real, one-word call; takes no --repo, --pr or --author)")
     args = ap.parse_args(argv)
-    given = {"--repo": args.repo, "--pr": args.pr, "--checkout": args.checkout, "--author": args.author}
+    given = {"--repo": args.repo, "--pr": args.pr, "--checkout": args.checkout, "--author": args.author,
+             "--track": args.track}
     if args.check_fallback:
-        refused = [flag for flag in ("--repo", "--pr", "--author") if given[flag] is not None]
+        refused = [flag for flag in ("--repo", "--pr", "--author", "--track") if given[flag] is not None]
         if refused:
             ap.error("--check-fallback does not take %s" % ", ".join(refused))
         if args.checkout is None:
@@ -1230,11 +1257,11 @@ def main(argv: list[str] | None = None) -> int:
         if not os.path.isdir(args.checkout):
             ap.error("checkout is not a directory: %r" % (args.checkout,))
         return _check_main(args.checkout)
-    missing = [flag for flag, value in given.items() if value is None]
+    missing = [flag for flag, value in given.items() if value is None and flag != "--track"]
     if missing:
         ap.error("the following arguments are required: %s" % ", ".join(missing))
     try:
-        result = review(args.repo, args.pr, args.checkout, args.author)
+        result = review(args.repo, args.pr, args.checkout, args.author, track=args.track)
     except ValueError as exc:
         print("boss_review: %s" % exc, file=sys.stderr)
         return EXIT_USAGE
