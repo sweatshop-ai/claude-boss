@@ -416,7 +416,8 @@ def claude_launch(fb: Fallback, prompt: str, cwd: str | None = None) -> tuple[li
     # directory may be an ancestor of a per-user install (`$HOME` holding ~/.local/bin/claude).
     try:
         base = os.path.realpath(cwd or os.getcwd()) if cwd or env is not None else None
-    except OSError:         # no cwd and the current directory was deleted: nothing to keep out, nothing safe to start
+    except OSError:         # getcwd failed: a deleted current directory, or a PermissionError from it (no cwd), or a
+                            # relative `cwd` resolved against a deleted process cwd. Nothing to keep out, nothing safe to start: fail closed
         return None
     inside = _within(base) if base else (lambda path: False)
     preset = fb in PRESETS.values()     # not "unsets nothing": a custom spec is confined by its own flags, so it gets the filtered PATH

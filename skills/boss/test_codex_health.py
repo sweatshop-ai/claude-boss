@@ -193,7 +193,9 @@ class Skipped(Base):
     def test_duplicate_keys_are_skipped_not_resolved_to_the_last(self):
         dup = b'{"ts": "t", "repo": "o/r", "pr": 1, "round": 1, "reviewer": "opus", "reason": "answered", ' \
               b'"exit_code": 0, "reviewer": "codex"}'
-        h = self.health(dup, line(F))
+        # after a failure: resolved to the last key it would be a codex answer and end the streak (failures 0,
+        # answers 1); skipped, the streak stands (failures 1, answers 0)
+        h = self.health(line(F), dup)
         self.assertEqual((h["failures"], h["answers"], h["skipped"]), (1, 0, 1))
 
     def test_duplicate_key_nested_in_an_extra_field_is_skipped_too(self):
@@ -203,14 +205,13 @@ class Skipped(Base):
 
     def test_a_torn_write_swallows_the_next_attempt(self):
         # a full disk can leave a fragment with no newline; the next append lands on the same line.
-        # The merged line is not parseable, so one real attempt goes uncounted (documented in the docstring).
+        # The merged line is not parseable, so one real attempt goes uncounted: three failures were written, two
+        # are counted and the state is up. This pins the accepted behaviour, not the wording that describes it.
         torn = json.dumps(line(F)).encode()[:-1]
         self.path.write_bytes(json.dumps(line(F)).encode() + b"\n" + torn + json.dumps(line(F)).encode()
                               + b"\n" + json.dumps(line(F)).encode() + b"\n")
         h = codex_health.health(self.path)
         self.assertEqual((h["state"], h["failures"], h["skipped"]), ("up", 2, 1))
-        self.assertIn("torn", codex_health.__doc__)
-        self.assertIn("one attempt late", codex_health.__doc__)
 
 
 class Concurrent(Base):
