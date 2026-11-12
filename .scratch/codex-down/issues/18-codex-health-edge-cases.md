@@ -4,7 +4,7 @@
 
 **Claimed by:** Sigurd 2026-11-12 17:29
 
-**Status:** in-progress
+**Status:** done (Sigurd built it, PR 109, merge 35213a5)
 
 Found by the fallback review of PR 94 (class c and d, no round blocked on them). Each is a small box.
 

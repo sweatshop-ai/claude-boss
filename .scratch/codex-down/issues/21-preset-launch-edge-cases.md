@@ -11,6 +11,6 @@
 
 **Claimed by:** Faisal 2026-11-12
 
-**Status:** in-progress (PR in review)
+**Status:** done (Faisal built it, PR 111, merge 9d32bb6)
 
 **Evidence:** box 1: `reviewer_chain.py` `claude_launch` (child_keep vs keep), `test_a_preset_child_keeps_an_absolute_entry_inside_the_checkout`, `test_the_confined_fallback_child_still_loses_the_entry_inside_the_checkout`. Box 2: already true, `test_without_a_cwd_a_preset_under_the_current_directory_is_still_started`; link case pinned by `test_without_a_cwd_a_preset_starts_a_claude_that_links_into_the_current_directory`. Box 3: `CONTEXT.md` Fallback paragraph, `CHANGELOG.md` Unreleased.
