@@ -1,10 +1,10 @@
 # 10: Codex re-reviews every provisional GO, and a release waits for it
 
-**What to build:** when Codex answers again, each PR on 06's provisional list gets a Codex review on the head that was reviewed (an open PR) or merged (a merged PR, reviewed in a detached worktree). A Codex NO-GO on a merged PR becomes a dispatched fix, or an open blocker on the ladder when no author can take it. A release or wrap-up stops while the list is not empty. Recovery is Codex-only: a re-review never falls back to Claude.
+**What to build:** when Codex answers again, each PR on 06a's provisional list gets a Codex review on the head that was reviewed (an open PR) or merged (a merged PR, reviewed in a detached worktree). A Codex NO-GO on a merged PR becomes a dispatched fix, or an open blocker on the ladder when no author can take it. A release or wrap-up stops while the list is not empty. Recovery is Codex-only: a re-review never falls back to Claude.
 
-**Scope:** new on 2026-10-04, split out of the original ticket 06 after Codex review 3 of the plan (finding 23), with the owner-accepted premortem (R16 to R18, R20, R25). The list, its write and its removal rule are 06's (`prune_provisional`); this ticket adds the command that walks the list and the skill text that makes the boss run it. It does not wait for 04: it reads and writes nothing that `boss_merge.py` owns.
+**Scope:** new on 2026-10-04, split out of the original ticket 06 after Codex review 3 of the plan (finding 23), with the owner-accepted premortem (R16 to R18, R20, R25). The list and its write are 06a's, its removal rule is 06b's (`prune_provisional`); this ticket adds the command that walks the list and the skill text that makes the boss run it. It does not wait for 04: it reads and writes nothing that `boss_merge.py` owns.
 
-**Blocked by:** 06 (Provisional GOs are tracked in a list that survives restarts)
+**Blocked by:** 06b (Provisional entries are removed when Codex has since said GO; it brings 06a, the list, with it), 22 (A provisional GO on an older head must not merge or be rechecked as the current one; it adds the merged-head box below). Split from 06 on 2026-11-12
 
 **Status:** ready-for-agent
 
