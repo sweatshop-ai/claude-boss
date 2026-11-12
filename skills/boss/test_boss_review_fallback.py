@@ -528,6 +528,10 @@ if [ -n "$CLAUDE_CODE_PLUGIN_DIRS" ]; then echo %s; else echo %s; fi
         self.sb.stub("claude", answer=GO)           # on the PATH behind the link: must not be reached
         safe = self.safe_bin_with_link(self.checkout / "claude")
         self.assert_refused(self.run_with_path(safe, str(self.checkout)))
+        self.assertEqual(self.claude_calls(), [], "a later entry's claude was started after the refusal")
+        path = os.pathsep.join([str(safe), os.environ["PATH"]])
+        with mock.patch.dict(os.environ, {"PATH": path}):
+            self.assertIsNone(rc.claude_launch(br.fallback_spec(), "p", str(self.checkout)))
 
     def test_with_a_deleted_current_directory_and_no_cwd_the_confined_fallback_is_absent(self):
         gone = self.sb.root / "gone"
@@ -540,6 +544,14 @@ if [ -n "$CLAUDE_CODE_PLUGIN_DIRS" ]; then echo %s; else echo %s; fi
         self.assertIsNone(rc.claude_launch(br.fallback_spec(), "p"))
         turn = rc._claude("p", br.fallback_spec(), 5, lambda text: None, None)
         self.assertEqual((turn.attempt.reviewer, turn.attempt.reason), ("opus", "absent"))
+
+    def test_with_a_deleted_current_directory_a_relative_cwd_is_absent_too(self):
+        gone = self.sb.root / "gone"
+        gone.mkdir()
+        self.sb.stub("claude", answer=GO)
+        self.chdir(gone)
+        gone.rmdir()
+        self.assertIsNone(rc.claude_launch(br.fallback_spec(), "p", "checkout"))     # realpath of a relative cwd needs getcwd
 
     def test_with_a_deleted_current_directory_a_preset_without_a_cwd_is_still_started(self):
         gone = self.sb.root / "gone"
@@ -566,6 +578,12 @@ if [ -n "$CLAUDE_CODE_PLUGIN_DIRS" ]; then echo %s; else echo %s; fi
         (sibling / "claude").symlink_to(self.sb.stubs / "claude")
         result = self.run_with_path(sibling, str(self.checkout))
         self.assertEqual(result.reviewer, "opus")
+        # the stubs directory is on the PATH too, so the same stub starts either way: which entry was
+        # taken is the point. A bare startswith(base) drops the sibling and starts the stubs' claude.
+        path = os.pathsep.join([str(sibling), os.environ["PATH"]])
+        with mock.patch.dict(os.environ, {"PATH": path}):
+            launch = rc.claude_launch(br.fallback_spec(), "p", str(self.checkout))
+        self.assertEqual(launch[0][0], str(sibling / "claude"))
 
     def test_a_fallback_that_unsets_path_is_refused_at_construction(self):
         for names in (("PATH",), ("BASH_ENV", "PATH")):
