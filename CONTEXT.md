@@ -168,6 +168,10 @@ that form (a short head, a round of one digit or not a number, an `at=` that is 
 no entry: the reader and the replace-by-tag step both skip it, so a hand-edited line is never taken over. An entry
 means "must recheck", not "a comment exists": it is kept when the PR cannot be read after the write or the comment
 fails, because a kept entry is rechecked by ticket 10 and a dropped one is a provisional GO nobody revisits.
+The prune (ticket 06b) keeps an entry whose PR has a round file it cannot read as a record (a half-written one, one
+nested too deep for the JSON parser, one whose own repo, pr or round are not its file's). A round file that is empty
+and has a later round above it is a dead claim, not an unreadable record: the prune skips it, so the next review of
+that PR (the recheck of ticket 10 included) clears the entry it kept; the newest round left empty still keeps it.
 
 **Round record**: `round<NN>.json`, what a gate reads. A round is `posted` only
 after `gh pr comment` returned success, so a comment on the PR with no `posted`
