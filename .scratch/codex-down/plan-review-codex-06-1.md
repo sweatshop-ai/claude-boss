@@ -36,4 +36,4 @@ Checked and no defect: lock order PR lock then tracker lock; `list-failed` (04 :
 | 8 | Accepted. `fn` matches the exact line form only; section creation keeps the file's line ending; hand appends are named. | 06, list box |
 | 9 | Accepted. Text now matches `update`. | 06, removal box |
 | 10 | Accepted. Stale text listed; `review()` says the message once; `main()` calls `usable_tracker` inside its `ValueError` try. | 06, list box |
-| 11 | Not applied: the split is Chiara's to rule. Cut proposed in the report. | proposal |
+| 11 | Accepted on Chiara's ruling (2026-11-12): 06 is an index; 06a holds the list write, `list-failed`, no track no fallback, the `main()` switch, SKILL.md and the tests (five boxes); 06b holds `prune_provisional` with the removal rows of the old Tests box (one box). Six boxes before, six after. Ticket 10 is blocked by 06b. | 06, 06a, 06b, 10, coverage.md, plan.md |
