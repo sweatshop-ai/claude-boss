@@ -869,14 +869,23 @@ class FallbackLabel(NamedTuple):
 
 def stderr_block(tail: str) -> str:
     """What is published of a Codex stderr tail: an indented code block, built as `findings_block` builds
-    its own (an @mention, link, image or HTML in it is not to be live): the last five non-blank lines,
+    its own (an @mention, link, image or HTML in it is not to be live): the five final physical lines
+    (a blank one is blank; it never pulls an older line in),
     one `redact` call, hiding characters written out, each cut to the length policy gives. A line
     longer than policy lets be read is not matched, only its length is shown. "" for an empty tail."""
-    lines = [line for line in tail.split("\n") if line.strip()][-5:]
-    whole = [line for line in lines if len(line) <= policy.REVIEW_FINDING_READ]
+    lines = tail.split("\n")
+    if lines and lines[-1] == "":           # the closing newline ends the last line, it is not one
+        lines.pop()
+    lines = lines[-5:]
+    if not any(line.strip() for line in lines):
+        return ""
+    whole = [line for line in lines if line.strip() and len(line) <= policy.REVIEW_FINDING_READ]
     redacted = iter(redact("\n".join(whole)).split("\n") if whole else [])
     shown = []
     for line in lines:
+        if not line.strip():
+            shown.append("    ")
+            continue
         if len(line) > policy.REVIEW_FINDING_READ:
             shown.append("    [a line of %d characters, not shown]" % len(line))
             continue
