@@ -16,4 +16,4 @@ What to build, in one line: when the `Codex down` blocker (05c) is open, the own
 
 **Blocked by:** 09a, 09b, 09c (this file is an index; the work is in the three)
 
-**Status:** ready-for-agent (09a, 09b, 09c)
+**Status:** done (09a, 09b and 09c are merged: PR 102, PR 104 and PR 116).
