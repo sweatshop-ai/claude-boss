@@ -52,6 +52,11 @@ class Base(ReviewBase):
     def fallback_review(self, **kw):
         return self.review(allow_fallback=True, **kw)
 
+    def assertGhVerbs(self, *verbs):
+        """The exact `gh pr` verbs the review used, in order: view, diff, the recheck, the read under
+        the lock, then the comment when one was posted."""
+        self.assertEqual([c.argv[1] for c in self.sb.calls_of("gh")], list(verbs))
+
     def assertClaudeCall(self, fallback_timeout=policy.REVIEW_FALLBACK_TIMEOUT):
         """The one `claude` call is exactly the confined call, in the checkout, on this PR's brief."""
         (call,) = self.sb.calls_of("claude")
@@ -74,6 +79,7 @@ class FallbackRuns(Base):
         result = self.fallback_review()
         self.assertEqual(result, br.ReviewResult(0, 1, "posted", "GO", self.round_file(1), "provisional"))
         self.assertClaudeCall()
+        self.assertGhVerbs("view", "diff", "view", "view", "comment")
         (comment,) = self.comments()
         self.assertEqual(comment.argv[-1], self.head_line(1, MODEL, "absent", "provisional GO")
                          + "\n\n    FINDING: none\n\n" + LAST)
@@ -121,6 +127,7 @@ class FallbackRuns(Base):
         result = self.fallback_review()
         self.assertEqual(result, br.ReviewResult(4, 1, "no-verdict", None, self.round_file(1), "provisional"))
         self.assertClaudeCall()
+        self.assertGhVerbs("view", "diff", "view", "view")
         self.assertEqual(self.comments(), [])
         record = self.record(1)
         self.assertEqual({k: record[k] for k in ("reviewer", "model", "kind", "verdict")},
@@ -175,6 +182,7 @@ class FallbackRuns(Base):
     def test_a_fallback_answer_with_a_nul_is_refused_with_both_attempts_logged_and_nothing_claimed(self):
         self.claude(answer=b"VERDICT: GO\0")
         result = self.fallback_review()
+        self.assertClaudeCall()
         self.assertEqual(result, br.ReviewResult(7, None, None, None, None, None))
         self.assertEqual(self.comments(), [])
         self.assertEqual(list(self.reviews.glob("*/*/pr*/round*")), [])
@@ -231,16 +239,17 @@ class ChildProcess(Base):
                          list(policy.REVIEW_FALLBACK_ENV_UNSET))
 
     def test_a_slow_fallback_after_a_codex_that_used_its_wait_is_not_cut_off_by_the_deadline(self):
-        # Codex ignores SIGTERM: stopped at about 1 + TERM_GRACE (2) = 3 s; the fallback then takes 3 s.
-        # Without fallback_timeout in the deadline it would be 1 + 6 = 7 s and the chain killed near 7 s
-        # (3 + 3 + start-up fits, so the bound is tight only with the 10 s fallback wait added): the
-        # deadline here is 1 + 10 + 6 = 17 s, and the answer is posted.
+        # Codex ignores SIGTERM: it is stopped at about 1 + TERM_GRACE (2) = 3 s; the fallback then takes
+        # 5 s, so the chain ends near 8 s plus start-up. Without fallback_timeout in the deadline that is
+        # codex_timeout + slack = 1 + 6 = 7 s and the chain would be killed first; with it the deadline is
+        # 1 + 10 + 6 = 17 s and the answer is posted.
         self.codex(hang=True, ignore_term=True)
-        self.claude(delay=3)
+        self.claude(delay=5)
         with mock.patch.object(policy, "REVIEW_CHAIN_SLACK", 6):
             result = self.review(codex_timeout=1, fallback_timeout=10, allow_fallback=True)
         self.assertEqual((result.exit_code, result.status, result.kind), (0, "posted", "provisional"))
         self.assertEqual(len(self.comments()), 1)
+        self.assertClaudeCall(fallback_timeout=10)
 
     def test_the_claude_child_has_none_of_the_removed_variables_and_codex_still_does(self):
         names = policy.REVIEW_FALLBACK_ENV_UNSET

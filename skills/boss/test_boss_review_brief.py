@@ -808,7 +808,7 @@ class SkillText(unittest.TestCase):
         paragraph = self.paragraph()
         self.assertNotIn("every PR gets a Codex review on the head that merges", paragraph)
         self.assertNotIn("No PR merges without a GO on record", paragraph)
-        self.assertIn("no plan is dispatched from without a Codex GO", paragraph)      # the plan half stays
+        self.assertIn("No plan is dispatched from without a Codex GO.", paragraph)      # the plan half stays
 
     def test_the_rules_that_still_hold_are_still_there(self):
         paragraph = self.paragraph()
