@@ -10,7 +10,7 @@
 
 **Blocked by:** 06b (Provisional entries are removed when Codex has since said GO; it brings 06a, the list, with it), 22 (A provisional GO on an older head must not merge or be rechecked as the current one; it adds the merged-head box below). Both merged.
 
-**Status:** in-progress (Otilia, PR <N>)
+**Status:** done (Otilia built it, PR 120)
 
 The review function (R17):
 
