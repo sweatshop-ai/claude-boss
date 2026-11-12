@@ -168,6 +168,28 @@ class WhatKeepsTheEntry(PruneBase):
                 self.assertEqual(self.prune(), [])
                 self.assertEqual([e.line for e in self.entries()], [line()])
 
+    def test_a_record_that_is_not_the_one_its_file_name_says_keeps_the_entry(self):
+        """round02.json is a Codex GO but says it is round 1, or another PR, or has no round: no record of round 2."""
+        for what, patch in {"another round": {"round": 1}, "no round": {"round": None}, "a round as text": {"round": "2"},
+                            "another PR": {"pr": 6}, "another repo": {"repo": "owner/other"}}.items():
+            with self.subTest(what=what):
+                self.setUp_clean()
+                self.put(line())
+                self.pr_is("OPEN")
+                self.rounds((2, A, "GO", patch))
+                self.assertEqual(self.prune(), [])
+                self.assertEqual([e.line for e in self.entries()], [line()])
+        with self.subTest(what="a round key that is missing"):
+            self.setUp_clean()
+            self.put(line())
+            self.pr_is("OPEN")
+            self.rounds((2, A, "GO"))
+            record = json.loads(self.round_file(2).read_text(encoding="utf-8"))
+            del record["round"]
+            self.round_file(2).write_text(json.dumps(record), encoding="utf-8")
+            self.assertEqual(self.prune(), [])
+            self.assertEqual([e.line for e in self.entries()], [line()])
+
     def test_a_round_file_that_is_not_readable_by_mode_keeps_the_entry(self):
         if os.geteuid() == 0:
             self.skipTest("root reads any file")

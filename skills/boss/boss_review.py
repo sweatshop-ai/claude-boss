@@ -1103,10 +1103,11 @@ class _Round(NamedTuple):
     verdict: str | None
 
 
-def _codex_rounds(pr_dir: Path) -> list[_Round] | None:
+def _codex_rounds(pr_dir: Path, entry: ProvEntry) -> list[_Round] | None:
     """The posted `kind: codex` rounds of one PR, or None when a round file cannot be read as a record. A
     round that is claimed and not yet recorded is an empty file: the prune takes no PR lock, so it can see
-    one, and what that round will say is not known, so the PR keeps its entries."""
+    one, and what that round will say is not known, so the PR keeps its entries. A record whose own `repo`,
+    `pr` and `round` are not its file's is no record of that round: the same."""
     try:
         names = [(int(m.group(1)), e) for e in pr_dir.iterdir() if (m := re.fullmatch(r"round(\d+)\.json", e.name))]
     except FileNotFoundError:
@@ -1118,7 +1119,10 @@ def _codex_rounds(pr_dir: Path) -> list[_Round] | None:
         try:
             data = json.loads(entry.read_text(encoding="utf-8"))
             status, kind, head, verdict = (data[k] for k in ("status", "kind", "head_sha", "verdict"))
+            own = (data["repo"], data["pr"], data["round"])
         except (OSError, ValueError, KeyError, TypeError):
+            return None
+        if own != (entry.repo, entry.pr, number) or type(data["pr"]) is not int or type(data["round"]) is not int:
             return None
         if status == "posted" and kind == "codex" and isinstance(head, str):
             found.append(_Round(number, head, verdict))
@@ -1152,7 +1156,7 @@ def _prunable(entry: ProvEntry, io_timeout: float) -> bool:
     state, live_head = live
     if state not in ("OPEN", "MERGED"):         # CLOSED keeps its entry (rule 3): a reopened PR is on a loan again
         return False
-    rounds = _codex_rounds(_reviews_dir() / entry.repo / ("pr%d" % entry.pr))
+    rounds = _codex_rounds(_reviews_dir() / entry.repo / ("pr%d" % entry.pr), entry)
     if rounds is None:
         return False
     first = _latest_codex_says_go(rounds, entry.head)
