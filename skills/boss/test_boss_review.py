@@ -4,7 +4,7 @@
 Run: python3 skills/boss/test_boss_review.py
 
 `review()` reads a PR with `gh`, asks Codex (through reviewer_chain, in a child process told `--cwd`
-the checkout), keeps the round on disk and posts a minimal comment. Every test goes through
+the checkout as named, made absolute), keeps the round on disk and posts a minimal comment. Every test goes through
 hermetic.Sandbox: `codex`, `claude` and `gh` are stubs that log their argv, stdin and working
 directory, `git` is the only other real tool and runs on a throwaway repo, HOME and
 CLAUDE_CONFIG_DIR are temporary, and TypeSafe has no key to find. Two seams are tested:
@@ -1013,6 +1013,21 @@ class ChainChild(Base):
         self.assertIn("--no-fallback", argv)
         self.assertEqual(argv[argv.index("--cwd") + 1], str(self.checkout))
         self.assertFalse([a for a in argv if a.startswith("--fallback-")])
+
+    def test_the_checkout_reaches_the_chain_as_named_not_folded_by_dotdot(self):
+        # git verified link/.. as the checkout; folding it lexically would name the directory above link
+        sub = self.checkout / "sub"
+        sub.mkdir()
+        link = self.sb.work / "link"
+        link.symlink_to(sub)
+        named = "%s/.." % link
+        recorded = self.sb.root / "chain-argv.json"
+        body = ("import json, sys\nopen(%r, 'w').write(json.dumps(sys.argv[1:]))\nsys.exit(2)\n"
+                % str(recorded))
+        with self.fake_chain(body):
+            self.review(checkout=named)
+        argv = json.loads(recorded.read_text())
+        self.assertEqual(argv[argv.index("--cwd") + 1], named)
 
 
 class OddWorktreeNames(Base):

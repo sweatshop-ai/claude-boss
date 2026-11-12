@@ -122,7 +122,8 @@ only. Callers name one by **preset** (`opus` = `claude-opus-5-5`, `fable` =
 `claude-fable-5-1`), so the model ids are written in `reviewer_chain.py` alone.
 
 **Review round**: one run of `skills/boss/boss_review.py` on one PR head. The
-review runs first (Codex only, in a child process told `--cwd` the checkout);
+review runs first (Codex only, in a child process told `--cwd` the checkout, as
+named and made absolute, never folded);
 the round is claimed at the end of the run, under the PR's lock, whatever the
 review said (GO, NO-GO, nothing, a head that moved), so numbers follow posting
 order and each comment's number is its file's. A failure before the claim
