@@ -257,6 +257,78 @@ class FrontierCase(unittest.TestCase):
 
     # -- text output lists only open blockers (review item 5)
 
+    def test_a_lettered_file_is_a_ticket_and_a_blocker_resolves_to_it(self):
+        self.put("05a-w.md", ticket("05a", "W", "None"))
+        self.put("06-x.md", ticket("06", "X", "05a (the writer)"))
+        code, out, err = self.run_json()
+        self.assertEqual(code, 0, err)
+        t = self.by_num(out)
+        self.assertEqual(t["06"]["open_blockers"], ["05a"])
+        self.assertEqual(out["ready"], ["05a"])
+
+    def test_05_and_05a_are_distinct(self):
+        self.put("05-i.md", ticket("05", "I", "None"))
+        self.put("05a-w.md", ticket("05a", "W", "05"))
+        self.put("06-x.md", ticket("06", "X", "05a"))
+        code, out, err = self.run_json()
+        self.assertEqual(code, 0, err)
+        t = self.by_num(out)
+        self.assertEqual(t["05a"]["open_blockers"], ["05"])
+        self.assertEqual(t["06"]["open_blockers"], ["05a"])
+
+    def test_ids_sort_by_number_then_letter(self):
+        for name, num in (("06-x.md", "06"), ("05b-b.md", "05b"), ("100-z.md", "100"),
+                          ("05-i.md", "05"), ("99-y.md", "99"), ("05a-a.md", "05a")):
+            self.put(name, ticket(num, "T", "None"))
+        code, out, err = self.run_json()
+        self.assertEqual(code, 0, err)
+        self.assertEqual([t["num"] for t in out["tickets"]], ["05", "05a", "05b", "06", "99", "100"])
+        self.assertEqual(out["ready"], ["05", "05a", "05b", "06", "99", "100"])
+
+    def test_an_index_ticket_is_ready_only_when_every_part_is_done(self):
+        self.put("05-i.md", ticket("05", "I", "05a, 05b, 05c (an index; the work is in the three)"))
+        self.put("05a-a.md", ticket("05a", "A", "None", status="done (merged)"))
+        self.put("05b-b.md", ticket("05b", "B", "05a", status="done (merged)"))
+        self.put("05c-c.md", ticket("05c", "C", "05b"))
+        code, out, err = self.run_json()
+        self.assertEqual(code, 0, err)
+        t = self.by_num(out)
+        self.assertEqual((t["05"]["state"], t["05"]["open_blockers"]), ("waiting", ["05c"]))
+        self.assertEqual(out["ready"], ["05c"])
+        self.put("05c-c.md", ticket("05c", "C", "05b", status="done"))
+        code, out, err = self.run_json()
+        self.assertEqual(out["ready"], ["05"])
+
+    def test_an_unknown_lettered_id_is_reported(self):
+        self.put("05-i.md", ticket("05", "I", "05a, 05b"))
+        self.put("05a-a.md", ticket("05a", "A", "None"))
+        code, out, err = self.run_json()
+        self.assertEqual(code, 2)
+        self.assertIn("05b", err)
+        self.assertIn("no ticket file", err)
+
+    def test_a_ticket_cannot_block_on_its_own_letter(self):
+        self.put("05a-a.md", ticket("05a", "A", "05a"))
+        code, out, err = self.run_json()
+        self.assertEqual(code, 2)
+        self.assertIn("blocks itself", err)
+
+    def test_claim_takes_a_lettered_ticket(self):
+        self.put("05-i.md", ticket("05", "I", "05a"))
+        self.put("05a-a.md", ticket("05a", "A", "None"))
+        r = subprocess.run([sys.executable, str(FRONTIER), "claim", str(self.dir), "05a", "Ada"],
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("**Claimed by:** Ada", (self.dir / "05a-a.md").read_text())
+        self.assertNotIn("Claimed by", (self.dir / "05-i.md").read_text())
+
+    def test_a_word_after_a_number_is_not_a_letter_suffix(self):
+        self.put("01-a.md", ticket("01", "A", "None"))
+        self.put("02-b.md", ticket("02", "B", "01st attempt is done by hand"))
+        code, out, err = self.run_json()
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.by_num(out)["02"]["blocked_by"], [])
+
     def test_text_waiting_lists_only_open_blockers(self):
         self.put("01-a.md", ticket("01", "A", "None", status="done"))
         self.put("02-b.md", ticket("02", "B", "None"))
