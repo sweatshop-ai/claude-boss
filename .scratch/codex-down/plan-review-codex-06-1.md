@@ -1,6 +1,6 @@
 # Spec round 1 of ticket 06 (provisional GOs tracked in a durable list)
 
-Run by Lucia (task #06S of the codex-down track), 2026-11-12, against main c0a25e7 (PR 96 merged). **Codex was out of tokens** (`codex-review.sh exec` exited 7, "out of tokens until 3:01 PM"; brief `/home/tiroir/Projects/boss-plugin-wt/06-spec-reviews/brief-1.md`, stderr in `round-1.stderr` beside it). The round is therefore the **labelled Opus fallback** (a fresh read-only Opus agent, same brief), not Codex: Codex owes a follow-up spec review of the settled ticket after 15:01. Verdict: **NO-GO**, 11 findings (1 P1, 5 P2, 5 P3). Every file:line the ticket cites was VERIFIED except the then-missing `plan-review-codex-06-1.md` (this file).
+Run by Lucia (task #06S of the codex-down track), 2026-11-12, against main c0a25e7 (PR 96 merged). **Codex was out of tokens** (`codex-review.sh exec` exited 7, "out of tokens until 3:01 PM"; brief `06-spec-reviews/brief-1.md`, stderr `round-1.stderr` beside it, in the worktree directory next to the spec worktree). The round is therefore the **labelled Opus fallback** (a fresh read-only Opus agent, same brief), not Codex: Codex owes a follow-up spec review of the settled ticket after 15:01. Verdict: **NO-GO**, 11 findings (1 P1, 5 P2, 5 P3). Every file:line the ticket cites was VERIFIED except the then-missing `plan-review-codex-06-1.md` (this file).
 
 ## Smoke check
 
@@ -37,3 +37,21 @@ Checked and no defect: lock order PR lock then tracker lock; `list-failed` (04 :
 | 9 | Accepted. Text now matches `update`. | 06, removal box |
 | 10 | Accepted. Stale text listed; `review()` says the message once; `main()` calls `usable_tracker` inside its `ValueError` try. | 06, list box |
 | 11 | Accepted on Chiara's ruling (2026-11-12): 06 is an index; 06a holds the list write, `list-failed`, no track no fallback, the `main()` switch, SKILL.md and the tests (five boxes); 06b holds `prune_provisional` with the removal rows of the old Tests box (one box). Six boxes before, six after. Ticket 10 is blocked by 06b. | 06, 06a, 06b, 10, coverage.md, plan.md |
+
+## Round 2 (on the split: 06a and 06b)
+
+Run by Lucia, 2026-11-12 after 15:02. **Codex stalled** (`codex-review.sh exec` exit 6, "stalled past 540s", no output; brief `brief-2.md`), so again the **labelled Opus fallback** (fresh read-only Opus agent, same brief); Codex still owes a spec review of 06a and 06b. Verdict **NO-GO**, 11 findings (1 P2, 10 P3). Brief question 1: the cut is clean but for one clause (finding 2); box count six before and after (five in 06a, one in 06b), every clause of the old Tests box in exactly one place; 10 is correctly blocked by 06b. Brief question 2: findings 1 to 6 of round 1 are closed in text and, checked against code, in fact (F5: a 0500 `pm/` makes `mkstemp` fail at tracker.py:334, a 0444 file does not).
+
+| # | Finding | Disposition |
+|---|---|---|
+| 1 | P2: one entry per PR; a provisional GO on an older head (force-push back, reopened CLOSED PR, replaced entry) can merge or be rechecked at the wrong commit (R17). | **Deferred to ticket 22, not applied to 06.** It changes 04's gate rule (a provisional or waived GO decides only when it is the PR's highest-numbered posted round) and 10's recheck (a merged PR is reviewed at its merged `headRefOid`); both are other tickets' scope, and a keep-the-entry rule here would not close case A. 22 holds the three cases and the two fixes; 06b's rule 3 stays as written. |
+| 2 | P3: 06a's `fn` rule left only in 06b. | Accepted: the clause is in 06a's list box; 06b names its caller (`boss_recheck`). |
+| 3 | P3: who prints the "needs a track" message. | Accepted: `main()` passes `allow_fallback=args.track is not None`; `review()` alone resolves and says it. |
+| 4 | P3: deadline ignores `io_timeout`. | Accepted: `job.io_timeout`. |
+| 5 | P3: who creates the section. | Accepted: `fn`. |
+| 6 | P3: empty or unreadable round file. | Accepted: skipped, entry kept. |
+| 7 | P3: the index would show as ready work. | Accepted: status "index only". |
+| 8 | P3: home path in this file. | Accepted: removed above. |
+| 9 | P3: two imprecise citations. | Accepted: `kind` :76, `SENTENCE` :21-23. |
+| 10 | P3: "never run by hand" vs the plan's PR line. | Accepted: "a PR head's fallback review". |
+| 11 | P3: no tracker path in `_keep_and_post`. | Accepted: `list-failed`, exit 7. |
