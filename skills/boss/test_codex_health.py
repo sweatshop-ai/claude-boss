@@ -14,6 +14,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import codex_health  # noqa: E402
+from hermetic import Sandbox  # noqa: E402
 import policy  # noqa: E402
 
 F, OK, NV = "timeout", "answered", "noverdict"
@@ -183,10 +184,33 @@ class Skipped(Base):
         h = self.health(line("answered", reviewer="opus", pr=0))
         self.assertEqual(h["skipped"], 1)
 
-    def test_blank_lines_are_neither(self):
-        self.path.write_bytes(b"\n" + json.dumps(line(F)).encode() + b"\n\n")
+    def test_blank_and_whitespace_lines_are_skipped_and_counted(self):
+        # a blank line is not a JSON object; append_attempts never writes one, so it is a hand edit
+        self.path.write_bytes(b"\n" + json.dumps(line(F)).encode() + b"\n \t\n\n")
         h = codex_health.health(self.path)
-        self.assertEqual((h["failures"], h["skipped"]), (1, 0))
+        self.assertEqual((h["failures"], h["skipped"]), (1, 3))
+
+    def test_duplicate_keys_are_skipped_not_resolved_to_the_last(self):
+        dup = b'{"ts": "t", "repo": "o/r", "pr": 1, "round": 1, "reviewer": "opus", "reason": "answered", ' \
+              b'"exit_code": 0, "reviewer": "codex"}'
+        h = self.health(dup, line(F))
+        self.assertEqual((h["failures"], h["answers"], h["skipped"]), (1, 0, 1))
+
+    def test_duplicate_key_nested_in_an_extra_field_is_skipped_too(self):
+        h = self.health(b'{"ts": "t", "repo": "o/r", "pr": 1, "reviewer": "codex", "reason": "timeout", '
+                        b'"x": {"a": 1, "a": 2}}')
+        self.assertEqual((h["failures"], h["skipped"]), (0, 1))
+
+    def test_a_torn_write_swallows_the_next_attempt(self):
+        # a full disk can leave a fragment with no newline; the next append lands on the same line.
+        # The merged line is not parseable, so one real attempt goes uncounted (documented in the docstring).
+        torn = json.dumps(line(F)).encode()[:-1]
+        self.path.write_bytes(json.dumps(line(F)).encode() + b"\n" + torn + json.dumps(line(F)).encode()
+                              + b"\n" + json.dumps(line(F)).encode() + b"\n")
+        h = codex_health.health(self.path)
+        self.assertEqual((h["state"], h["failures"], h["skipped"]), ("up", 2, 1))
+        self.assertIn("torn", codex_health.__doc__)
+        self.assertIn("one attempt late", codex_health.__doc__)
 
 
 class Concurrent(Base):
@@ -208,11 +232,24 @@ class Concurrent(Base):
         self.assertEqual((h["state"], h["failures"], h["skipped"]), ("up", 2, 0))
 
 
-class Command(Base):
+class Command(unittest.TestCase):
+    def setUp(self):
+        self.sb = Sandbox()
+        self.addCleanup(self.sb.cleanup)
+        for name in ("codex", "claude", "gh"):      # present only to log a call, should the module make one
+            self.sb.stub(name)
+        self.reviews = self.sb.cfg / "pm" / "reviews"
+
     def run_cli(self):
-        env = dict(os.environ, CLAUDE_CONFIG_DIR=self.tmp.name)
-        return subprocess.run([sys.executable, str(HERE / "codex_health.py")], env=env, capture_output=True,
-                              text=True, timeout=60)
+        r = subprocess.run([sys.executable, str(HERE / "codex_health.py")], env=self.sb.env, capture_output=True,
+                           text=True, timeout=60)
+        for name in ("codex", "claude", "gh"):      # the stubs would have logged a call: none was made
+            self.assertEqual(self.sb.calls_of(name), [], name)
+        return r
+
+    def log(self, *entries):
+        self.reviews.mkdir(parents=True, exist_ok=True)
+        (self.reviews / "attempts.jsonl").write_text("".join(json.dumps(e) + "\n" for e in entries))
 
     def test_missing_file_prints_one_json_line(self):
         r = self.run_cli()
@@ -221,11 +258,43 @@ class Command(Base):
         self.assertEqual(len(r.stdout.splitlines()), 1)
 
     def test_reads_the_log_under_the_config_dir(self):
-        reviews = Path(self.tmp.name) / "pm" / "reviews"
-        reviews.mkdir(parents=True)
-        (reviews / "attempts.jsonl").write_text("".join(json.dumps(line(F)) + "\n" for _ in range(3)))
+        self.log(*[line(F)] * 3)
         r = self.run_cli()
         self.assertEqual(json.loads(r.stdout), {"state": "down", "failures": 3, "answers": 0, "skipped": 0})
+
+    def test_an_unreadable_log_exits_2_on_purpose_with_the_error_on_stderr(self):
+        # IsADirectoryError: the log path is a directory. Not a traceback, not exit 0 (which says "up").
+        (self.reviews / "attempts.jsonl").mkdir(parents=True)
+        r = self.run_cli()
+        self.assertEqual(r.returncode, 2)
+        self.assertEqual(r.stdout, "")
+        self.assertIn("codex_health:", r.stderr)
+        self.assertIn("attempts.jsonl", r.stderr)
+        self.assertNotIn("Traceback", r.stderr)
+
+    def test_a_log_below_a_file_exits_2(self):
+        # NotADirectoryError: `reviews` is a file
+        self.reviews.parent.mkdir(parents=True)
+        self.reviews.write_text("x")
+        r = self.run_cli()
+        self.assertEqual(r.returncode, 2)
+        self.assertNotIn("Traceback", r.stderr)
+
+    @unittest.skipIf(os.geteuid() == 0, "root reads a mode-000 file")
+    def test_a_log_without_read_permission_exits_2(self):
+        self.log(line(F))
+        log = self.reviews / "attempts.jsonl"
+        log.chmod(0)
+        self.addCleanup(log.chmod, 0o600)
+        r = self.run_cli()
+        self.assertEqual(r.returncode, 2)
+        self.assertNotIn("Traceback", r.stderr)
+
+    def test_health_itself_still_raises_so_the_blocker_sync_sees_the_failure(self):
+        d = Path(self.sb.cfg) / "dir.jsonl"
+        d.mkdir()
+        with self.assertRaises(IsADirectoryError):
+            codex_health.health(d)
 
 
 if __name__ == "__main__":
