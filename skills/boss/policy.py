@@ -9,6 +9,7 @@ Every threshold a boss or a worker acts on lives here, and only here:
   review waits    how long a PR review waits on Codex, on the fallback, on gh and on its lock
   review text     how much of a PR's text goes into the brief, and how much of the findings into the comment
   fallback call   the model, the tools and the permission mode of the read-only fallback reviewer
+  Codex health    how many failed or answered Codex attempts in a row say it is down or back
 
     flag_for(ctx, cost, role) -> list of flags, e.g. ["CTX-SPLIT"]
     heavy(ctx, cost, role)    -> True past the first context or recycle line
@@ -54,6 +55,14 @@ COST_HEAVY, COST_RECYCLE = 60_000, 90_000
 RUNGS = (5, 15, 30, 60, 120)
 RUNG_EVERY = 120
 STOP_MIN = 24 * 60
+
+# Codex health (codex_health.py), counted over the attempts log, all repos together (2026-11-12, the owner:
+# an outage should be an open blocker, not a silent wait). DOWN_AFTER failed Codex attempts in a row make
+# it down. UP_AFTER answered ones in a row make it up again, so one answer amid failures never clears it;
+# 2 is the smallest value that says so, and the recheck passes supply the second answer soon, where a
+# larger value would leave a recovered outage on the ladder for hours.
+CODEX_DOWN_AFTER = 3
+CODEX_UP_AFTER = 2
 
 # The fallback reviewer, `claude` in read-only mode (boss_review.fallback_spec). The model is passed by
 # its exact id, so no CLI default is ever accepted; the tools are the built-in set it may use, and
