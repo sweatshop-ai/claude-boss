@@ -8,7 +8,7 @@
 
 **Blocked by:** 04 (The merge gate for deploying branches; merged, PR 118, 9fa994e)
 
-**Status:** ready-for-agent
+**Status:** done (Maja built it, PR 121)
 
 The other door (R15, finding 15):
 
