@@ -43,7 +43,8 @@ formats stay with `objective.py` and `tracker.py`. `skills/boss/boss_store.py`.
 _Avoid_: pm paths, state dir
 
 **Policy**: the steering numbers a boss and its workers act on — context
-bands, cost lines, escalation rungs, review waits. One module,
+bands, cost lines, escalation rungs, review waits, and the exact model and
+tool values of the read-only fallback. One module,
 `skills/boss/policy.py`; the prose quotes it and `test_policy.py` keeps the
 quotes true.
 
@@ -116,10 +117,35 @@ Codex's answer fails the rule.
 usable verdict always wins, whatever the exit status.
 
 **Fallback**: the spec of the model asked when Codex fails: a name, an exact
-model id, a timeout (twice Codex's unless set), an optional tool restriction,
-and which Codex reasons let it run. Optional; without one the chain is Codex
-only. Callers name one by **preset** (`opus` = `claude-opus-5-5`, `fable` =
-`claude-fable-5-1`), so the model ids are written in `reviewer_chain.py` alone.
+model id, a timeout (twice Codex's unless set), an optional tool restriction, variables
+the child does not inherit (`env_unset`), extra `claude` flags
+(`extra_args`, put ahead of `-p` because `--tools` and its kind take any number
+of values and `-p` ends them), and which Codex reasons let it run. Optional;
+without one the chain is Codex only. Callers name one by **preset**
+(`opus` = `claude-opus-5-5`, `fable` = `claude-fable-5-1`), so the model ids are
+written in `reviewer_chain.py` alone. `claude_argv` builds its call, the one
+place, and `fallback_flags` renders a whole spec as command-line flags for a
+caller that starts the chain as a child process.
+
+**Read-only fallback**: the PR gate's fallback, `boss_review.fallback_spec()`:
+`claude` on the policy's exact model, `--tools Read,Grep,Glob`,
+`--strict-mcp-config` (without it `--tools` alone leaves every MCP tool in),
+`--disable-slash-commands`, `--restricted`, `--safe-mode` and
+`--permission-mode dontAsk`.
+`--restricted` keeps the user, project and local settings files out (`claude -p` skips the workspace
+trust dialog, so without it a hook in the PR checkout's `.claude/settings.json`
+runs, and so do the owner's own hooks and plugins) and confines the file tools
+to the working directory. `--safe-mode` also turns off the checkout's agents,
+output styles, workflows, skills and CLAUDE.md. The `claude` child also does not
+inherit the variables in `policy.REVIEW_FALLBACK_ENV_UNSET` (`env_unset` on the
+spec: plugin directories, managed and remote settings paths, launchers and loaders): a plugin directory named there loads its hooks even under `--restricted`
+(found 2026-11-12 by the real check). The review does not run it yet.
+`boss_review.py --check-fallback --checkout DIR` runs it once from DIR with a
+one-word prompt, with `--include-hook-events` so that every kind of hook shows, and passes only if the stream holds no hook event and the init
+event shows exactly Glob, Grep and Read, no MCP servers, no slash commands,
+only plugins that are part of claude, that permission mode and that model id.
+It is a smoke test on the real CLI; the suite checks the argv and the decision
+on a stub.
 
 **Review round**: one run of `skills/boss/boss_review.py` on one PR head. The
 review runs first (Codex only, in a child process told `--cwd` the checkout, as

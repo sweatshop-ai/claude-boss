@@ -10,7 +10,7 @@
 
 **Status:** done
 
-Rebased after the 2026-11-05 scrub: sweatshop-ai/claude-boss PR #84, settled on head 1b6fda49288f5ca4db775ce1544e57df6e469cb6 (CI run 43195829740 green; Opus fallback review, Codex stalled; follow-up ticket 13). Zara, 2026-11-12.
+Rebased after the 2026-11-05 scrub: sweatshop-ai/claude-boss PR #84, settled on head cd2fddb2b734588849ad08b63b33cb42edc3e57d, merged as dedfe0d (CI run 43197388572 green; Opus fallback review, Codex stalled; follow-up ticket 13). Zara, 2026-11-12.
 
 Command and function:
 

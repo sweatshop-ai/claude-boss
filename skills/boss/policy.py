@@ -8,6 +8,7 @@ Every threshold a boss or a worker acts on lives here, and only here:
   escalation      the rungs at which a blocker on the owner is re-raised
   review waits    how long a PR review waits on Codex, on the fallback, on gh and on its lock
   review text     how much of a PR's text goes into the brief, and how much of the findings into the comment
+  fallback call   the model, the tools and the permission mode of the read-only fallback reviewer
 
     flag_for(ctx, cost, role) -> list of flags, e.g. ["CTX-SPLIT"]
     heavy(ctx, cost, role)    -> True past the first context or recycle line
@@ -54,6 +55,28 @@ RUNGS = (5, 15, 30, 60, 120)
 RUNG_EVERY = 120
 STOP_MIN = 24 * 60
 
+# The fallback reviewer, `claude` in read-only mode (boss_review.fallback_spec). The model is passed by
+# its exact id, so no CLI default is ever accepted; the tools are the built-in set it may use, and
+# `--strict-mcp-config` (with no `--mcp-config`) keeps every MCP server out, which `--tools` alone does not.
+# `--restricted` (no constant: it takes no value) keeps the user, project and local settings files out;
+# managed and remote settings still apply, hence the variables below.
+REVIEW_FALLBACK_MODEL = "claude-opus-5-5"
+REVIEW_FALLBACK_TOOLS = ("Read", "Grep", "Glob")
+REVIEW_FALLBACK_PERMISSION_MODE = "dontAsk"
+# Variables the fallback's `claude` does not inherit: the plugin directories named here load their hooks
+# whatever `--restricted` says about settings files (found 2026-11-12 by --check-fallback with 2.1.311).
+# The list is a denylist and so can fall behind a release of `claude`: the init-event and hook checks of
+# --check-fallback are what shows that nothing slipped through, not this list.
+REVIEW_FALLBACK_ENV_UNSET = (
+    "CLAUDE_CODE_PLUGIN_DIRS", "CLAUDE_CODE_PLUGIN_SEED_DIR", "CLAUDE_CODE_PLUGIN_CACHE_DIR",
+    "CLAUDE_CODE_DESKTOP_SKILLS_PLUGIN_DIR", "CLAUDE_DEV_MODS_DIR",
+    # managed and remote settings still apply under --restricted, so a path a PR could be named in is out
+    "CLAUDE_CODE_MANAGED_SETTINGS_PATH", "CLAUDE_CODE_REMOTE_SETTINGS_PATH", "CLAUDE_CODE_MOCK_REMOTE_SETTINGS",
+    "CLAUDE_CODE_REMOTE_MCP_CONFIG", "CLAUDE_CODE_BRIDGE_CHILD_MACHINE_SETTINGS",
+    # launchers and loaders: they run a program before `claude` has read any flag
+    "CLAUDE_ENV_FILE", "CLAUDE_CODE_PROCESS_WRAPPER", "CLAUDE_CODE_SHELL_LAUNCHER_SCRIPT",
+    "BASH_ENV", "ENV", "LD_PRELOAD", "LD_LIBRARY_PATH", "NODE_OPTIONS", "BUN_OPTIONS")
+
 # PR review (boss_review.py), seconds. A Codex review of a plan took 8 minutes, so Codex gets 600;
 # the fallback reviewer, once there is one, gets a wait of its own, also 600; a `gh` or `git` call or
 # the wait for a PR's lock gets 60; the review's child process gets 30 past Codex's wait to wind up.
@@ -79,7 +102,6 @@ REVIEW_DIFF_MAX = 80_000
 REVIEW_BRIEF_MAX = 120_000
 REVIEW_BASE_MAX = 255            # the longest base branch name the brief takes, in bytes
 REVIEW_DELIMITER_DRAWS = 20      # how many delimiters are drawn before the PR text is given up as unfenceable
-
 
 def flag_for(ctx, cost, role):
     """Flags for a session with `ctx` tokens of context and `cost` cost-units

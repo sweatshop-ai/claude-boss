@@ -6,7 +6,7 @@
 
 **Blocked by:** 02 (PR review becomes a command)
 
-**Claimed by:** Amara 2026-10-04 11:01
+**Claimed by:** Zola 2026-11-12 (rebuild after the scrub, PR 87; Amara 2026-10-04)
 
 **Status:** in-progress
 
