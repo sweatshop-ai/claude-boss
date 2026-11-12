@@ -2,7 +2,7 @@
 
 Split on 2026-11-12 (Joaquin, task #05X) into three tickets, on Chiara's ruling on finding 12 of spec round 1 (`plan-review-codex-05-1.md`). The eight boxes of the old 05 now live in exactly one of them; this file holds none, so an old reference to "05" resolves here and a reference to a box resolves to the letter below.
 
-What to build, in one line: after N failed Codex attempts in a row the boss's tracker gets an open blocker "Codex down" that the ladder escalates without a boss turn, and it clears after M answered attempts in a row. How the owner is asked, and what the owner's answer allows, is 09.
+What to build, in one line: after N failed Codex attempts in a row the boss's tracker gets an open blocker "Codex down" that the ladder escalates without a boss turn, and it clears after M answered attempts in a row. How the owner is asked, and what the owner's answer allows, is 09a, 09b and 09c.
 
 | Ticket | What it holds | Old 05 box (by its first words) | Blocked by |
 |---|---|---|---|

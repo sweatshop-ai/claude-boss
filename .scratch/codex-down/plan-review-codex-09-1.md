@@ -76,3 +76,21 @@ Every finding has a disposition. "Spec" means the text of the tickets in this PR
 | 13 | d | **Accepted, and it overturns Chiara's two-way cut** (her ruling allowed it). Three tickets: 09a hand-clear hold, 09b choice record/reader/ask, 09c waiver and consent. Codex answered the cut question: 09b needs from 09a only the grammar and reader, and in fact needs nothing from the hand-clear hold; 09a's SKILL step would have named `--waive` before it exists, so the tests-alone option moves to 09c. 04 is now blocked by 08 and 09c; 11 stays behind 04; `plan.md`, `coverage.md`, 04, 08, 20 and the 05 index are repointed. |
 
 No new ticket was needed: the findings are in the three 09 tickets. (Numbers from 23 stay free; PR 99 touches only 06.)
+
+## Round 2 (Malin, 2026-11-12): Opus fallback, Codex stalled
+
+Codex round 2 was run at head 2af4ba6 (`codex-review.sh exec`, brief on the diff since 360baf0) and stalled past 540s (exit 6, no answer; stderr in `/home/tiroir/Projects/boss-plugin-wt/09-spec-reviews/round-2.codex-stalled.md.stderr`). The labelled Opus fallback ran in the same turn: `/home/tiroir/Projects/boss-plugin-wt/09-spec-reviews/round-2.md`. Verdict: 09a GO after N4 and N5; 09b NO-GO until N2, N3, N7, N8, N9; 09c NO-GO until N1, N6. No class a finding. The 13 round-1 dispositions: all closed, findings 2 and 4 accepted in part with the residue judged acceptable. Codex still owes a re-read when it answers; its findings become tickets numbered from 23, not a revert.
+
+| # | Class | Disposition |
+|---|---|---|
+| N1 | d (security-adjacent) | **Fixed** in 09c: `is_consent` only routes a `CONSENT:` question; the step is SKILL discipline; any peer relay is not a choice; residue in coverage R26. |
+| N2 | b | **Fixed**: 09b changes `codex_blocker.ASK` to two options and rewrites the marker's `ask=` on `--choose`; 09c adds tests alone back. |
+| N3 | b | **Fixed** in 09b: write nothing only when the last choice equals the request; revocation test. |
+| N4 | b | **Fixed** in 09a: `C` capped at `now`, stderr line, test. |
+| N5 | d | **Fixed** in 09a: `entry()`/`add()` take `ts`; later failure at NOW+20 s. |
+| N6 | b | **Fixed** in 09c: clean checkout before and under the lock, `_prepare` reused, tests; `--test-cmd` residue in R26. |
+| N7 | d | **Fixed**: sentence in 09b's text test; 09b blocked by 09a for it. |
+| N8 | d | **Fixed**: `coverage.md` residual risk R26 added. |
+| N9 | b | **Fixed** in 09b: own-turn `AskUserQuestion` when the boss has no concierge. |
+| N10 | d | **Fixed**: three tests added to 09c. |
+| stale pointers | d | 04's scope says 09c; 05's index says 09a, 09b and 09c. |
