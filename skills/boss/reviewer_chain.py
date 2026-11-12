@@ -90,9 +90,9 @@ class Fallback:
             raise ValueError("allowed_tools=() would read as no restriction; use None for that")
         if not isinstance(self.extra_args, tuple) or not all(isinstance(a, str) for a in self.extra_args):
             raise ValueError("extra_args must be a tuple of strings: %r" % (self.extra_args,))
-        if (not isinstance(self.env_unset, tuple) or not all(isinstance(n, str) and n and "=" not in n
-                                                             and "," not in n for n in self.env_unset)):
-            raise ValueError("env_unset must be a tuple of variable names, without = or a comma: %r"
+        if (not isinstance(self.env_unset, tuple) or not all(isinstance(n, str) and n and n == n.strip()
+                                                             and "=" not in n and "," not in n for n in self.env_unset)):
+            raise ValueError("env_unset must be a tuple of variable names, without = , or surrounding space: %r"
                              % (self.env_unset,))
         if "--" in self.extra_args:
             raise ValueError("extra_args cannot hold a bare --: it would end option parsing before -p")

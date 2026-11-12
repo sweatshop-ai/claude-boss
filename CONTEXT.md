@@ -130,16 +130,18 @@ caller that starts the chain as a child process.
 **Read-only fallback**: the PR gate's fallback, `boss_review.fallback_spec()`:
 `claude` on the policy's exact model, `--tools Read,Grep,Glob`,
 `--strict-mcp-config` (without it `--tools` alone leaves every MCP tool in),
-`--disable-slash-commands`, `--restricted` and `--permission-mode dontAsk`.
+`--disable-slash-commands`, `--restricted`, `--safe-mode` and
+`--permission-mode dontAsk`.
 `--restricted` keeps every settings file out (`claude -p` skips the workspace
 trust dialog, so without it a hook in the PR checkout's `.claude/settings.json`
 runs, and so do the owner's own hooks and plugins) and confines the file tools
-to the working directory. The `claude` child also does not inherit
-`CLAUDE_CODE_PLUGIN_DIRS` or `CLAUDE_CODE_PLUGIN_SEED_DIR` (`env_unset` on the
-spec): a plugin directory named there loads its hooks even under `--restricted`
+to the working directory. `--safe-mode` also turns off the checkout's agents,
+output styles, workflows, skills and CLAUDE.md. The `claude` child also does not
+inherit the variables in `policy.REVIEW_FALLBACK_ENV_UNSET` (`env_unset` on the
+spec: plugin directories, managed and remote settings paths, launchers and loaders): a plugin directory named there loads its hooks even under `--restricted`
 (found 2026-11-12 by the real check). The review does not run it yet.
 `boss_review.py --check-fallback --checkout DIR` runs it once from DIR with a
-one-word prompt and passes only if the stream holds no hook event and the init
+one-word prompt, with `--include-hook-events` so that every kind of hook shows, and passes only if the stream holds no hook event and the init
 event shows exactly Glob, Grep and Read, no MCP servers, no slash commands,
 only plugins that are part of claude, that permission mode and that model id.
 It is a smoke test on the real CLI; the suite checks the argv and the decision

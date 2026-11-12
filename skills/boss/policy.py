@@ -64,7 +64,17 @@ REVIEW_FALLBACK_TOOLS = ("Read", "Grep", "Glob")
 REVIEW_FALLBACK_PERMISSION_MODE = "dontAsk"
 # Variables the fallback's `claude` does not inherit: the plugin directories named here load their hooks
 # whatever `--restricted` says about settings files (found 2026-11-12 by --check-fallback with 2.1.311).
-REVIEW_FALLBACK_ENV_UNSET = ("CLAUDE_CODE_PLUGIN_DIRS", "CLAUDE_CODE_PLUGIN_SEED_DIR")
+# The list is a denylist and so can fall behind a release of `claude`: the init-event and hook checks of
+# --check-fallback are what shows that nothing slipped through, not this list.
+REVIEW_FALLBACK_ENV_UNSET = (
+    "CLAUDE_CODE_PLUGIN_DIRS", "CLAUDE_CODE_PLUGIN_SEED_DIR", "CLAUDE_CODE_PLUGIN_CACHE_DIR",
+    "CLAUDE_CODE_DESKTOP_SKILLS_PLUGIN_DIR", "CLAUDE_DEV_MODS_DIR",
+    # managed and remote settings still apply under --restricted, so a path a PR could be named in is out
+    "CLAUDE_CODE_MANAGED_SETTINGS_PATH", "CLAUDE_CODE_REMOTE_SETTINGS_PATH", "CLAUDE_CODE_MOCK_REMOTE_SETTINGS",
+    "CLAUDE_CODE_REMOTE_MCP_CONFIG", "CLAUDE_CODE_BRIDGE_CHILD_MACHINE_SETTINGS",
+    # launchers and loaders: they run a program before `claude` has read any flag
+    "CLAUDE_ENV_FILE", "CLAUDE_CODE_PROCESS_WRAPPER", "CLAUDE_CODE_SHELL_LAUNCHER_SCRIPT",
+    "BASH_ENV", "ENV", "LD_PRELOAD", "LD_LIBRARY_PATH", "NODE_OPTIONS", "BUN_OPTIONS")
 
 # PR review (boss_review.py), seconds. A Codex review of a plan took 8 minutes, so Codex gets 600;
 # the fallback reviewer, once there is one, gets a wait of its own, also 600; a `gh` or `git` call or

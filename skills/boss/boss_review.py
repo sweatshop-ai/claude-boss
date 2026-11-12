@@ -935,7 +935,9 @@ def review(repo: str, pr: int, checkout: str, author: str, *,
 
 # ------------------------------------------------------------ the fallback, confined ----
 CHECK_PROMPT = "ok"         # one word: the check reads the init event, not the answer
-CHECK_FLAGS = ("--output-format", "stream-json", "--verbose")   # `claude -p` refuses stream-json without --verbose
+# `claude -p` refuses stream-json without --verbose; without --include-hook-events the stream shows only
+# the SessionStart hooks (checked with 2.1.311: a UserPromptSubmit or Stop hook ran unseen)
+CHECK_FLAGS = ("--output-format", "stream-json", "--verbose", "--include-hook-events")
 BUILTIN_PLUGIN_PATH = "builtin"     # the `path` claude 2.1.289 gives the plugins that are part of it
 _MISSING = object()
 
@@ -948,12 +950,14 @@ def fallback_spec(timeout: int = policy.REVIEW_FALLBACK_TIMEOUT) -> Fallback:
     out: `claude -p` skips the workspace trust dialog, so without it the checkout's `.claude/settings.json`
     runs its hooks (a `SessionStart` hook ran a command there, checked with 2.1.289), as do the owner's
     own hooks and plugins, and the owner's CLAUDE.md and auto-memory reach the model; it also confines
-    the file tools to the working directory. It runs when Codex is absent, hangs or fails, and not after
+    the file tools to the working directory. `--safe-mode` also turns off what is not a settings file:
+    the checkout's custom agents, output styles, workflows, skills and CLAUDE.md. `env_unset` keeps the
+    variables that name plugins, settings or launchers out of the child. It runs when Codex is absent, hangs or fails, and not after
     a Codex answer that has no verdict. Not yet run by review(): ticket 08 does that."""
     return Fallback("opus", policy.REVIEW_FALLBACK_MODEL, timeout=timeout,
                     when=("absent", "timeout", "error"), env_unset=policy.REVIEW_FALLBACK_ENV_UNSET,
                     extra_args=("--tools", ",".join(policy.REVIEW_FALLBACK_TOOLS),
-                                "--strict-mcp-config", "--disable-slash-commands", "--restricted",
+                                "--strict-mcp-config", "--disable-slash-commands", "--restricted", "--safe-mode",
                                 "--permission-mode", policy.REVIEW_FALLBACK_PERMISSION_MODE))
 
 

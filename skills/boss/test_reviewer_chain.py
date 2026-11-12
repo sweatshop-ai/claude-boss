@@ -675,7 +675,7 @@ class FlagsRoundTrip(Base):
                 self.assertEqual(self.rebuilt(fb), fb)
 
     def test_an_env_unset_that_is_not_a_tuple_of_names_is_refused(self):
-        for bad in (["A"], "A", ("A=1",), ("A,B",), ("",), (3,), None):
+        for bad in (["A"], "A", ("A=1",), ("A,B",), ("",), (3,), None, (" A",), ("A ",)):
             with self.subTest(env_unset=bad), self.assertRaises(ValueError):
                 rc.Fallback("opus", OPUS_ID, env_unset=bad)
 

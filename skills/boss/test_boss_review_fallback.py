@@ -33,7 +33,7 @@ from hermetic import Sandbox  # noqa: E402
 
 # What the fallback must be, written out here and not read back from the code under test.
 MODEL = "claude-opus-5-5"
-CALL = ["--tools", "Read,Grep,Glob", "--strict-mcp-config", "--disable-slash-commands", "--restricted",
+CALL = ["--tools", "Read,Grep,Glob", "--strict-mcp-config", "--disable-slash-commands", "--restricted", "--safe-mode",
         "--permission-mode", "dontAsk"]
 GO = "VERDICT: GO\n"
 MISSING = object()
@@ -158,7 +158,7 @@ class Spec(Base):
         paragraph = text.split("**Read-only fallback**", 1)[1].split("\n\n", 1)[0]
         flat = " ".join(paragraph.split())
         for quoted in ("--tools " + ",".join(policy.REVIEW_FALLBACK_TOOLS), "--strict-mcp-config",
-                       "--disable-slash-commands", "--restricted",
+                       "--disable-slash-commands", "--restricted", "--safe-mode",
                        "--permission-mode " + policy.REVIEW_FALLBACK_PERMISSION_MODE):
             self.assertIn(quoted, flat)
 
@@ -187,7 +187,7 @@ class TheCall(Base):
         self.assertEqual(argv[argv.index("--model") + 1], policy.REVIEW_FALLBACK_MODEL)
         self.assertEqual(argv.count("--permission-mode"), 1)
         self.assertEqual(argv[argv.index("--permission-mode") + 1], "dontAsk")
-        for flag in ("--strict-mcp-config", "--disable-slash-commands", "--restricted", "-p"):
+        for flag in ("--strict-mcp-config", "--disable-slash-commands", "--restricted", "--safe-mode", "-p"):
             self.assertEqual(argv.count(flag), 1, flag)
         for flag in ("--dangerously-skip-permissions", "--allow-dangerously-skip-permissions",
                      "--allowedTools", "--allowed-tools", "--bare", "--mcp-config", "--add-dir",
@@ -322,10 +322,10 @@ class Check(Base):
         self.check()
         (call,) = self.claude_calls()
         self.assertEqual(call.argv, [*CALL, "--output-format", "stream-json", "--verbose",
-                                     "-p", "--model", MODEL, br.CHECK_PROMPT])
-        # taking those three tokens out leaves the argv a review sends, prompt aside
+                                     "--include-hook-events", "-p", "--model", MODEL, br.CHECK_PROMPT])
+        # taking those four tokens out leaves the argv a review sends, prompt aside
         i = call.argv.index("--output-format")
-        self.assertEqual(call.argv[:i] + call.argv[i + 3:],
+        self.assertEqual(call.argv[:i] + call.argv[i + 4:],
                          rc.claude_argv(br.fallback_spec(), br.CHECK_PROMPT)[1:])
         self.assertEqual(len(br.CHECK_PROMPT.split()), 1)      # a one-word prompt
 
@@ -390,6 +390,22 @@ if [ -n "$CLAUDE_CODE_PLUGIN_DIRS" ]; then echo %s; else echo %s; fi
                 mock.patch.object(br, "fallback_spec", return_value=loose):
             problems = br.check_fallback(str(self.checkout))
         self.assertTrue(any("plugins" in p for p in problems), problems)
+
+    def test_every_variable_the_spec_unsets_is_gone_from_the_claude_child(self):
+        # one stub call, every name in the policy list set in our environment: none reaches `claude`
+        self.sb.stub_script("claude", 'env > "$R/claude.env"; echo "VERDICT: GO"')
+        self.expect["claude"] += 1
+        names = policy.REVIEW_FALLBACK_ENV_UNSET
+        for must in ("CLAUDE_CODE_PLUGIN_DIRS", "CLAUDE_CODE_PLUGIN_SEED_DIR", "CLAUDE_CODE_MANAGED_SETTINGS_PATH",
+                     "CLAUDE_CODE_REMOTE_SETTINGS_PATH", "CLAUDE_ENV_FILE", "BASH_ENV", "LD_PRELOAD"):
+            self.assertIn(must, names)
+        env = dict(os.environ, KEPT_BY_THE_TEST="yes", **{n: "/in/the/checkout" for n in names})
+        with mock.patch.dict(os.environ, env, clear=True):
+            result = rc.run_chain("p", words=rc.APPROVE_REJECT, fallback=br.fallback_spec(), cwd=str(self.checkout))
+        self.assertEqual(result.reviewer, "opus")
+        seen = dict(line.split("=", 1) for line in (self.sb.root / "claude.env").read_text().splitlines() if "=" in line)
+        self.assertEqual([n for n in names if n in seen], [])
+        self.assertEqual(seen.get("KEPT_BY_THE_TEST"), "yes")
 
     def test_the_call_runs_in_the_checkout_it_was_given(self):
         self.check()
