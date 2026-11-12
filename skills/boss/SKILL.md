@@ -497,6 +497,17 @@ boxes it proved, and a criterion that was ticked and no longer holds comes back
 **REGRESSED** rather than being quietly unticked. Zero checks on a ref is
 `UNKNOWN`, never green — nothing ran is not the same as nothing failed.
 
+**Name the local tickets a criterion covers as `<feature>/<NN>`**, the feature being
+the folder under `.scratch/`: `paste/12 at Status done`, or a range,
+`paste/23 to 26 at Status done`. Never "ticket 26", "04's" or a folder path with
+"every ticket in it". FleetView turns each Done when line into a row on the
+track's card and finds its tickets by that name alone: from them it shows the row
+worked on (a live worker of your `Roster` has the ticket in its task, so name it
+there the same way), waiting (a ticket's `Blocked by` names one still open) or
+planned. A line that names no ticket shows only done or planned. A track that
+works a whole ticket folder writes one line per ticket, or one range per run of
+them, not one line for the folder.
+
 Run it when a PR merges and again at wrap-up. Anything left needs a human, and
 `verify` says which. `check` flags the criteria that carry no anchor at all.
 

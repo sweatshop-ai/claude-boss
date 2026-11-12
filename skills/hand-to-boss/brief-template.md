@@ -38,8 +38,10 @@ escalation ladder.
 ## Objective
 
 Write it with `boss-goal` from this brief. **Done when**: every ticket not waiting
-on an external blocker has Status `done` and its boxes ticked; the ones still
-waiting are listed with who holds them. Give it a `## Tickets` section holding
+on an external blocker has Status `done` and its boxes ticked, written as one line
+per ticket or per run of them, named `<feature>/<NN>` (`{{feature}}/01 to 05 at Status
+done`), so FleetView can show each line's state; the ones still waiting are listed
+with who holds them. Give it a `## Tickets` section holding
 `{{issues dir}}`, one line: the pulse then reads the frontier itself and hands you
 every ready ticket each time a worker goes idle.
 
