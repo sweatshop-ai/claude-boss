@@ -1,0 +1,27 @@
+{
+ "agent_id": "AGENT-ID",
+ "agent_type": "general-purpose",
+ "cwd": "CWD",
+ "duration_ms": 33,
+ "effort": {
+  "level": "medium"
+ },
+ "hook_event_name": "PostToolUse",
+ "permission_mode": "auto",
+ "prompt_id": "PROMPT-ID",
+ "scratchpad_dir": "SCRATCHPAD-DIR",
+ "session_id": "SESSION-ID",
+ "tool_input": {
+  "command": "echo subagent-probe"
+ },
+ "tool_name": "Bash",
+ "tool_response": {
+  "interrupted": false,
+  "isImage": false,
+  "noOutputExpected": false,
+  "stderr": "",
+  "stdout": "subagent-probe"
+ },
+ "tool_use_id": "toolu_TOOL-USE-ID",
+ "transcript_path": "TRANSCRIPT-PATH"
+}

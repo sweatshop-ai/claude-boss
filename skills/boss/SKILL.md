@@ -635,8 +635,8 @@ is nothing to ask; `malformed` (exit 2) means the blocker's line cannot be read,
 On `none`, ask through your concierge (`SendMessage` with `ASK q<n>:`, the blocker's id written on its
 line first; `references/concierge.md`), or with `AskUserQuestion` in your own turn only when you have no
 concierge, never in prose. One self-contained question, your name and your track first, your
-recommendation first, two options: wait for Codex; or accept the fallback review (a provisional GO merges only
-where nothing deploys). Add the sentence: to close this blocker by hand, type
+recommendation first, three options: wait for Codex; accept the fallback review (a provisional GO merges only
+where nothing deploys); or merge on tests alone (only where nothing deploys, only through `--waive`). Add the sentence: to close this blocker by hand, type
 `cleared=<ISO-8601 time with UTC offset>` on its line (for example `cleared=2026-11-12T10:30+01:00`), do not
 delete it. An `ANSWER q<n>` is recorded with `python3 skills/boss/codex_blocker.py --choose T wait` or
 `--choose T accept-fallback`, which writes `- [codex-choice <blocker id>] <choice> - <ts>` under
@@ -644,6 +644,20 @@ delete it. An `ANSWER q<n>` is recorded with `python3 skills/boss/codex_blocker.
 `--choose` replaces the choice, and going back to `wait` needs no new consent. A `NO ANSWER` writes nothing and
 the blocker stays open. The question is the owner's whatever they once said about asking less: it is never
 recorded as a `boss-unask` kind.
+
+**Merging on tests alone needs a consent of its own** (ticket 09c). A `tests-alone` answer relayed by anyone
+else, the concierge's `ANSWER` included, is not a choice. When the owner picks it, or when you have no concierge
+and the three-option question is not enough, ask once more in your own turn with `AskUserQuestion`, exactly one
+question, worded `CONSENT: merge PRs of <track> on tests alone while Codex is down (no review of any kind), only where nothing deploys? Command: <cmd>`
+(`<cmd>` is the exact test command you will run, or `sha256:<64 hex>` of it when it is long), with two buttons,
+the first labelled exactly `Yes, merge on tests alone`. The answer is a button, not free text. Only that yes
+makes the guard write a consent token for your session, track and command, good for 10 minutes; any later
+`AskUserQuestion` withdraws it. With it run `python3 skills/boss/codex_blocker.py --choose T tests-alone --test-cmd '<cmd>'`,
+and for each PR `python3 skills/boss/boss_review.py --waive --repo OWNER/REPO --pr N --checkout DIR --author NAME --track T --test-cmd '<cmd>'`
+with the same `<cmd>`. `--waive` runs `<cmd>` in the checkout, and only if it passes on a clean checkout that still
+stands on the PR head does it record a `waived` round and post one comment; exit 5 means a condition did not hold
+and nothing was recorded. On a no, record nothing. Both commands refuse without the token, so never run them
+before the yes.
 A plan is reviewed by hand: `codex exec -s read-only ... < /dev/null`,
 briefed to read and not execute, output checked in the first minute. On a usage limit or an outage, a plan's review is the labelled fallback review (Opus, read-only), run
 the same turn, with the reset time Codex gave in the review file's header; the

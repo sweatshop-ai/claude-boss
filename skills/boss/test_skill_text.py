@@ -93,10 +93,26 @@ class CodexDownChoice(unittest.TestCase):
         start = text.index("**When a `Codex down` blocker is open, ask the owner once what to do**")
         return text[start:text.index("A plan is reviewed by hand", start)]
 
-    def test_both_options_and_the_recommendation_first(self):
+    def test_the_three_options_and_the_recommendation_first(self):
         sec = self.section()
-        self.assertIn("recommendation first, two options: wait for Codex; or accept the fallback review", sec)
-        self.assertNotIn("tests alone", sec)                    # 09c adds that option with its own consent
+        self.assertIn("recommendation first, three options: wait for Codex; accept the fallback review", sec)
+        self.assertIn("or merge on tests alone (only where nothing deploys, only through `--waive`)", sec)
+
+    def test_tests_alone_has_a_consent_of_its_own_asked_in_the_boss_own_turn(self):
+        """Ticket 09c: the CONSENT: question, its exact button, the token, and `--waive` named once."""
+        text = flat()
+        self.assertEqual(text.count("**Merging on tests alone needs a consent of its own**"), 1)
+        self.assertEqual(text.count("`CONSENT: merge PRs of <track> on tests alone while Codex is down (no review of any kind), "
+                                    "only where nothing deploys? Command: <cmd>`"), 1)
+        for part in ("not a choice", "ask once more in your own turn with `AskUserQuestion`, exactly one question",
+                     "the first labelled exactly `Yes, merge on tests alone`", "a button, not free text",
+                     "consent token", "any later `AskUserQuestion` withdraws it",
+                     "codex_blocker.py --choose T tests-alone --test-cmd '<cmd>'", "On a no, record nothing",
+                     "Both commands refuse without the token"):
+            self.assertIn(part, text)
+        self.assertEqual(text.count("boss_review.py --waive "), 1)
+        import consent
+        self.assertIn("`%s`" % consent.AFFIRMATIVE, text)
 
     def test_it_asks_through_the_concierge_and_in_its_own_turn_only_without_one(self):
         sec = self.section()
