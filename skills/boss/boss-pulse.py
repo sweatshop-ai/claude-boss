@@ -45,6 +45,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import boss_store  # noqa: E402
+import codex_blocker  # noqa: E402
 import fleet  # noqa: E402
 import objective  # noqa: E402
 import policy  # noqa: E402
@@ -172,7 +173,41 @@ def open_blockers(body):
     """
     if body is None:
         return []
-    return [b[:160] for b in tracker.open_blockers(body)]
+    decided = _decided_entries(body)
+    return [b[:160] for b in tracker.open_blockers(body) if b not in decided]
+
+
+def _decided_entries(body):
+    """{entry: choice} for the Open blockers entries the owner has already answered.
+
+    The answer is `codex_blocker`'s: `_state` says whether the one open Codex down
+    blocker has a valid recorded choice, and an entry counts only when its own marker
+    carries that blocker's id. A malformed choice, one for another id, and a tracker
+    with several open Codex down lines decide nothing. The lines are split as `_state`
+    split them, and a marker that does not parse (a line closed by hand) is skipped.
+    """
+    lines = body.split("\n")
+    status, id_, choice = codex_blocker._state(lines)
+    if status != "chosen":
+        return {}
+    lo, hi = tracker.blockers_range(lines)
+    out = {}
+    for line in lines[lo:hi]:
+        try:
+            found = codex_blocker._is_cd(line) and tracker.scan_marker(line)
+        except tracker.MarkerError:
+            continue
+        if found and found[1].get("id") == id_:
+            out[line.strip().lstrip("-* ").strip()] = choice
+    return out
+
+
+def decided_blockers(body):
+    """The blockers the owner has answered, as `entry (owner chose X)` lines, for the text."""
+    if body is None:
+        return []
+    return ["%s (owner chose %s)" % (e.split(tracker.TOKEN)[0].strip()[:120], c)
+            for e, c in _decided_entries(body).items()]
 
 
 def question_pending(sid):
@@ -330,11 +365,12 @@ def main():
     tracker_text = boss_store.read_tracker(track)  # once per Stop, both consumers share it
     rungs = due_rungs(track, fired, tracker_text)
     blockers = [] if concierge_holding(sid) else open_blockers(tracker_text)
+    decided = decided_blockers(tracker_text)
     source = objective.tickets_source(body)
     ready, broken = read_frontier(source, track) if source else ([], None)
     facts = pulse.Facts(
         track=track, idle=idle, size=size, rungs=rungs, fired=fired,
-        blockers=blockers, source=source, ready=ready, broken=broken,
+        blockers=blockers, decided=decided, source=source, ready=ready, broken=broken,
         outcome=objective.section(body, "Outcome"), unmet=objective.unmet(body),
         next_items=objective.next_items(body))
     decision = pulse.decide(facts)
