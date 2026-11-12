@@ -461,13 +461,13 @@ def _follows(word: str, output: str) -> bool:
     return found is not None and found.word == word
 
 
-def _refused_for_nul(data: dict) -> bool:
+def _refused_for_nul(data: dict, code: int) -> bool:
     """Whether `_sound` would take the result but for the NUL in the answer."""
     try:
         (a,) = data["attempts"]
         clean = dict(data, output=data["output"].replace("\0", ""),
                      attempts=[dict(a, output=a["output"].replace("\0", ""))])
-        return "\0" in a["output"] and _sound(clean, 0)
+        return "\0" in a["output"] and _sound(clean, code)
     except (ValueError, KeyError, TypeError, AttributeError):
         return False
 
@@ -485,7 +485,7 @@ def _chain_result(run: _Out) -> dict:
     except (ValueError, KeyError, TypeError) as exc:
         raise _Infra("the chain printed no result I can read: %s: %s" % (type(exc).__name__, exc))
     if not sound:
-        if _refused_for_nul(data):
+        if _refused_for_nul(data, run.code):
             raise _Refused("the chain's answer holds a NUL: it cannot be read as the chain read it",
                            [{k: a[k] for k in ("reviewer", "reason", "exit_code")} for a in data["attempts"]])
         raise _Infra("the chain printed a result that is not a consistent Codex-only one")

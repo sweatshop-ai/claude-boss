@@ -966,10 +966,18 @@ class ChainChild(Base):
                 self.assertEqual(self.comments(), [])
                 self.assertEqual(list(self.reviews.glob("*/*/pr*/round*")), [])
                 (line,) = self.attempts_log()
+                self.assertRegex(line["ts"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
+                self.assertEqual(stat.S_IMODE(self.reviews.stat().st_mode), 0o700)
+                self.assertEqual(stat.S_IMODE((self.reviews / "attempts.jsonl").stat().st_mode), 0o600)
                 self.assertEqual(set(line), {"ts", "repo", "pr", "round", "reviewer", "reason", "exit_code"})
                 self.assertEqual((line["repo"], line["pr"], line["round"], line["reviewer"],
                                   line["reason"], line["exit_code"]),
                                  ("owner/repo", PR, None, "codex", "answered", 0))
+
+    def test_a_nul_answer_from_a_child_that_exited_one_is_not_logged(self):
+        self.gh.configure()
+        with self.stand_in(1, output="VERDICT: GO\u0000", attempt_output="VERDICT: GO\u0000"):
+            self.assertInfraBeforeAnyClaim()
 
     def test_a_child_that_exits_with_anything_but_zero_or_one_is_exit_seven(self):
         good = json.dumps({"reviewer": "none", "output": "", "parsed": None, "attempts": [
