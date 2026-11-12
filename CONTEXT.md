@@ -194,6 +194,7 @@ The prune (ticket 06b) keeps an entry whose PR has a round file it cannot read a
 nested too deep for the JSON parser, one whose own repo, pr or round are not its file's). A round file that is empty
 and has a later round above it is a dead claim, not an unreadable record: the prune skips it, so the next review of
 that PR (the recheck of ticket 10 included) clears the entry it kept; the newest round left empty still keeps it.
+A merged PR's entry is cleared by a Codex GO on the head it merged at (rule 4) or, when that is the entry's own head, by rule 1; a Codex GO on the entry's head never clears it when the PR merged at another head (ticket 35).
 
 **Recheck**: `skills/boss/boss_recheck.py --track T --repo OWNER/REPO --checkout DIR [--author NAME]` (ticket 10a), the pass
 that has Codex alone review again each entry of a repo under `## Provisional GO`. It runs `prune_provisional` first and after

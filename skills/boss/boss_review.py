@@ -1190,7 +1190,9 @@ def _prunable(entry: ProvEntry, io_timeout: float) -> bool:
     if rounds is None:
         return False
     first = _latest_codex_says_go(rounds, entry.head)
-    if first and first.number > entry.round:    # rule 1
+    # rule 1; not for a merged PR whose merged head is another one (ticket 35): what merged is that head, and the entry
+    # stays until rule 4 sees a Codex GO on it
+    if first and first.number > entry.round and (state == "OPEN" or live_head == entry.head):
         return True
     if live_head == entry.head:
         return False
