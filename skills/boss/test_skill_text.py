@@ -85,5 +85,47 @@ class MergeRule(unittest.TestCase):
                       "marks the branch non-deploying)", flat())
 
 
+class CodexDownChoice(unittest.TestCase):
+    """Ticket 09b: the boss asks the owner once, records the answer, and does not ask twice."""
+
+    def section(self):
+        text = flat()
+        start = text.index("**When a `Codex down` blocker is open, ask the owner once what to do**")
+        return text[start:text.index("A plan is reviewed by hand", start)]
+
+    def test_both_options_and_the_recommendation_first(self):
+        sec = self.section()
+        self.assertIn("recommendation first, two options: wait for Codex; or accept the fallback review", sec)
+        self.assertNotIn("tests alone", sec)                    # 09c adds that option with its own consent
+
+    def test_it_asks_through_the_concierge_and_in_its_own_turn_only_without_one(self):
+        sec = self.section()
+        self.assertIn("`SendMessage` with `ASK q<n>:`", sec)
+        self.assertIn("`AskUserQuestion` in your own turn only when you have no concierge, never in prose", sec)
+
+    def test_the_hand_clear_sentence_carries_its_example_and_never_a_bare_cleared(self):
+        sec = self.section()
+        self.assertIn("`cleared=<ISO-8601 time with UTC offset>` on its line (for example "
+                      "`cleared=2026-11-12T10:30+01:00`), do not delete it", sec)
+        self.assertNotRegex(sec, r"cleared=(?![<2])")
+
+    def test_the_commands_and_the_line_format_are_named(self):
+        sec = self.section()
+        for part in ("codex_blocker.py --choice T", "codex_blocker.py --choose T wait", "--choose T accept-fallback",
+                     "- [codex-choice <blocker id>] <choice> - <ts>", "under `## Decisions in force`"):
+            self.assertIn(part, sec)
+
+    def test_a_no_answer_writes_nothing_and_the_question_is_never_a_boss_unask_kind(self):
+        sec = self.section()
+        self.assertIn("A `NO ANSWER` writes nothing and the blocker stays open", sec)
+        self.assertIn("never recorded as a `boss-unask` kind", sec)
+
+    def test_it_appears_once_and_the_merge_rule_still_names_the_tests_alone_case(self):
+        text = flat()
+        self.assertEqual(text.count("ask the owner once what to do"), 1)
+        self.assertEqual(text.count(MergeRule.RULE), 1)
+        self.assertIn("the owner's merge on tests alone", MergeRule.RULE)
+
+
 if __name__ == "__main__":
     unittest.main()
