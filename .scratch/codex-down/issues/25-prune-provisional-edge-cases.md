@@ -11,3 +11,4 @@
 - [ ] **Two tests prove less than they say (class d).** `test_a_held_tracker_lock_leaves_the_entry_and_says_so` and `test_a_gh_that_outlasts_the_io_timeout_keeps_the_entry` use `io_timeout=1` for the `gh` read too, so a slow stub can pass them without reaching the path; neither checks the stderr line. Give the lock test a long `gh` timeout and capture stderr in both.
 - [ ] **A leaked descriptor in a test (class d).** `test_the_prune_takes_the_tracker_lock_and_never_the_prs` unlocks `fd` but never closes it.
 - [ ] **Two tracker shapes are untested (class d).** A CRLF tracker, and two identical lines of one entry.
+- [ ] **Rule 2's boundary has no row (class d, Opus fallback review 4).** Add the row OPEN, live head B, entry `round=02`, rounds [(2, B, GO)]: a GO at the entry's own round does not remove.
