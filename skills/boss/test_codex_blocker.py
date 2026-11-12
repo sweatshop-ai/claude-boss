@@ -706,6 +706,127 @@ class Choice(Base):
         self.assertFalse(any(tracker.has_marker(ln) for ln in self.lines_of(id_)))
 
 
+class Edges(Base):
+    """Ticket 20: the edge cases found in the review of 05c."""
+
+    def test_a_hand_written_empty_cleared_is_open_and_the_next_up_sync_clears_it(self):
+        for empty in ("cleared=", 'cleared=""'):
+            with self.subTest(empty=empty):
+                self.setUp()
+                marker = tracker.render_marker("cd261112080000", NOW, NOW, ask="x").replace(" ask=", " %s ask=" % empty)
+                self.path.write_text(TRACKER.replace("## Open blockers\n", "## Open blockers\n- a %s\n" % marker),
+                                     encoding="utf-8")
+                self.assertEqual(codex_blocker._classify(self.text().split("\n"))[0], [3])
+                self.add(OK, OK)
+                self.sync()
+                (ln,) = self.cd_lines()
+                self.assertEqual(tracker.validate(tracker.scan_marker(ln)[1])["cleared"], "2026-11-12T10:30+01:00")
+                self.assertEqual(codex_blocker._classify(self.text().split("\n")), ([], []))
+                self.assertEqual(len(self.alerts("clear")), 1)
+                after = self.text()
+                self.sync(NOW + timedelta(minutes=1))
+                self.assertEqual((self.text(), len(self.alerts())), (after, 1))
+
+    def test_a_symlink_swapped_in_after_the_check_is_not_written_through(self):
+        target = self.path.with_name("elsewhere.md")
+        real_usable = codex_blocker.usable_tracker
+        swapped = []
+
+        def swap(track):
+            path = real_usable(track)
+            target.write_text(self.text(), encoding="utf-8")
+            self.path.unlink()
+            self.path.symlink_to(target)
+            swapped.append(path)
+            return path
+
+        self.add(F, F, F)
+        with mock.patch.object(codex_blocker, "usable_tracker", swap):
+            err = self.sync()
+        self.assertEqual(len(swapped), 1)
+        self.assertIn("symbolic link", err)
+        self.assertEqual((target.read_text(encoding="utf-8"), self.alerts()), (TRACKER, []))
+
+    def test_a_symlink_swapped_in_after_the_check_is_not_chosen_through(self):
+        self.add(F, F, F)
+        self.sync()
+        target = self.path.with_name("elsewhere.md")
+        target.write_text(self.text(), encoding="utf-8")
+        before = self.text()
+        real_usable = codex_blocker.usable_tracker
+
+        def swap(track):
+            path = real_usable(track)
+            self.path.unlink()
+            self.path.symlink_to(target)
+            return path
+
+        with mock.patch.object(codex_blocker, "usable_tracker", swap):
+            rc, msg = codex_blocker.choose("t", "wait", now=NOW)
+        self.assertEqual(rc, 1)
+        self.assertIn("symbolic link", msg)
+        self.assertEqual(target.read_text(encoding="utf-8"), before)
+
+    def test_an_id_that_is_not_the_markers_own_is_not_a_cd_line(self):
+        lookalikes = (
+            '- see id=cd261112090000 here [ladder id=zz11 t0=bad last=0 next=x ask="a"]',     # prose before the marker
+            '- x [ladder id=cd2611120900001 t0=bad last=0 next=x ask="a"]',                   # a thirteenth digit
+            '- x [ladder xid=cd261112090000 t0=bad last=0 next=x ask="a"]',                   # another field
+            '- x [ladder id=zz11 t0=bad last=0 next=x ask="see id=cd261112090000"]',          # inside another's ask
+        )
+        for line in lookalikes:
+            with self.subTest(line=line):
+                self.setUp()
+                self.path.write_text(TRACKER.replace("## Open blockers\n", "## Open blockers\n%s\n" % line),
+                                     encoding="utf-8")
+                self.assertEqual(codex_blocker._classify(self.text().split("\n")), ([], []))
+                self.add(F, F, F)
+                err = self.sync()
+                self.assertEqual((err, len(self.alerts("0"))), ("", 1))
+                self.assertEqual(codex_blocker._classify(self.text().split("\n"))[0], [4])
+
+    def test_a_cd_id_in_the_markers_own_field_is_still_a_broken_cd_line(self):
+        line = '- x see xid=cd261112090000 [ladder id=cd261112090000 t0=bad last=0 next=x ask="a"]'
+        self.path.write_text(TRACKER.replace("## Open blockers\n", "## Open blockers\n%s\n" % line), encoding="utf-8")
+        opened, broken = codex_blocker._classify(self.text().split("\n"))
+        self.assertEqual((opened, [i for i, _ in broken]), ([], [3]))
+
+    def test_a_repo_with_marker_characters_gives_one_valid_marker(self):
+        repo = 'a]b"c[ladder x\nd'
+        self.add(F, F, F, repo=repo)
+        before = self.text().count("\n")
+        self.sync()
+        self.assertEqual(self.text().count("\n"), before + 1)
+        self.assertEqual(self.text().count(tracker.TOKEN), 1)
+        (ln,) = self.cd_lines()
+        self.assertIn("(last: a?b?c?ladder?x?d#1 ", ln)
+        self.assertEqual(tracker.validate(tracker.scan_marker(ln)[1])["ask"], codex_blocker.ASK)
+        self.assertEqual(len(self.alerts("0")), 1)
+
+    def test_a_crlf_tracker_is_raised_classified_chosen_and_cleared_with_its_line_ends(self):
+        def raw():
+            return self.path.read_bytes().decode("utf-8")
+
+        self.path.write_bytes(TRACKER.replace("\n", "\r\n").encode("utf-8"))
+        self.add(F, F, F)
+        self.sync()
+        self.assertEqual(len(self.alerts("0")), 1)
+        self.assertNotRegex(raw(), r"(?<!\r)\n")
+        self.assertEqual(len(codex_blocker._classify(raw().split("\n"))[0]), 1)
+        self.assertEqual(codex_blocker.choice("t")[0], "none")
+        self.sync(NOW + timedelta(minutes=1))
+        self.assertEqual(len(self.alerts()), 1)
+        self.assertEqual(codex_blocker.choose("t", "wait", now=NOW)[0], 0)
+        self.assertEqual(codex_blocker.choice("t")[0], "chosen")
+        self.assertNotRegex(raw(), r"(?<!\r)\n")
+        self.add(OK, OK)
+        self.sync(NOW + timedelta(minutes=2))
+        self.assertEqual(len(self.alerts("clear")), 1)
+        self.assertEqual(codex_blocker._classify(raw().split("\n")), ([], []))
+        self.assertIn(" cleared=", raw())
+        self.assertNotRegex(raw(), r"(?<!\r)\n")
+
+
 class Ladder(Base):
     def test_the_ladder_escalates_the_raised_line_at_rung_five_without_a_boss_turn(self):
         (self.sb.cfg / "pm" / "t.goal.md").write_text("# Objective - t\n_Status: OPEN_\n", encoding="utf-8")

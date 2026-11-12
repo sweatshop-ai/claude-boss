@@ -57,6 +57,7 @@ and skipped, never guessed at.
 """
 from __future__ import annotations
 
+import errno
 import fcntl
 import os
 import re
@@ -356,6 +357,11 @@ def update(path: Path, fn: Callable[[str], Optional[str]], deadline: float) -> s
     read and the rename, and the pass is redone on the new text, 3 tries in all
     (the ladder's process_tracker makes the same check with the same limit).
 
+    A symlink in place of the tracker is never followed: the file is opened once with O_NOFOLLOW and read,
+    and its identity checked, through that descriptor, so a link swapped in after a caller's lstat is
+    "failed: the tracker is a symbolic link", not a write through it. A symlink put there between the
+    read and the rename shows as a changed inode, and the pass is redone.
+
     Returns "done", "done (no change)" or "failed: <reason>" and never raises
     for those; an exception from `fn` is not swallowed (the lock is let go, the
     file is as it was).
@@ -372,8 +378,14 @@ def update(path: Path, fn: Callable[[str], Optional[str]], deadline: float) -> s
                         return "failed: lock held past the deadline"
                     time.sleep(0.01)
             for _ in range(3):
-                before = path.stat()
-                with open(path, newline="", encoding="utf-8") as fh:
+                try:
+                    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+                except OSError as err:
+                    if err.errno == errno.ELOOP:
+                        return "failed: the tracker is a symbolic link"
+                    raise
+                with os.fdopen(fd, newline="", encoding="utf-8") as fh:
+                    before = os.fstat(fh.fileno())
                     text = fh.read()
                 try:
                     new = fn(text)
@@ -386,7 +398,7 @@ def update(path: Path, fn: Callable[[str], Optional[str]], deadline: float) -> s
                     with os.fdopen(fd, "w", newline="", encoding="utf-8") as fh:
                         fh.write(new)
                     os.chmod(tmp, before.st_mode & 0o7777)
-                    now = path.stat()
+                    now = os.lstat(path)
                     if ((now.st_ino, now.st_mtime_ns, now.st_size)
                             != (before.st_ino, before.st_mtime_ns, before.st_size)):
                         continue
