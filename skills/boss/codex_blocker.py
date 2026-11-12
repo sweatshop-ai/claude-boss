@@ -97,6 +97,16 @@ def usable_tracker(track: str) -> Path | None:
     return path
 
 
+def _require_offset(now: datetime, message: str) -> None:
+    """ValueError unless `now` has a UTC offset; a tzinfo whose utcoffset() is None or raises is not one."""
+    try:
+        offset = now.utcoffset()
+    except (TypeError, ValueError) as e:
+        raise ValueError("%s (%s)" % (message, e)) from e
+    if offset is None:
+        raise ValueError(message)
+
+
 def _is_cd(line: str) -> bool:
     """Does the line carry a marker whose own `id=` field is a `cd` id? Only the text from the `[ladder` token
     on is looked at, with the quoted values (ask=, cost=) taken out: `xid=cd...`, an id with a thirteenth digit
@@ -224,8 +234,7 @@ def choose(track: str, value: str, now: datetime | None = None, test_cmd: str | 
         raise ValueError("choice must be one of %s, not %r" % (", ".join(CHOICES), value))
     if now is None:
         now = datetime.now().astimezone()
-    if now.tzinfo is None:
-        raise ValueError("now has no UTC offset")
+    _require_offset(now, "now has no UTC offset")
     if value == "tests-alone":
         if not test_cmd:
             return 2, "tests-alone needs --test-cmd: the consent is for one command"
@@ -271,8 +280,7 @@ def _post(alert: str, rung: str, text: str) -> None:
 def sync(track: str, now: datetime | None = None, health_path=None) -> None:
     if now is None:
         now = datetime.now().astimezone()
-    if now.tzinfo is None:
-        raise ValueError("now has no UTC offset: the ladder would report the marker malformed")
+    _require_offset(now, "now has no UTC offset: the ladder would report the marker malformed")
     path = usable_tracker(track)
     if path is None:
         return

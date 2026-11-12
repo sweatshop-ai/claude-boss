@@ -16,7 +16,7 @@ import re
 import subprocess
 import sys
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, tzinfo
 from pathlib import Path
 from unittest import mock
 
@@ -146,6 +146,26 @@ class Raise(Base):
             codex_blocker.sync("t", now=datetime(2026, 11, 12, 10, 30, 15))
         self.assertEqual((self.text(), self.alerts()), (before, []))
 
+    def test_a_tzinfo_without_an_offset_is_a_value_error_and_nothing_is_written(self):
+        class NoOffset(tzinfo):
+            def utcoffset(self, dt):
+                return None
+
+            def dst(self, dt):
+                return None
+
+        class Broken(NoOffset):
+            def utcoffset(self, dt):
+                raise TypeError("utcoffset() must return a timedelta")
+
+        for tz in (NoOffset(), Broken()):
+            with self.subTest(tz=type(tz).__name__):
+                self.add(F, F, F)
+                before = self.text()
+                with self.assertRaises(ValueError):
+                    codex_blocker.sync("t", now=datetime(2026, 11, 12, 10, 30, 15, tzinfo=tz))
+                self.assertEqual((self.text(), self.alerts()), (before, []))
+
     def test_two_outages_in_one_minute_get_two_ids_and_both_lines_stay(self):
         self.add(F, F, F)
         self.sync()
@@ -164,6 +184,7 @@ class Raise(Base):
         self.sync()
         ids = [CD.search(ln).group() for ln in self.cd_lines()]
         self.assertEqual(ids, ["id=cd261112103015", "id=cd261112103016"])
+        self.assertEqual(len(self.alerts("0")), 2)
 
     def test_prose_outside_the_blockers_section_does_not_hold_back_a_raise(self):
         # prose under ## Notes names the id the raise would take: the id is still never shared, so the next second
@@ -695,6 +716,15 @@ class Choice(Base):
         self.raised()
         with self.assertRaises(ValueError):
             codex_blocker.choose("t", "wait", now=datetime(2026, 11, 12, 10, 0))
+
+    def test_a_tzinfo_without_an_offset_is_a_value_error(self):
+        class NoOffset(tzinfo):
+            def utcoffset(self, dt):
+                return None
+
+        self.raised()
+        with self.assertRaises(ValueError):
+            codex_blocker.choose("t", "wait", now=datetime(2026, 11, 12, 10, 0, tzinfo=NoOffset()))
 
     def test_the_ladder_and_classify_never_read_the_line(self):
         id_ = self.raised()

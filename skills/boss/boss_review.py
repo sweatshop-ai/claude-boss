@@ -1121,7 +1121,10 @@ def _codex_rounds(pr_dir: Path, entry: ProvEntry) -> list[_Round] | None:
     """The posted `kind: codex` rounds of one PR, or None when a round file cannot be read as a record. A
     round that is claimed and not yet recorded is an empty file: the prune takes no PR lock, so it can see
     one, and what that round will say is not known, so the PR keeps its entries. A record whose own `repo`,
-    `pr` and `round` are not its file's is no record of that round: the same."""
+    `pr` and `round` are not its file's is no record of that round: the same. The newest round left empty
+    (a claim not yet recorded, or a failed write: `_keep_and_post` says "round N is left empty") keeps the PR's
+    entry; once any later round exists, that empty file is a dead claim, since a round is claimed under the PR's
+    lock, and it is skipped. The next review of the PR, the recheck of ticket 10 included, therefore clears it."""
     try:
         names = [(int(m.group(1)), f) for f in pr_dir.iterdir() if (m := re.fullmatch(r"round(\d+)\.json", f.name))]
     except FileNotFoundError:
@@ -1129,12 +1132,16 @@ def _codex_rounds(pr_dir: Path, entry: ProvEntry) -> list[_Round] | None:
     except OSError:
         return None
     found = []
+    last = max((n for n, _ in names), default=0)
     for number, file in sorted(names):
         try:
-            data = json.loads(file.read_text(encoding="utf-8"))
+            text = file.read_text(encoding="utf-8")
+            if not text and number < last:      # a dead claim: rounds are claimed under the PR's lock
+                continue
+            data = json.loads(text)
             status, kind, head, verdict = (data[k] for k in ("status", "kind", "head_sha", "verdict"))
             own = (data["repo"], data["pr"], data["round"])
-        except (OSError, ValueError, KeyError, TypeError):
+        except (OSError, ValueError, KeyError, TypeError, RecursionError):      # a RecursionError: JSON nested too deep
             return None
         if own != (entry.repo, entry.pr, number) or type(data["pr"]) is not int or type(data["round"]) is not int:
             return None
