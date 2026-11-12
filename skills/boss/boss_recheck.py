@@ -29,10 +29,11 @@ leaves the entry and the pass goes on to the next one; `prune_provisional` runs 
 so a Codex GO takes its entry off.
 
 `--list` is the release stop: it prints `PROVISIONAL <repo>#<N> round <NN> state=<S> head=<sha>` for each entry that
-counts and exits 1 when there is one, else 0. An entry counts unless its PR reads as `CLOSED` without a merge (that
+counts, and `BLOCKER <repo>#<N> round <NN>` for each open `Codex NO-GO on merged` blocker (a merged PR Codex rejected
+has no entry any more, but main still holds it until the fix has merged), and exits 1 when there is one, else 0. An entry counts unless its PR reads as `CLOSED` without a merge (that
 entry stays in the tracker until the owner deletes its `[prov]` line by hand, ticket 27); a state that cannot be
 read (`state=unreadable`) counts, since the PR is not known to be closed. It prunes first, as the pass does, reads
-each entry once with `gh pr view`, and starts no review, no worktree and no `codex`. `--repo` limits it to one
+each entry with `gh pr view` (the prune reads it too: twice), and starts no review, no worktree and no `codex`. `--repo` limits it to one
 repo; `--checkout` is not needed.
 
 Exit codes: 0 the pass ran (`--list`: nothing counts); 1 `--list` only, an entry counts; 2 usage, or a track whose tracker is not a regular file of yours (stderr says "no
@@ -63,6 +64,9 @@ WORKTREE_PREFIX = "boss-recheck-"
 DEFAULT_AUTHOR = "recheck"
 LOCK_WAIT = 20.0
 EXIT_OK, EXIT_COUNTS, EXIT_USAGE, EXIT_INFRA = 0, 1, 2, 7
+
+
+OPEN_NO_GO = re.compile(r"- Codex NO-GO on merged (?P<repo>[^\s#]+)#(?P<pr>\d+) \(round (?P<round>\d+)\) .*\[ladder id=fx")
 
 
 class Unusable(Exception):
@@ -318,14 +322,19 @@ def list_entries(track: str, repo: str | None = None, *, io_timeout: int = polic
     for each in sorted({e.repo for e in br.provisional_entries(_read(path)) if key is None or e.repo == key}):
         _prune(track, each, io_timeout)
     lines = []
-    for entry in br.provisional_entries(_read(path)):
-        if key is not None and entry.repo != key:
+    text = _read(path)
+    for entry in br.provisional_entries(text):
+        if key is not None and entry.repo.lower() != key:
             continue
         live = br._live_state(entry, io_timeout)
         if live is not None and live[0] == "CLOSED":
             continue
         lines.append("PROVISIONAL %s#%d round %02d state=%s head=%s"
                      % (entry.repo, entry.pr, entry.round, live[0] if live else "unreadable", live[1] if live else entry.head))
+    for line in tracker.blocker_lines(text):        # a Codex NO-GO on a merged PR removed its entry: its blocker holds
+        m = OPEN_NO_GO.match(line)                  # the stop until the fix has merged on a Codex GO and it is cleared
+        if m and "cleared=" not in line and (key is None or m["repo"].lower() == key):
+            lines.append("BLOCKER %s#%s round %s" % (m["repo"], m["pr"], m["round"]))
     return lines
 
 
@@ -355,6 +364,11 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError as exc:
         _say(str(exc))
         return EXIT_USAGE
+    except Exception as exc:        # exit 1 means "an entry counts"; a crash must not look like it
+        if not args.list:
+            raise
+        _say("--list failed: %s: %s" % (type(exc).__name__, exc))
+        return EXIT_INFRA
     for line in lines:
         print(line)
     return EXIT_COUNTS if args.list and lines else EXIT_OK

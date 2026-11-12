@@ -210,7 +210,7 @@ no second blocker and no second alert, even after the blocker was cleared. No Co
 **Release stop**: `boss_recheck.py --track T --list [--repo OWNER/REPO]` (ticket 10b) prunes, then prints
 `PROVISIONAL <repo>#<N> round <NN> state=<S> head=<sha>` for each entry that counts and exits 1 when there is one, else 0
 (2 an unusable tracker or bad argument, 7 an unreadable tracker). An entry counts unless its PR reads as `CLOSED` without a
-merge; a state `gh` cannot read (`state=unreadable`) counts. It starts no review, no worktree and no `codex`, and needs no
+merge; a state `gh` cannot read (`state=unreadable`) counts. An open `Codex NO-GO on merged` blocker (its entry is gone) counts too, printed as `BLOCKER <repo>#<N> round <NN>`. It starts no review, no worktree and no `codex`, and needs no
 `--checkout`. SKILL.md has the boss run the recheck whenever a Codex review answers and at wrap-up, dispatch on a `DISPATCH`
 line, and stop Phase E and any release request (a version bump, a tag, a publish, a reinstall) while `--list` exits 1.
 

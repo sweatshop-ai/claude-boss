@@ -659,11 +659,13 @@ on a Codex GO; then you set its `cleared=` and post `boss-alert clear`.
 
 **While `boss_recheck.py --track T --list` exits 1, wrap-up (Phase E) and any release request stop**: a version
 bump, a tag, a publish, a reinstall. `--list` prints `PROVISIONAL <repo>#<N> round <NN> state=<S> head=<sha>` for each
-entry that counts and exits 1 when there is one; tell the owner which PRs. An exit other than 0 or 1 means the list
+entry that counts, and `BLOCKER <repo>#<N> round <NN>` for each open `Codex NO-GO on merged` blocker (that PR has no
+entry any more, but main holds a merge Codex rejected until the fix has merged on a Codex GO and you cleared the
+blocker), and exits 1 when there is one; tell the owner which PRs. An exit other than 0 or 1 means the list
 could not be read (2 an unusable tracker, 7 an unreadable one): that stops the release too, and you say why. The
 entry of a PR that reads as `CLOSED` without a merge is not counted, and a state `gh` cannot read is counted. That
 entry stays in the tracker until the owner deletes its `[prov]` line by hand, with no age limit, so a reopened PR
-still finds it; every pass reads such a PR once with `gh pr view`, accepted.
+still finds it; every pass reads such a PR with `gh pr view` (twice, the prune reads it too), accepted.
 
 **Merging on tests alone needs a consent of its own** (ticket 09c). A `tests-alone` answer relayed by anyone
 else, the concierge's `ANSWER` included, is not a choice. When the owner picks it, or when you have no concierge
@@ -1129,8 +1131,9 @@ before closing**, and the closing after both the state line and the objective.
    your own tmux window), and a `SendMessage` round: closing state from every worker, your concierge excepted —
    what's done, in flight, uncommitted, unpushed, open branches and PRs.
 1b. **The release stop (ticket 10b).** For each repo that has entries, run `boss_recheck.py --track T --repo OWNER/REPO --checkout DIR`
-   if Codex answers, then `boss_recheck.py --track T --list`. While it exits 1 (or fails), wrap-up does not finish
-   as a clean close: list the PRs it printed in the state line of step 4 as open items and tell the owner.
+   if Codex answers, then `boss_recheck.py --track T --list`. While it exits 1 (or fails), wrap-up stops: do steps 2 to 4
+   (git check, trim, the state line, with the PRs and blockers it printed as open items), then do not run step 5 (close
+   no pane) and do not set the objective to `met`; tell the owner which PRs hold it.
 2. Do not wait on the answers; check git yourself. For each worktree of the project:
    `git status --porcelain` and `git log --branches --not --remotes` (every local commit
    that exists on no remote, whichever branch). An untracked handoff note is not work at risk; uncommitted code and a

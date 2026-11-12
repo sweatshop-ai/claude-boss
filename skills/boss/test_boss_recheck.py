@@ -694,8 +694,53 @@ class TheList(Base):
         self.put(self.prov(5, head), self.prov(9, "a" * 40, repo="owner/other"))
         self.set_pr(9, headRefOid="a" * 40)
         run = self.run_list()
+        self.assertEqual(run.returncode, 1, run.stderr)
         self.assertEqual(sorted(ln.split()[1] for ln in run.stdout.splitlines()), ["owner/other#9", "owner/repo#5"])
-        # the stub gh serves owner/repo only; the other repo's call is allowed to fail (state unreadable) and counts
+
+    BLOCKER = ("- Codex NO-GO on merged owner/repo#5 (round 02) - T+0 2026-11-12T10:00+00:00 "
+               "[ladder id=fx0a1b2c3d t0=2026-11-12T10:00+00:00 last=0 next=2026-11-12T10:05+00:00 ask=\"x\"%s]\n")
+
+    def test_an_open_codex_no_go_blocker_on_a_merged_pr_holds_the_stop_though_its_entry_is_gone(self):
+        self.put(blockers=self.BLOCKER % "")
+        run = self.run_list()
+        self.assertEqual((run.returncode, run.stdout), (1, "BLOCKER owner/repo#5 round 02\n"), run.stderr)
+
+    def test_a_cleared_blocker_does_not_hold_the_stop(self):
+        self.put(blockers=self.BLOCKER % " cleared=2026-11-12T11:00+00:00")
+        run = self.run_list()
+        self.assertEqual((run.returncode, run.stdout), (0, ""), run.stderr)
+
+    def test_the_repo_option_limits_the_blockers_too(self):
+        self.put(blockers=self.BLOCKER % "")
+        self.assertEqual(self.run_list("--repo", "owner/other").returncode, 0)
+        self.assertEqual(self.run_list("--repo", REPO).returncode, 1)
+
+    def test_a_hand_written_mixed_case_entry_is_found_by_repo(self):
+        head = self.provisional(5)
+        self.put(self.prov(5, head, repo="Owner/Repo"))
+        run = self.run_list("--repo", REPO)
+        self.assertEqual(run.returncode, 1, run.stderr)
+
+    def test_a_state_other_than_open_merged_or_closed_counts(self):
+        head = self.provisional(5, state="DRAFT")
+        self.put(self.prov(5, head))
+        run = self.run_list()
+        self.assertEqual(run.returncode, 1, run.stderr)
+        self.assertIn("state=DRAFT", run.stdout)
+
+    def test_a_prune_that_raises_leaves_the_entry_counting(self):
+        head = self.provisional(5)
+        self.put(self.prov(5, head))
+        with mock.patch.object(rk.br, "prune_provisional", side_effect=RuntimeError("boom")), \
+                contextlib.redirect_stderr(io.StringIO()):
+            lines = rk.list_entries("t")
+        self.assertEqual(len(lines), 1)
+
+    def test_a_crash_is_exit_7_never_exit_1(self):
+        self.put()
+        with mock.patch.object(rk, "list_entries", side_effect=RuntimeError("boom")), \
+                contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(rk.main(["--track", "t", "--list"]), 7)
 
     def test_an_unusable_track_is_exit_2(self):
         run = self.run_list(track="nope")
@@ -733,8 +778,10 @@ class TheSkillText(unittest.TestCase):
 
     def test_the_stop_covers_wrap_up_and_every_release_request(self):
         self.assertRegex(self.flat, r"--list` exits 1")
-        for word in ("Phase E", "version bump", "tag", "publish", "reinstall"):
-            self.assertIn(word, self.flat)
+        self.assertRegex(self.flat, r"--list` exits 1, wrap-up \(Phase E\) and any release request stop.{0,20}"
+                                    r"a version bump, a tag, a publish, a reinstall")
+        self.assertRegex(self.flat, r"wrap-up stops: do steps 2 to 4.{0,200}do not run step 5")
+        self.assertRegex(self.flat, r"`BLOCKER <repo>#<N> round <NN>`")
 
     def test_a_closed_pr_is_not_counted_and_its_entry_stays_until_the_owner_deletes_it(self):
         self.assertRegex(self.flat, r"CLOSED.{0,200}not counted")

@@ -6,7 +6,7 @@
 
 **Blocked by:** 10a (The recheck, the post-merge blocker and its crash resume: `boss_recheck.py` and its `_live_state` handling of a closed PR)
 
-**Status:** done (Zola built it, PR <N>)
+**Status:** done (Zola built it, PR 125)
 
 Trigger and release stop (R16):
 
@@ -18,3 +18,4 @@ Built (Zola, 2026-11-12), in `skills/boss/test_boss_recheck.py` (`TheList`, `The
 - `--list`: both exit codes, a closed-PR-only list (exit 0, entry kept, no `review(...)` call, no `codex`), an unreadable state (counts, exit 1, entry kept), a merged entry, `--repo` filter, an entry Codex has since cleared (pruned first), exit 2 and 7, `--repo`/`--checkout` still required without `--list`.
 - The text tests find the trigger, the dispatch rule, the stop on Phase E and every release request, and the CLOSED-PR and `[prov]` sentences.
 - Declined as written: "one `gh pr view` per entry". `--list` prunes first (an entry Codex has already cleared must not stop a release), and the prune reads each entry's state too, so it is two reads per entry, as the pass makes; the test pins "only `pr view`, two per entry".
+- Added after review round 1 (Opus fallback): `--list` also prints `BLOCKER <repo>#<N> round <NN>` for an open `Codex NO-GO on merged` blocker, because a Codex NO-GO on a merged PR removes its entry and would otherwise open the stop while main holds a rejected merge; Phase E step 1b is a real stop (steps 2 to 4, not 5, objective not `met`); a crash in `--list` is exit 7, never 1; `--repo` compares the lowercased repo.
