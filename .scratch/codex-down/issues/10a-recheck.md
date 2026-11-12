@@ -41,3 +41,5 @@ Review round 1 (Opus fallback, Codex unavailable), triage:
 - Declined, evidence: the main worktree's `FETCH_HEAD` is overwritten by the fetch (class c, a millisecond window; the box asks for the FETCH_HEAD check). An archived blocker loses its id, so a resume after an archive could write a second one, and a hand note quoting an id counts as handled (class c, each needs a failed removal plus an archive, or a hand-typed id).
 - Not 10a's, ticket 06b's rule 1: `_prunable` applies rule 1 before it looks at the state, so case B plus a Codex GO on B and a merge back on A removes the entry before the recheck sees the merged head (class a, pre-existing, `boss_review.py:1182`). To be filed as its own ticket.
 
+
+Review: round 1 Opus fallback GO (PR comment 6834952538, head 2382c6c); round 2 Opus narrow re-run GO (6834986738, head 6219791). Codex was out (exit 7, until Nov 13 01:03) and owes a follow-up review of the merged PR. Round files: `10a-reviews/` beside the worktrees.
