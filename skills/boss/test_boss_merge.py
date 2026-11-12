@@ -944,9 +944,9 @@ class TestOnlySince(Base):
         self.assertEqual(self.merges(), [])
         self.assertEqual((self.last()["decision"], self.last()["reason"]), ("allowed", "codex-go-test-only"))
 
-    def test_no_file_changed_since_is_allowed(self):
+    def test_no_file_changed_since_is_allowed_only_when_identical(self):
         self.old_go()
-        self.assertEqual(self.since({"raw": compare_answer()}), 0, self.err)
+        self.assertEqual(self.since({"raw": compare_answer(status="identical")}), 0, self.err)
 
     def test_a_rename_inside_the_test_paths_is_allowed(self):
         self.old_go()
@@ -1021,11 +1021,12 @@ class TestOnlySince(Base):
         self.old_go()
         self.assertEqual(self.since({"raw": compare_answer("tests/a.py", status="identical")}), 0, self.err)
 
-    def test_commits_ahead_with_no_file_listed_refuses_and_none_ahead_does_not(self):
+    def test_ahead_with_no_file_listed_refuses_whatever_ahead_by_says(self):
         self.old_go()
-        self.refused("compare-no-files", {"raw": compare_answer(ahead_by=2, total_commits=2)})
-        self.assertEqual(self.since({"raw": compare_answer("tests/a.py", ahead_by=2)}, dry_run=True), 0, self.err)
-        self.assertEqual(self.since({"raw": compare_answer(status="identical", ahead_by=0)}, dry_run=True), 0, self.err)
+        for extra in ({}, {"ahead_by": 0}, {"ahead_by": 2}, {"ahead_by": "2"}, {"ahead_by": True}):
+            with self.subTest(extra):
+                self.refused("compare-no-files", {"raw": compare_answer(**extra)})
+        self.assertEqual(self.since({"raw": compare_answer("tests/a.py")}, dry_run=True), 0, self.err)
 
     def test_a_page_of_300_files_is_not_known_to_be_all_of_them(self):
         self.old_go()
