@@ -1083,7 +1083,7 @@ def _list_write(path: Path, fn, io_timeout: float) -> str:
 def _listed(path: Path, entry: ProvEntry) -> bool:
     """True when the file now holds `entry`'s line."""
     try:
-        with open(path, newline="") as fh:
+        with open(path, newline="", encoding="utf-8") as fh:
             return entry in provisional_entries(fh.read())
     except (OSError, UnicodeDecodeError):
         return False
@@ -1215,7 +1215,7 @@ def prune_provisional(track: str, repo: str, io_timeout: float = policy.REVIEW_I
     if path is None:
         return []
     try:
-        with open(path, newline="") as fh:
+        with open(path, newline="", encoding="utf-8") as fh:
             read = [e for e in provisional_entries(fh.read()) if e.repo == key]
     except (OSError, UnicodeDecodeError) as exc:
         _say("the list of %s cannot be read: %s" % (path, exc))
