@@ -624,7 +624,9 @@ keeps the full answer in the private round record, and posts "Codex review N (ru
 <name>)" itself, with the head, the verdict and the findings (redacted and cut to a
 cap). Its exit code is the verdict: 0 GO posted, 3 NO-GO posted, 4 Codex gave no
 verdict, 6 the head or base moved (nothing posted), 2 usage or wrong checkout, 7
-infrastructure. A plan is reviewed by hand: `codex exec -s read-only ... < /dev/null`,
+infrastructure. Codex counts as down after 3 failed attempts in a row (`absent`, `timeout`, `error`;
+all repos together) and as back after 2 answered ones in a row (`codex_health.py` reads the attempts log).
+A plan is reviewed by hand: `codex exec -s read-only ... < /dev/null`,
 briefed to read and not execute, output checked in the first minute. On a usage limit or an outage, the same turn runs the labelled
 fallback review (Opus, read-only), with the reset time Codex gave in the review file's header; the
 review is never held for that time, and no wakeup or loop is scheduled for it. `boss_review.py` does not run that
