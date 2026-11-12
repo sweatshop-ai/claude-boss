@@ -13,4 +13,4 @@ What to build, in one line: 04's `boss_merge.py` decides and merges; 11 makes th
 
 **Blocked by:** 11a, 11b (this file is an index; the work is in the two)
 
-**Status:** ready-for-agent (11a, 11b)
+**Status:** done (11a is merged: PR 121, e4fb576; 11b is built in PR TBD).

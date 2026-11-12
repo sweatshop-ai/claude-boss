@@ -878,6 +878,261 @@ class Command(Base):
         self.assertEqual(self.merges(), [])
 
 
+# --------------------------------------------------------------- the test-only exception (11b) ----
+SINCE = "c" * 40            # the head of the last GO
+PRODUCTION = "skills/boss/boss_merge.py"
+DEPLOYING = {"version": 1, "non_deploying": ["staging"], "test_paths": ["tests/*"]}      # `main` deploys
+
+
+def compare_answer(*files, status="ahead", **extra):
+    """What `gh api .../compare/<SINCE>...<head>` prints. A file is a name, or a (name, previous name) pair."""
+    listed = [{"filename": f[0], "previous_filename": f[1], "status": "renamed"} if isinstance(f, tuple)
+              else {"filename": f, "status": "modified"} for f in files]
+    return json.dumps(dict({"status": status, "files": listed}, **extra))
+
+
+class TestOnlySince(Base):
+    """`--test-only-since SHA`: the fixes after the last GO that touch only tests need no new review."""
+
+    def setUp(self):
+        super().setUp()
+        self.deploy = {"raw": deploy_answer(GOOD_DEPLOY)}       # non_deploying main, test_paths tests/*
+
+    def since(self, *compare, deploy=None, sha=SINCE, **kw):
+        """The gate with the flag on; `compare` are the entries of the compare calls (the api calls after the first)."""
+        self.gh.configure(api=[deploy or self.deploy, *compare])
+        return self.run_gate(since=sha, **kw)
+
+    def old_go(self, n=1, **over):
+        self.put(n, **dict({"head_sha": SINCE}, **over))
+
+    def compares(self):
+        return [c for c in self.gh_calls("api") if "/compare/" in c.argv[1]]
+
+    def refused(self, reason, *compare, code=3, **kw):
+        self.assertEqual(self.since(*compare, **kw), code, self.err)
+        self.assertEqual(self.merges(), [])
+        self.assertEqual((self.last()["decision"], self.last()["exit"], self.last()["reason"]),
+                         ("refused", code, reason))
+        self.assertEqual(self.last()["since"], kw.get("sha", SINCE))
+
+    # ---------------------------------------------------------------- what it allows ----
+    def test_a_codex_go_on_since_and_only_test_files_since_merges_and_the_line_says_so(self):
+        self.old_go()
+        self.assertEqual(self.since({"raw": compare_answer("tests/a.py", "tests/b/c.py")}), 0, self.err)
+        self.assertEqual([c.argv for c in self.merges()],
+                         [["pr", "merge", str(PR), "--repo", REPO, "--merge", "--match-head-commit", HEAD]])
+        intent, done = self.log()
+        self.assertEqual((done["decision"], done["exit"], done["reason"], done["round"], done["kind"], done["head"]),
+                         ("merged", 0, "codex-go-test-only", 1, "codex", HEAD))
+        self.assertEqual((intent["decision"], intent["since"], done["since"]), ("merging", SINCE, SINCE))
+
+    def test_the_compare_is_asked_for_since_and_the_live_head_and_nothing_else(self):
+        self.old_go()
+        self.since({"raw": compare_answer("tests/a.py")})
+        self.assertEqual([c.argv for c in self.compares()],
+                         [["api", "repos/%s/compare/%s...%s" % (REPO, SINCE, HEAD)]])
+
+    def test_a_line_without_the_flag_has_no_since_key(self):
+        self.put(1)
+        self.run_gate()
+        self.assertNotIn("since", self.last())
+
+    def test_dry_run_decides_and_logs_the_exception_but_never_merges(self):
+        self.old_go()
+        self.assertEqual(self.since({"raw": compare_answer("tests/a.py")}, dry_run=True), 0, self.err)
+        self.assertEqual(self.merges(), [])
+        self.assertEqual((self.last()["decision"], self.last()["reason"]), ("allowed", "codex-go-test-only"))
+
+    def test_no_file_changed_since_is_allowed(self):
+        self.old_go()
+        self.assertEqual(self.since({"raw": compare_answer()}), 0, self.err)
+
+    def test_a_rename_inside_the_test_paths_is_allowed(self):
+        self.old_go()
+        self.assertEqual(self.since({"raw": compare_answer(("tests/new.py", "tests/old.py"))}), 0, self.err)
+
+    def test_a_provisional_go_on_a_listed_base_qualifies(self):
+        self.old_go(kind="provisional")
+        self.assertEqual(self.since({"raw": compare_answer("tests/a.py")}), 0, self.err)
+        self.assertEqual(self.last()["reason"], "provisional-go-non-deploying-test-only")
+
+    def test_a_codex_go_on_since_qualifies_on_a_deploying_base(self):
+        self.old_go()
+        self.assertEqual(self.since({"raw": compare_answer("tests/a.py")},
+                                    deploy={"raw": deploy_answer(DEPLOYING)}), 0, self.err)
+
+    def test_patterns_are_fnmatchcase_on_the_whole_path(self):
+        deploy = {"raw": deploy_answer({"version": 1, "non_deploying": ["main"],
+                                        "test_paths": ["skills/*/test_*.py", "fixtures/*"]})}
+        self.old_go()
+        for names, code in ((("skills/boss/test_x.py", "fixtures/a/b.json"), 0), (("skills/boss/Test_x.py",), 3),
+                            (("other/skills/boss/test_x.py",), 3)):
+            with self.subTest(names):
+                self.assertEqual(self.since({"raw": compare_answer(*names)}, deploy=deploy, dry_run=True), code)
+
+    # ------------------------------------------------------------ what it refuses (3) ----
+    def test_any_other_file_refuses(self):
+        self.old_go()
+        self.refused("not-test-only", {"raw": compare_answer("tests/a.py", PRODUCTION)})
+        self.assertIn(PRODUCTION, self.err)
+
+    def test_a_rename_out_of_the_test_paths_refuses_by_either_name(self):
+        self.old_go()
+        self.refused("not-test-only", {"raw": compare_answer(("src/new.py", "tests/old.py"))})
+        self.refused("not-test-only", {"raw": compare_answer(("tests/new.py", "src/old.py"))})
+
+    def test_a_deploy_json_without_test_paths_or_not_valid_refuses_without_a_compare(self):
+        self.old_go()
+        for answer in (deploy_answer({"version": 1, "non_deploying": ["main"]}), "not json"):
+            with self.subTest(answer):
+                self.refused("no-test-paths", {"raw": compare_answer("tests/a.py")}, deploy={"raw": answer})
+                self.assertEqual(self.compares(), [])
+
+    def test_an_empty_test_paths_refuses_any_file(self):
+        self.old_go()
+        empty = {"raw": deploy_answer({"version": 1, "non_deploying": ["main"], "test_paths": []})}
+        self.refused("not-test-only", {"raw": compare_answer("tests/a.py")}, deploy=empty)
+
+    def test_a_compare_that_fails_or_is_not_a_comparison_refuses_and_is_not_exit_7(self):
+        self.old_go()
+        answers = [{"rc": 1, "err": "HTTP 404"}, {"raw": "not json"}, {"raw": "[]"},
+                   {"raw": json.dumps({"status": "ahead"})},
+                   {"raw": json.dumps({"status": "ahead", "files": "tests/a.py"})},
+                   {"raw": json.dumps({"status": "ahead", "files": [{"status": "added"}]})},
+                   {"raw": json.dumps({"status": "ahead", "files": [{"filename": 5}]})},
+                   {"raw": json.dumps({"status": "ahead", "files": [{"filename": "tests/a.py",
+                                                                        "previous_filename": 7}]})}]
+        for answer in answers:
+            with self.subTest(answer):
+                self.refused("compare-failed", answer)
+
+    def test_a_slow_compare_refuses_and_does_not_hang(self):
+        self.old_go()
+        self.refused("compare-failed", {"sleep": 5, "raw": compare_answer("tests/a.py")}, io_timeout=0.5)
+
+    def test_behind_diverged_and_anything_else_refuse(self):
+        self.old_go()
+        for status in ("behind", "diverged", "ahead ", "AHEAD", None, 3):
+            with self.subTest(status):
+                self.refused("compare-not-ahead", {"raw": compare_answer("tests/a.py", status=status)})
+
+    def test_identical_is_accepted_as_a_status(self):
+        self.old_go()
+        self.assertEqual(self.since({"raw": compare_answer("tests/a.py", status="identical")}), 0, self.err)
+
+    def test_a_page_of_300_files_is_not_known_to_be_all_of_them(self):
+        self.old_go()
+        tests = ["tests/f%d.py" % i for i in range(300)]
+        self.refused("compare-truncated", {"raw": compare_answer(*tests)})
+        self.assertEqual(self.since({"raw": compare_answer(*tests[:299])}), 0, self.err)
+
+    # -------------------------------------------------- what counts as the last GO ----
+    def test_a_since_that_is_the_head_of_no_round_refuses_without_a_compare(self):
+        self.old_go(head_sha=OTHER)
+        self.refused("no-round", {"raw": compare_answer("tests/a.py")})
+        self.assertEqual(self.compares(), [])
+
+    def test_a_since_whose_round_is_a_no_go_refuses(self):
+        self.old_go(verdict="NO-GO")
+        self.refused("no-go", {"raw": compare_answer("tests/a.py")})
+        self.old_go(verdict="NO-GO", status="post-failed")
+        self.refused("unposted-no-go", {"raw": compare_answer("tests/a.py")})
+
+    def test_a_since_whose_go_never_posted_or_decided_nothing_refuses(self):
+        for status, verdict in (("post-failed", "GO"), ("head-moved", None), ("no-verdict", None),
+                                ("list-failed", None)):
+            with self.subTest(status):
+                self.old_go(status=status, verdict=verdict)
+                self.refused("no-round", {"raw": compare_answer("tests/a.py")})
+
+    def test_a_no_go_after_since_on_any_head_refuses(self):
+        self.old_go()
+        for status in ("posted", "post-failed"):
+            with self.subTest(status):
+                self.put(2, head_sha=OTHER, verdict="NO-GO", status=status)
+                self.refused("no-go-after-since", {"raw": compare_answer("tests/a.py")})
+                self.assertEqual(self.compares(), [])
+
+    def test_a_no_go_on_the_live_head_stays_a_no_go(self):
+        self.old_go()
+        self.put(2, verdict="NO-GO")
+        self.refused("no-go", {"raw": compare_answer("tests/a.py")})
+
+    def test_a_no_go_below_since_does_not_matter(self):
+        self.put(1, head_sha=OTHER, verdict="NO-GO")
+        self.old_go(2)
+        self.assertEqual(self.since({"raw": compare_answer("tests/a.py")}), 0, self.err)
+
+    def test_a_malformed_since_raises_before_gh_is_asked_anything(self):
+        self.old_go()
+        for sha in ("c" * 39, "c" * 41, "C" * 40, "", "main", "c" * 39 + "g", " " + "c" * 39, "c" * 40 + "\n",
+                    "../" + "c" * 37, "c" * 40 + "?x=1", 5):
+            with self.subTest(sha):
+                with self.assertRaises(ValueError):
+                    self.run_gate(since=sha)
+        self.assertEqual(self.sb.calls_of("gh"), [])
+        self.assertEqual(self.log(), [])
+
+    # ------------------------------------- provisional and waived rounds (04's rules) ----
+    def test_a_provisional_or_waived_go_on_a_deploying_base_does_not_qualify(self):
+        for kind in ("provisional", "waived"):
+            with self.subTest(kind):
+                self.old_go(kind=kind)
+                self.refused("deploying-base", {"raw": compare_answer("tests/a.py")}, code=4,
+                             deploy={"raw": deploy_answer(DEPLOYING)})
+                self.assertEqual(self.compares(), [])
+
+    def test_a_later_round_on_the_new_head_supersedes_a_provisional_go_on_since(self):
+        self.old_go(kind="provisional")
+        self.put(2, status="head-moved", verdict=None)
+        self.refused("superseded-go", {"raw": compare_answer("tests/a.py")})
+        self.assertEqual(self.compares(), [])
+
+    def test_a_codex_go_on_since_survives_that_later_round(self):
+        self.old_go()
+        self.put(2, status="head-moved", verdict=None)
+        self.assertEqual(self.since({"raw": compare_answer("tests/a.py")}), 0, self.err)
+
+    def test_a_codex_go_above_a_provisional_go_on_since_decides_for_the_codex_one(self):
+        self.old_go(kind="provisional")
+        self.put(2, head_sha=SINCE)
+        self.assertEqual(self.since({"raw": compare_answer("tests/a.py")}), 0, self.err)
+        self.assertEqual((self.last()["round"], self.last()["kind"]), (2, "codex"))
+
+    # ---------------------------------------------------- the live head decides first ----
+    def test_a_live_head_that_is_already_allowed_merges_without_the_exception(self):
+        self.put(1)
+        self.assertEqual(self.since({"raw": compare_answer(PRODUCTION)}), 0, self.err)
+        self.assertEqual(self.compares(), [])
+        self.assertEqual(self.last()["reason"], "codex-go")
+
+    def test_a_refusal_on_the_live_head_other_than_no_round_is_not_overridden(self):
+        self.old_go(kind="provisional")
+        self.put(2, kind="provisional")
+        self.put(3, status="head-moved", verdict=None, head_sha=OTHER)
+        self.refused("superseded-go", {"raw": compare_answer("tests/a.py")})
+        self.assertEqual(self.compares(), [])
+
+    def test_a_bad_record_refuses_before_the_compare(self):
+        self.old_go()
+        self.raw(2, "not json")
+        self.refused("bad-record", {"raw": compare_answer("tests/a.py")})
+        self.assertEqual(self.compares(), [])
+
+    # ---------------------------------------------------------------- the command line ----
+    def test_the_flag_reaches_the_gate_from_the_command_line_and_a_bad_one_is_exit_2(self):
+        self.old_go()
+        self.gh.configure(api=[self.deploy, {"raw": compare_answer("tests/a.py")}])
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(bm.main(["--repo", REPO, "--pr", str(PR), "--dry-run", "--test-only-since", SINCE]), 0)
+            self.assertEqual(bm.main(["--repo", REPO, "--pr", str(PR), "--test-only-since", "main"]), 2)
+        self.assertIn("40 lowercase hex", err.getvalue())
+        self.assertEqual(len(self.compares()), 1)
+        self.assertEqual(self.merges(), [])
+
+
 # ----------------------------------------------------- end to end, from the real writers ----
 class FromTheWriters:
     """Records made by 08's and 09c's own code, then the gate on them. The `gh` stub is the merge gate's."""
