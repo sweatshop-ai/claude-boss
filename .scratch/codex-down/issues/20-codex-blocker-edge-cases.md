@@ -4,7 +4,7 @@
 
 **Status:** ready-for-agent
 
-Found by the fallback review of PR 96, round 1 (Opus on b8a97ce, Codex unavailable; no class a finding). Each is a small box. Review files: `/home/tiroir/Projects/boss-plugin-wt/05c-reviews/`.
+Found by the fallback review of PR 96, round 1 (Opus on b8a97ce, Codex unavailable; no class a finding). Each is a small box. Review files: the `05c-reviews/` directory beside the 05c worktree.
 
 - [ ] Class b, decided in 09a (2026-11-12: a hand clear holds until a later failure is logged; the build is 09a's): a blocker the owner cleared by hand is raised again at the next `--track` review while the streak has not grown (health stays down with `failures >= CODEX_DOWN_AFTER`, for instance after a `noverdict`, or a run that logged nothing). 05c's own tests require a re-raise after a hand clear. Decide whether a hand clear holds until the streak grows (a marker of the failure count at the clear), then change code and tests together.
 - [ ] Class c: a hand-written marker with an empty `cleared=` is open forever in `codex_blocker` (`validate` returns `cleared=""`, `mark_cleared` leaves it): every "up" sync rewrites identical text and no clear or new raise follows. Make `_classify` and `mark_cleared` agree (see 16, finding 5), test it.

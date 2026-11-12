@@ -4,7 +4,7 @@
 
 **Scope:** rewritten 2026-10-04 after Codex review 1 of the plan (finding 5) and the owner-accepted premortem (R7, R14, R25); split on 2026-10-04 (the provisional list and the recheck went to 06 and 10, then the exception, the hard rule and the skill text to 11) and amended after Codex review 3 (findings 10 to 12, 14, 23). Why a command and not a hook: `boss-guard.py` warns and never denies (its docstring says so, by design), hooks fire only for registered boss sessions, and `boss-run`'s hard rules see command text, not review state. One command that checks and merges in one step is testable end to end. It reads the round records of 02 and the `kind` values `codex`, `provisional` (08) and `waived` (09c). The filename is historical; the ticket is the gate.
 
-**Blocked by:** 08 (The fallback review, labelled and provisional), 09c (The waiver; 09 is now an index of 09a, 09b, 09c, and the `waived` record is 09c's)
+**Blocked by:** 08 (The fallback review, labelled and provisional), 09c (The waiver; 09 is now an index of 09a, 09b, 09c, and the `waived` record is 09c's), 22 (A provisional GO on an older head must not merge or be rechecked as the current one; it adds the highest-numbered-round box below, 2026-11-12)
 
 **Status:** ready-for-agent
 
