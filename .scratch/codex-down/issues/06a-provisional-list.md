@@ -6,7 +6,7 @@
 
 **Blocked by:** 05a (The tracker writer), 05c (A dead reviewer becomes an open blocker: the box that gives `review()` its `track` parameter and defines a usable track), 08 (The fallback review, labelled and provisional), 14 (claude_launch hardening: the fallback does not go live before it)
 
-**Status:** ready-for-agent (spec refreshed 2026-11-12 against main c0a25e7; Codex spec round 1 in `plan-review-codex-06-1.md`)
+**Status:** in-progress (claimed by Ronja, 2026-11-12, branch ronja/ticket-06a; spec refreshed 2026-11-12 against main c0a25e7; Codex spec rounds in `plan-review-codex-06-1.md`)
 
 **Code as merged (main c0a25e7, 2026-11-12; all four blockers are on `main`):**
 

@@ -81,6 +81,7 @@ class TrackArgument(Base):
             with mock.patch.object(br, "review", return_value=br._nothing(0)) as rv:
                 br.main(args + extra)
             self.assertEqual(rv.call_args.kwargs["track"], want)
+            self.assertEqual(rv.call_args.kwargs["allow_fallback"], want is not None)      # ticket 06a
 
     def test_check_fallback_takes_no_track(self):
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):

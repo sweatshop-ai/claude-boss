@@ -53,6 +53,7 @@ from typing import NamedTuple
 import boss_store
 import codex_blocker
 import policy
+import tracker
 from reviewer_chain import (CODEX_FAILURES, GO_NOGO, STDERR_TAIL, TERM_GRACE, Fallback, _parse, _snapshot,
                             _stop, claude_launch, fallback_flags)
 
@@ -958,6 +959,143 @@ def _log_refused(job: _Job, attempts: list[dict]) -> None:
         _say("the attempts of the refused answer are not logged: %s" % exc)
 
 
+# ------------------------------------------------------- the list of provisional GOs ----
+# One line per PR under `## Provisional GO` in the track's tracker: the contract between ticket 06a (which
+# writes it) and 06b (which prunes it). A provisional GO is only a loan, so the line is written before the
+# comment is posted and no provisional GO can exist that the list does not know about.
+PROV_SECTION = "Provisional GO"
+PROV_LINE = re.compile(r"- \[prov (?P<repo>[^\]#\s]+)#(?P<pr>[0-9]+)\] head=(?P<head>[0-9a-f]+) "
+                       r"round=(?P<round>[0-9]+) base=(?P<base>\S+) at=(?P<at>\S+)")
+_H2 = re.compile(r"##\s")
+_PROV_H2 = re.compile(r"##\s+%s\s*" % re.escape(PROV_SECTION))
+
+
+class ProvEntry(NamedTuple):
+    repo: str       # repo_key
+    pr: int
+    head: str
+    round: int
+    base: str
+    at: str
+
+    @property
+    def tag(self) -> str:
+        return "[prov %s#%d]" % (self.repo, self.pr)
+
+    @property
+    def line(self) -> str:
+        return "- %s head=%s round=%02d base=%s at=%s" % (self.tag, self.head, self.round, self.base, self.at)
+
+
+def _entry_of(line: str) -> ProvEntry | None:
+    """The entry a line of the exact form holds (a trailing CR ignored), else None."""
+    m = PROV_LINE.fullmatch(line.rstrip("\r"))
+    return ProvEntry(m["repo"], int(m["pr"]), m["head"], int(m["round"]), m["base"], m["at"]) if m else None
+
+
+def _section(lines: list[str]) -> tuple[int, int] | None:
+    """(first body line, end) of the `## Provisional GO` section, end being the next `##` heading or the end."""
+    head = next((i for i, ln in enumerate(lines) if _PROV_H2.fullmatch(ln.rstrip("\r"))), None)
+    if head is None:
+        return None
+    end = next((i for i in range(head + 1, len(lines)) if _H2.match(lines[i])), len(lines))
+    return head + 1, end
+
+
+def provisional_entries(text: str) -> list[ProvEntry]:
+    """Every entry in the `## Provisional GO` section, in file order; a line of another form, or outside the
+    section, is no entry."""
+    lines = text.split("\n")
+    found = _section(lines)
+    if found is None:
+        return []
+    return [e for e in map(_entry_of, lines[found[0]:found[1]]) if e]
+
+
+def _eol(text: str) -> str:
+    return "\r\n" if "\r\n" in text else "\n"
+
+
+def _with_entry(text: str, entry: ProvEntry) -> str:
+    """`text` with `entry` as the one line of its PR in the section: every line of that tag in the section
+    becomes this one (at the place of the first), or, if there was none, it goes at the end of the section;
+    a missing section is created at the end of the file. The file's own line ending is used."""
+    eol = _eol(text)
+    lines = text.split("\n")
+    found = _section(lines)
+    if found is None:
+        return text.rstrip("\r\n") + eol + eol + "## " + PROV_SECTION + eol + entry.line + eol
+    lo, hi = found
+    new = entry.line + ("\r" if eol == "\r\n" else "")
+    same = [i for i in range(lo, hi) if (e := _entry_of(lines[i])) and e.tag == entry.tag]
+    if same:
+        lines[same[0]] = new
+        for i in reversed(same[1:]):
+            del lines[i]
+    else:
+        at = hi
+        while at > lo and not lines[at - 1].strip():
+            at -= 1
+        lines.insert(at, new)
+    return "\n".join(lines)
+
+
+def _without_entry(text: str, entry: ProvEntry) -> str | None:
+    """`text` without the line `entry` wrote (its tag, head and round all match, so a newer line of the same PR
+    stays); None when there is no such line."""
+    lines = text.split("\n")
+    found = _section(lines)
+    if found is None:
+        return None
+    gone = [i for i in range(*found) if (e := _entry_of(lines[i])) and (e.tag, e.head, e.round) == (entry.tag, entry.head, entry.round)]
+    for i in reversed(gone):
+        del lines[i]
+    return "\n".join(lines) if gone else None
+
+
+def _list_write(path: Path, fn, io_timeout: float) -> str:
+    return tracker.update(path, fn, time.monotonic() + io_timeout)
+
+
+def _listed(path: Path, entry: ProvEntry) -> bool:
+    """True when the file now holds `entry`'s line."""
+    try:
+        with open(path, newline="") as fh:
+            return entry in provisional_entries(fh.read())
+    except (OSError, UnicodeDecodeError):
+        return False
+
+
+def _list_and_post(job: _Job, seen: _Pr, number: int, ts: str, verdict: str, findings: str,
+                   label: FallbackLabel | None, tracker_path: Path | None) -> tuple[str, int]:
+    """(status, exit code) of a provisional GO. The PR's entry is written first and must read back; then the
+    live head is read once more (the write may have waited as long as io_timeout), and a PR that moved gets no
+    comment and its entry removed; then the comment is posted. An entry for a comment that was never posted is
+    harmless: the recheck (ticket 10) clears it."""
+    if tracker_path is None:
+        _say("a provisional GO reached the review with no tracker to list it in: nothing posted")
+        return "list-failed", EXIT_INFRA
+    entry = ProvEntry(job.key, job.pr, seen.head, number, seen.base, ts)
+    got = _list_write(tracker_path, lambda text: _with_entry(text, entry), job.io_timeout)
+    if got != "done" or not _listed(tracker_path, entry):
+        _say("the provisional GO is not in the list of %s (%s): nothing posted"
+             % (tracker_path, got if got != "done" else "the line is not in the file"))
+        return "list-failed", EXIT_INFRA
+    try:
+        live, checkout = _read_pr(job), _checkout_of(job)
+    except (_Infra, OSError) as exc:
+        _say("nothing posted: the PR cannot be read after the list was written: %s" % exc)
+        return "post-failed", EXIT_INFRA
+    if (live.head, live.base, checkout and checkout.head) != (seen.head, seen.base, seen.head):
+        got = _list_write(tracker_path, lambda text: _without_entry(text, entry), job.io_timeout)
+        if not got.startswith("done"):
+            _say("the entry of the head that moved stays in the list (%s)" % got)
+        return "head-moved", EXIT_MOVED
+    if _post(job, comment_body(number, job.author, seen.head, verdict, findings, fallback=label)):
+        return "posted", EXIT_FOR_VERDICT[verdict]
+    return "post-failed", EXIT_INFRA
+
+
 def _sync_health(track: str | None) -> None:
     """Raise or clear the "Codex down" blocker in `track`'s tracker. A failure is said and changes nothing."""
     if track is None:
@@ -969,9 +1107,10 @@ def _sync_health(track: str | None) -> None:
 
 
 def _keep_and_post(job: _Job, seen: _Pr, chain: dict, findings: str,
-                   label: FallbackLabel | None = None) -> ReviewResult:
+                   label: FallbackLabel | None = None, *, tracker_path: Path | None = None) -> ReviewResult:
     """Under the PR's lock: look at the PR and the checkout again, claim the next round, keep what
-    the review said, post, and make the claimed file the full record."""
+    the review said, post, and make the claimed file the full record. A provisional GO is listed in
+    `tracker_path` first (`_list_and_post`); the PR's lock is taken before the tracker's, never after."""
     reviews = _reviews_dir()
     pr_dir = reviews / job.key / ("pr%d" % job.pr)
     try:
@@ -1003,6 +1142,8 @@ def _keep_and_post(job: _Job, seen: _Pr, chain: dict, findings: str,
                 status, exit_code = "head-moved", EXIT_MOVED
             elif verdict is None:
                 status, exit_code = "no-verdict", EXIT_NO_VERDICT
+            elif kind == "provisional" and verdict == "GO":
+                status, exit_code = _list_and_post(job, seen, number, ts, verdict, findings, label, tracker_path)
             elif _post(job, comment_body(number, job.author, seen.head, verdict, findings, fallback=label)):
                 status, exit_code = "posted", EXIT_FOR_VERDICT[verdict]
             else:
@@ -1025,9 +1166,11 @@ def review(repo: str, pr: int, checkout: str, author: str, *,
            fallback_timeout: int = policy.REVIEW_FALLBACK_TIMEOUT,
            allow_fallback: bool = False,
            track: str | None = None) -> ReviewResult:
-    """Review one PR head. With `allow_fallback`, a Codex that does not answer (absent, timeout, error)
-    runs the confined fallback and its verdict is recorded as provisional; the command line leaves it
-    off until the track's list of provisional verdicts exists (ticket 06).
+    """Review one PR head. With `allow_fallback` and a usable `track` (a regular file of the user's,
+    pm/<track>.md), a Codex that does not answer (absent, timeout, error) runs the confined fallback and its
+    verdict is recorded as provisional; a provisional GO is listed in that tracker before it is posted
+    (ticket 06a). Without a usable track the review is Codex only, whatever `allow_fallback` says, and the
+    command line asks for the fallback exactly when it was given `--track`.
 
     With `track`, the Codex health is synced into that track's tracker once the chain has returned
     (codex_blocker.sync: the "Codex down" blocker is raised or cleared); a failed sync is said on stderr
@@ -1040,6 +1183,13 @@ def review(repo: str, pr: int, checkout: str, author: str, *,
         raise ValueError("checkout is not a directory: %r" % (checkout,))
     if track is not None and not (isinstance(track, str) and boss_store.valid_track(track)):
         raise ValueError("track must match %s and hold no '..': %r" % (boss_store.TRACK_RE.pattern, track))
+    tracker_path = None
+    if allow_fallback:
+        tracker_path = codex_blocker.usable_tracker(track) if track is not None else None
+        if tracker_path is None:
+            _say("the fallback review needs a usable track (--track T naming a regular file pm/T.md of yours): "
+                 "this review asks Codex only")
+            allow_fallback = False
     job = _Job(repo, key, pr, checkout, author, io_timeout)
     seen = _prepare(job)
     if isinstance(seen, ReviewResult):
@@ -1076,7 +1226,7 @@ def review(repo: str, pr: int, checkout: str, author: str, *,
             _log_refused(job, [{k: a[k] for k in ("reviewer", "reason", "exit_code")} for a in chain["attempts"]])
             _sync_health(track)
             return _failed("the findings cannot be made safe to publish: %s" % exc)
-    result = _keep_and_post(job, seen, chain, findings, label)
+    result = _keep_and_post(job, seen, chain, findings, label, tracker_path=tracker_path)
     _sync_health(track)      # outside the PR's lock, which _keep_and_post has let go
     return result
 
@@ -1102,7 +1252,7 @@ def fallback_spec(timeout: int = policy.REVIEW_FALLBACK_TIMEOUT) -> Fallback:
     the file tools to the working directory. `--safe-mode` also turns off what is not a settings file:
     the checkout's custom agents, output styles, workflows, skills and CLAUDE.md. `env_unset` keeps the
     variables that name plugins, settings or launchers out of the child. It runs when Codex is absent, hangs or fails, and not after
-    a Codex answer that has no verdict. review(allow_fallback=True) runs it (the command line does not yet)."""
+    a Codex answer that has no verdict. review(allow_fallback=True, track=T) runs it, and so does the command line given --track T."""
     return Fallback("opus", policy.REVIEW_FALLBACK_MODEL, timeout=timeout,
                     when=("absent", "timeout", "error"), env_unset=policy.REVIEW_FALLBACK_ENV_UNSET,
                     extra_args=("--tools", ",".join(policy.REVIEW_FALLBACK_TOOLS),
@@ -1230,7 +1380,8 @@ def _pr_number(text: str) -> int:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         prog="boss_review.py",
-        description="Review one PR head with Codex and post the verdict. Exit 0: GO posted. 2: usage, "
+        description="Review one PR head with Codex and post the verdict; with --track T, when Codex does not "
+                    "answer, run the labelled read-only Opus fallback instead (a provisional verdict). Exit 0: GO posted. 2: usage, "
                     "wrong PR or wrong checkout. 3: NO-GO posted. 4: Codex gave no verdict. 6: the head "
                     "or base moved. 7: infrastructure failure. With --check-fallback: 0 the fallback "
                     "call is confined, 1 it is not, 2 usage.")
@@ -1241,7 +1392,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--author", metavar="NAME", help="who runs the review, as the comment says")
     ap.add_argument("--track", metavar="T",
                     help="the track from the dispatch header: after the review, raise or clear the "
-                         "\"Codex down\" blocker in pm/T.md (without it nothing is written to a tracker)")
+                         "\"Codex down\" blocker in pm/T.md, and, when Codex does not answer, run the labelled "
+                         "Opus fallback review and list a provisional GO in pm/T.md before it is posted "
+                         "(without a usable pm/T.md the review asks Codex only and nothing is written to a tracker)")
     ap.add_argument("--check-fallback", action="store_true",
                     help="instead of a review: run the read-only fallback once, in --checkout, and check "
                          "its init event (one real, one-word call; takes no --repo, --pr or --author)")
@@ -1261,13 +1414,17 @@ def main(argv: list[str] | None = None) -> int:
     if missing:
         ap.error("the following arguments are required: %s" % ", ".join(missing))
     try:
-        result = review(args.repo, args.pr, args.checkout, args.author, track=args.track)
+        result = review(args.repo, args.pr, args.checkout, args.author, track=args.track,
+                        allow_fallback=args.track is not None)
     except ValueError as exc:
         print("boss_review: %s" % exc, file=sys.stderr)
         return EXIT_USAGE
     if result.round is not None:
-        print("Codex review %d: %s (%s) %s" % (result.round, result.verdict or "no verdict",
-                                               result.status or "round left empty", result.record))
+        print("%s review %d: %s (%s) %s" % ("Fallback" if result.kind == "provisional" else "Codex", result.round,
+                                            result.verdict or "no verdict",
+                                            result.status or "round left empty", result.record))
+    if args.track is None and result.exit_code == EXIT_NO_VERDICT:
+        _say("no fallback review was run: it needs a usable --track T")
     return result.exit_code
 
 
