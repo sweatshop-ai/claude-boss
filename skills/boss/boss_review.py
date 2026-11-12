@@ -390,7 +390,7 @@ def _ask_codex(checkout: str, head: str, base: str, codex_timeout: int) -> dict:
             prompt.write_text(build_brief(head, base), encoding="utf-8")
             run = _spawn([sys.executable, str(CHAIN), "--prompt-file", str(prompt), "--words", "GO,NO-GO",
                           "--match", "token", "--strict", "--no-fallback", "--effort", REVIEW_EFFORT,
-                          "--codex-timeout", str(codex_timeout), "--cwd", checkout],
+                          "--codex-timeout", str(codex_timeout), "--cwd", os.path.abspath(checkout)],   # absolute: a name that starts with - is no option
                          codex_timeout + policy.REVIEW_CHAIN_SLACK)
     except OSError as exc:
         raise _Infra("the brief for the chain could not be written: %s" % exc)

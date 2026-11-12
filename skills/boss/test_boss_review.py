@@ -3,8 +3,8 @@
 
 Run: python3 skills/boss/test_boss_review.py
 
-`review()` reads a PR with `gh`, asks Codex (through reviewer_chain, in a child process started
-in the checkout), keeps the round on disk and posts a minimal comment. Every test goes through
+`review()` reads a PR with `gh`, asks Codex (through reviewer_chain, in a child process told `--cwd`
+the checkout), keeps the round on disk and posts a minimal comment. Every test goes through
 hermetic.Sandbox: `codex`, `claude` and `gh` are stubs that log their argv, stdin and working
 directory, `git` is the only other real tool and runs on a throwaway repo, HOME and
 CLAUDE_CONFIG_DIR are temporary, and TypeSafe has no key to find. Two seams are tested:
