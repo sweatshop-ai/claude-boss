@@ -8,7 +8,7 @@
 
 **Claimed by:** Zola 2026-11-12 (rebuild after the scrub, PR 87; Amara 2026-10-04); Kaveh 2026-11-12 (Codex rounds 2 and 3)
 
-**Status:** done (merged PR 87, 0730625; the real-claude smoke of `--check-fallback` on the final head is run in ticket 08's PR; follow-ups 14 and 15)
+**Status:** done (merged PR 87, 0730625; follow-ups 14 and 15; Smoke run 2026-11-12 (Otilia), real `claude`, main ef95b4c, `python3 skills/boss/boss_review.py --check-fallback --checkout <worktree>`, exit 0: `fallback check passed: tools Glob, Grep, Read; permission mode dontAsk; model claude-opus-5-5; no MCP servers, no slash commands, no hooks, no plugins but claude's own`.)
 
 Fallback spec ("read-only" named and tested, R13):
 
