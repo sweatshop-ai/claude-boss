@@ -282,13 +282,16 @@ class Clear(Base):
         self.sync(NOW + timedelta(minutes=3))
         self.assertEqual((len(self.alerts("clear")), len(self.alerts("0"))), (1, 1))
 
-    def test_an_answer_between_failures_never_clears(self):
-        self.add(F, F, F, OK, F)
+    def test_one_answer_amid_failures_never_clears(self):
+        self.add(F, F, F)
         self.sync()
-        self.assertEqual(len(self.alerts("0")), 1)
-        self.add(OK)
-        self.sync()
+        self.add(OK, F, OK)        # two answers, but not in a row
+        self.sync(NOW + timedelta(minutes=1))
         self.assertEqual(self.alerts("clear"), [])
+        self.assertNotIn(" cleared=", self.text())
+        self.add(OK)
+        self.sync(NOW + timedelta(minutes=2))
+        self.assertEqual(len(self.alerts("clear")), 1)
 
     def test_codex_up_with_only_a_broken_cd_line_posts_no_clear(self):
         for broken in ('[ladder id=cd261112090000 t0=2026-11-12T09:00+01:00 last=0',

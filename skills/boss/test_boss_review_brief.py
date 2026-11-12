@@ -740,7 +740,8 @@ class ReviewBrief(base.Base):
         self.assertEqual(self.review(), base.INFRA)
         self.assertEqual(len(self.sb.calls_of("codex")), 1)
         self.assertEqual(self.comments(), [])
-        self.assertFalse(self.reviews.exists())
+        self.assertEqual(list(self.reviews.glob("*/*/pr*/round*")), [])      # no round was claimed
+        self.assertEqual([line["round"] for line in self.attempts_log()], [None])    # the attempt is owed (05c)
 
     def test_what_codex_found_is_published_redacted_and_the_private_record_keeps_all_of_it(self):
         (self.sb.cfg / "boss-hard-rules.tsv").write_text("a client\tacme-[a-z]+-internal\n")
