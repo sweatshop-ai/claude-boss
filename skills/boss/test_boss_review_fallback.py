@@ -439,6 +439,86 @@ if [ -n "$CLAUDE_CODE_PLUGIN_DIRS" ]; then echo %s; else echo %s; fi
         self.assertTrue(any("could not be started" in p for p in problems), problems)
         self.assertFalse((self.sb.root / "planted-ran").exists())
 
+    def safe_bin_with_link(self, target, *, relative=False, via=None, name="safe-bin"):
+        """A directory outside the checkout, on its own, holding a `claude` that is a symlink to `target`."""
+        safe = self.sb.root / name
+        safe.mkdir(exist_ok=True)
+        link = safe / "claude"
+        if via is not None:      # a chain: claude -> via -> target
+            via.symlink_to(target)
+            target = via
+        link.symlink_to(os.path.relpath(target, safe) if relative else target)
+        return safe
+
+    def run_with_path(self, safe, cwd):
+        path = os.pathsep.join([str(safe), os.environ["PATH"]])      # the stubs come after: a fall-through shows
+        with mock.patch.dict(os.environ, {"PATH": path}):
+            return rc.run_chain("p", words=rc.GO_NOGO, fallback=br.fallback_spec(), cwd=cwd)
+
+    def assert_refused(self, result):
+        self.assertEqual([a.reason for a in result.attempts if a.reviewer == "opus"], ["absent"])
+        self.assertFalse((self.sb.root / "planted-ran").exists(), "the checkout's claude ran")
+        # the claude stub is on the PATH behind the link and must not have been reached: self.expect says 0
+
+    def test_a_symlink_in_a_safe_directory_that_leads_into_the_checkout_is_refused(self):
+        self.planted_claude(self.checkout)
+        self.sb.stub("claude", answer=GO)
+        safe = self.safe_bin_with_link(self.checkout / "claude")
+        self.assert_refused(self.run_with_path(safe, str(self.checkout)))
+
+    def test_a_relative_symlink_and_a_chain_of_links_into_the_checkout_are_refused(self):
+        self.planted_claude(self.checkout)
+        self.sb.stub("claude", answer=GO)
+        safe = self.safe_bin_with_link(self.checkout / "claude", relative=True, via=self.sb.root / "hop")
+        self.assert_refused(self.run_with_path(safe, str(self.checkout)))
+
+    def test_a_checkout_that_is_itself_a_symlink_is_compared_by_realpath(self):
+        self.planted_claude(self.checkout)
+        self.sb.stub("claude", answer=GO)
+        alias = self.sb.root / "checkout-alias"
+        alias.symlink_to(self.checkout)
+        safe = self.safe_bin_with_link(self.checkout / "claude")
+        self.assert_refused(self.run_with_path(safe, str(alias)))       # the link leads to the real path
+        safe_alias = self.safe_bin_with_link(alias / "claude", name="safe-bin-2")       # and the other way round
+        self.assert_refused(self.run_with_path(safe_alias, str(self.checkout)))
+
+    def test_a_symlink_to_a_claude_outside_the_checkout_is_still_started(self):
+        self.sb.stub("claude", answer=GO)
+        self.expect["claude"] = 1
+        safe = self.safe_bin_with_link(self.sb.stubs / "claude")
+        result = self.run_with_path(safe, str(self.checkout))
+        self.assertEqual(result.reviewer, "opus")
+        self.assertFalse((self.sb.root / "planted-ran").exists())
+
+    def chdir(self, where):
+        before = os.getcwd()
+        os.chdir(where)
+        self.addCleanup(os.chdir, before)
+
+    def test_without_a_cwd_the_current_directory_is_the_one_kept_out(self):
+        self.planted_claude(self.checkout)
+        self.sb.stub("claude", answer=GO)
+        self.expect["claude"] = 1
+        self.chdir(self.checkout)
+        path = os.pathsep.join([str(self.checkout), os.environ["PATH"]])
+        with mock.patch.dict(os.environ, {"PATH": path}):
+            result = rc.run_chain("p", words=rc.GO_NOGO, fallback=br.fallback_spec())      # cwd=None
+        self.assertEqual(result.reviewer, "opus")
+        self.assertFalse((self.sb.root / "planted-ran").exists(), "the current directory's claude ran")
+
+    def test_without_a_cwd_a_claude_only_in_the_current_directory_is_absent(self):
+        self.planted_claude(self.checkout)
+        self.chdir(self.checkout)
+        with mock.patch.dict(os.environ, {"PATH": os.pathsep.join([str(self.checkout), os.environ["PATH"]])}):
+            result = rc.run_chain("p", words=rc.GO_NOGO, fallback=br.fallback_spec())
+        self.assertEqual([a.reason for a in result.attempts if a.reviewer == "opus"], ["absent"])
+        self.assertFalse((self.sb.root / "planted-ran").exists())
+
+    def test_a_fallback_that_unsets_path_is_refused_at_construction(self):
+        for names in (("PATH",), ("BASH_ENV", "PATH")):
+            with self.subTest(names=names), self.assertRaisesRegex(ValueError, "PATH"):
+                rc.Fallback("opus", "claude-opus-5-5", env_unset=names)
+
     def test_the_call_runs_in_the_checkout_it_was_given(self):
         self.check()
         (call,) = self.claude_calls()
