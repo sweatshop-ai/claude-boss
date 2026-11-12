@@ -159,6 +159,16 @@ only plugins that are part of claude, that permission mode and that model id.
 It is a smoke test on the real CLI; the suite checks the argv and the decision
 on a stub.
 
+**Merge gate**: `skills/boss/boss_merge.py --repo OWNER/REPO --pr N [--dry-run]`, the one merge path the skill names.
+It reads the PR once with `gh`, walks the PR's review rounds from the highest number down (`decide`) and merges with
+`gh pr merge --merge --match-head-commit <head it read>` only if the first round that decides allows it: a `codex` GO on
+any base, a `provisional` or `waived` GO only on a base listed in the repo's `.boss/deploy.json` (`non_deploying`, exact
+names, read from the base branch through `gh api`, never from the PR's head). It fails closed: a round it cannot read, a
+provisional or waived GO that any later round supersedes, a missing or invalid deploy file (every branch then deploys) all
+refuse. Exit 0 merged, 2 usage or not open, 3 no usable GO, 4 a weak GO on a deploying branch, 5 the merge or the check
+after it failed, 7 a `gh` read failed; every decision is one line in `pm/reviews/merges.jsonl`. It does not stop a merge
+typed by hand in a shell; ticket 11 closes `boss-run`'s door and only branch protection closes the rest.
+
 **Review round**: one run of `skills/boss/boss_review.py` on one PR head. The
 review runs first (Codex only, in a child process told `--cwd` the checkout, as
 named and made absolute, never folded);
