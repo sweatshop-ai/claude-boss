@@ -405,7 +405,10 @@ def claude_launch(fb: Fallback, prompt: str, cwd: str | None = None) -> tuple[li
     when it is refused (a link into that directory), the result is None, "absent", and no later PATH
     entry is tried. With no `cwd` and a current directory that no longer exists, the confined spec is
     None too: there is no base to keep out. The environment is the spec's (`child_env`), or ours as it
-    is for a spec that unsets nothing, with that PATH in place of ours."""
+    is for a spec that unsets nothing. The confined spec's child gets the filtered PATH. A preset's child
+    gets ours minus its empty and relative entries (in the child they would mean the checkout, not the
+    caller's directory) and keeps the absolute ones under the checkout, so an MCP server or hook found
+    through an activated `.venv/bin` still starts: only the lookup of `claude` is filtered."""
     argv = claude_argv(fb, prompt)
     env = child_env(fb)
     # With no cwd there is no checkout to keep out. The confined spec still excludes the current
@@ -416,18 +419,23 @@ def claude_launch(fb: Fallback, prompt: str, cwd: str | None = None) -> tuple[li
     except OSError:         # no cwd and the current directory was deleted: nothing to keep out, nothing safe to start
         return None
     inside = _within(base) if base else (lambda path: False)
-    if env is None:
+    preset = env is None
+    if preset:
         env = dict(os.environ)
-    keep = []
+    keep, child_keep = [], []
     for entry in os.environ.get("PATH", "").split(os.pathsep):
         if not entry or not os.path.isabs(entry):
             continue
-        real = os.path.realpath(entry)
-        if inside(real):
+        child_keep.append(entry)
+        if inside(os.path.realpath(entry)):
             continue
         keep.append(entry)
-    env["PATH"] = os.pathsep.join(keep)
-    exe = shutil.which("claude", path=env["PATH"])
+    # Only the lookup of `claude` is filtered for a preset: the MCP servers and hooks it loads keep the
+    # owner's absolute entries, an activated checkout `.venv/bin` among them (ticket 21). The confined
+    # spec gets the filtered PATH, since nothing the checkout supplies may run in it.
+    env["PATH"] = os.pathsep.join(child_keep if preset else keep)
+    lookup = os.pathsep.join(keep)
+    exe = shutil.which("claude", path=lookup)
     if exe is None:
         return None
     real_exe = os.path.realpath(exe)    # a symlink in a safe directory may lead into the checkout

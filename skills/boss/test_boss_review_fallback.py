@@ -735,14 +735,52 @@ class PresetLaunch(Base):
         os.chdir(where)
         self.addCleanup(os.chdir, before)
 
-    def test_an_entry_inside_the_checkout_is_not_on_the_childs_path(self):
+    def child_path(self, spec, path, cwd=None):
         self.sb.stub_script("claude", 'echo "$PATH" > "$R/claude.path"; echo "VERDICT: GO"')
+        self.expect["claude"] += 1
+        with mock.patch.dict(os.environ, {"PATH": path}):
+            result = rc.run_chain("p", words=rc.GO_NOGO, fallback=spec, cwd=cwd or str(self.checkout))
+        self.assertEqual(result.reviewer, spec.name)
+        return (self.sb.root / "claude.path").read_text().strip().split(os.pathsep)
+
+    def test_a_preset_child_keeps_an_absolute_entry_inside_the_checkout(self):
+        # an MCP server or hook the preset loads may live in an activated checkout .venv/bin (ticket 21)
+        venv = self.checkout / ".venv" / "bin"
+        venv.mkdir(parents=True)
+        for preset in rc.PRESETS.values():
+            with self.subTest(preset=preset.name):
+                seen = self.child_path(preset, os.pathsep.join([".", "", "bin", str(venv), os.environ["PATH"]]))
+                self.assertIn(str(venv), seen)
+                self.assertNotIn("", seen)
+                self.assertNotIn(".", seen)
+                self.assertNotIn("bin", seen)
+
+    def test_the_lookup_of_claude_still_skips_that_entry_for_a_preset(self):
+        venv = self.checkout / ".venv" / "bin"
+        self.planted(venv)
+        self.sb.stub("claude", answer=GO)
         self.expect["claude"] = 1
-        inside = self.checkout / "tools"
-        inside.mkdir()
-        self.run_preset(rc.OPUS, os.pathsep.join([str(inside), os.environ["PATH"]]))
-        seen = (self.sb.root / "claude.path").read_text().strip().split(os.pathsep)
-        self.assertNotIn(str(inside), seen)
+        self.run_preset(rc.OPUS, os.pathsep.join([str(venv), os.environ["PATH"]]))
+        self.assertEqual(len(self.claude_calls()), 1)
+        self.assertFalse((self.sb.root / "planted-ran").exists(), "the checkout's claude ran")
+
+    def test_the_confined_fallback_child_still_loses_the_entry_inside_the_checkout(self):
+        venv = self.checkout / ".venv" / "bin"
+        venv.mkdir(parents=True)
+        confined = rc.Fallback("confined", "m", env_unset=("BASH_ENV",))
+        seen = self.child_path(confined, os.pathsep.join([str(venv), os.environ["PATH"]]))
+        self.assertNotIn(str(venv), seen)
+
+    def test_without_a_cwd_a_preset_starts_a_claude_that_links_into_the_current_directory(self):
+        # the tradeoff of ticket 15, now pinned: with no checkout to name, nothing under the current directory is kept out
+        self.planted(self.sb.root / "here")
+        safe = self.sb.root / "here" / "safe"
+        safe.mkdir()
+        (safe / "claude").symlink_to(self.sb.root / "here" / "claude")
+        self.chdir_to(self.sb.root / "here")
+        with mock.patch.dict(os.environ, {"PATH": os.pathsep.join([str(safe), os.environ["PATH"]])}):
+            launch = rc.claude_launch(rc.OPUS, "p")
+        self.assertEqual(launch[0][0], str(safe / "claude"))
 
     def test_when_the_only_claude_is_the_checkouts_the_preset_is_absent(self):
         self.planted(self.checkout)
