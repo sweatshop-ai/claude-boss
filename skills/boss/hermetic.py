@@ -14,6 +14,10 @@ in `Sandbox(extra_tools=...)`; the four above are refused there.
 Every stub logs its argv, its stdin and its working directory under calls/ before
 doing anything else, so a test can see exactly how the reviewer was called and from
 where.
+
+A stub nobody looks at proves nothing, so `cleanup` fails a test that installed a stub for
+one of the four forbidden tools and never read its call log. Reading it is `calls_of(name)`;
+a test that expects the tool never to be called says so with `expect_unused(name)`.
 """
 import json
 import os
@@ -21,7 +25,9 @@ import shlex
 import shutil
 import signal
 import subprocess
+import sys
 import tempfile
+import unittest
 from collections import namedtuple
 from pathlib import Path
 
@@ -33,6 +39,38 @@ TOOLS = ("bash sh env jq date mkdir mktemp cat grep sed tr head tail rm timeout 
          "dirname readlink sleep touch wc python3 sort cut setsid").split()
 # Names that must never resolve to a real binary inside the sandbox.
 FORBIDDEN = ("codex", "claude", "gh", "tmux")
+
+# Tests that predate the rule and still leave a stub unread: `Class.test_name` under the module
+# name, one per line. The list may only shrink. See Sandbox.cleanup.
+BASELINE_FILE = HERE / "unread_stub_baseline.txt"
+
+
+def short_id(case):
+    """`module.Class.test_name` of a TestCase, however pytest or unittest imported the module."""
+    return ".".join(case.id().split(".")[-3:])
+
+
+def load_baseline(path=BASELINE_FILE):
+    if not Path(path).exists():
+        return set()
+    return {line.strip() for line in Path(path).read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.startswith("#")}
+
+
+BASELINE = load_baseline()
+_open = {}      # test id -> [sandboxes not yet cleaned up, unread stubs found so far]
+
+
+def _running_test():
+    """The id of the TestCase whose code is building this Sandbox (None outside a test)."""
+    frame = sys._getframe(1)
+    while frame is not None:
+        case = frame.f_locals.get("self")
+        if isinstance(case, unittest.TestCase):
+            return short_id(case)
+        frame = frame.f_back
+    return None
+
 
 Call = namedtuple("Call", "argv stdin cwd", defaults=(None,))
 
@@ -71,6 +109,11 @@ class Sandbox:
         self.work = self.root / "work"
         self.tmp = self.root / "tmp"
         self.side = self.root / "side"
+        self._stubbed = set()       # forbidden tools a test has written a stub for
+        self._read = set()          # of those, the ones whose call log the test looked at
+        self._cleaned = False
+        self._test = _running_test()
+        _open.setdefault(self._test, [0, set()])[0] += 1
         for d in (self.stubs, self.tools, self.calls, self.cfg, self.home,
                   self.work, self.tmp, self.side):
             d.mkdir()
@@ -185,6 +228,8 @@ class Sandbox:
 
     def _write_stub(self, name, lines):
         path = self.stubs / name
+        if name in FORBIDDEN:
+            self._stubbed.add(name)
         path.write_text("\n".join(lines) + "\n", encoding="utf-8")
         path.chmod(0o755)
         self.guard()
@@ -192,6 +237,7 @@ class Sandbox:
 
     def calls_of(self, name):
         """Every call the stub `name` received, oldest first."""
+        self._read.add(name)
         found = []
         for argv_file in sorted(self.calls.glob("*-%s.argv" % name)):
             raw = argv_file.read_bytes().decode("utf-8", "surrogateescape")
@@ -203,6 +249,19 @@ class Sandbox:
             cwd = cwd_file.read_text(encoding="utf-8").rstrip("\n") if cwd_file.exists() else None
             found.append(Call(argv, stdin, cwd))
         return found
+
+    def expect_unused(self, name):
+        """Assert the stub `name` has not been called, and count its log as read.
+
+        The way a test says that a tool must stay untouched; silence does not say it."""
+        calls = self.calls_of(name)
+        if calls:
+            raise AssertionError("%s was expected unused but was called %d time(s): %s"
+                                 % (name, len(calls), calls[0].argv))
+
+    def unread_stubs(self):
+        """The forbidden tools this sandbox holds a stub for whose call log nobody read."""
+        return sorted(self._stubbed - self._read)
 
     # --------------------------------------------------------------- running ----
     def boss_run(self, *args, stdin="", timeout=60, extra_env=None):
@@ -258,5 +317,30 @@ class Sandbox:
                     pass
 
     def cleanup(self):
+        """Remove the sandbox, then enforce R25 on the test that owned it.
+
+        A stub for one of the four forbidden tools whose call log nobody read fails the test.
+        A test listed in the baseline (it predates the rule) may leave one unread; but once
+        all its sandboxes are clean, it must come off the list, so the list only shrinks.
+        """
+        if self._cleaned:
+            return
+        self._cleaned = True
+        unread, self._stubbed = self.unread_stubs(), set()
         self.reap()
         shutil.rmtree(self.root, ignore_errors=True)
+        state = _open[self._test]
+        state[0] -= 1
+        state[1].update(unread)
+        listed = self._test in BASELINE
+        if state[0] <= 0:
+            del _open[self._test]
+        if unread and not listed:
+            raise AssertionError(
+                "stub installed but its call log never read: %s. Assert on sandbox.calls_of(name),"
+                " or say sandbox.expect_unused(name) if the tool must not be called"
+                % ", ".join(unread))
+        if listed and state[0] <= 0 and not state[1]:
+            raise AssertionError(
+                "%s reads every stub it installs: delete it from unread_stub_baseline.txt"
+                % self._test)
