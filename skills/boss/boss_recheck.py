@@ -2,7 +2,9 @@
 """Have Codex review again every PR on the list of provisional GOs (ticket 10a).
 
     recheck(track, repo, checkout, author="recheck") -> list[str]      the pass: the lines it printed
+    list_entries(track, repo=None) -> list[str]                        the entries that count (ticket 10b)
     boss_recheck.py --track T --repo OWNER/REPO --checkout DIR [--author NAME]   the command
+    boss_recheck.py --track T --list [--repo OWNER/REPO]                         the release stop
 
 A fallback review is only a loan (ticket 06): its PR stays under `## Provisional GO` in the track's tracker
 until Codex has since said GO. Once Codex answers again this walks the entries of `--repo`, one at a time, and
@@ -26,7 +28,14 @@ second one says so and does nothing. Any other outcome (no Codex answer, a fetch
 leaves the entry and the pass goes on to the next one; `prune_provisional` runs at the start and after each review,
 so a Codex GO takes its entry off.
 
-Exit codes: 0 the pass ran; 2 usage, or a track whose tracker is not a regular file of yours (stderr says "no
+`--list` is the release stop: it prints `PROVISIONAL <repo>#<N> round <NN> state=<S> head=<sha>` for each entry that
+counts and exits 1 when there is one, else 0. An entry counts unless its PR reads as `CLOSED` without a merge (that
+entry stays in the tracker until the owner deletes its `[prov]` line by hand, ticket 27); a state that cannot be
+read (`state=unreadable`) counts, since the PR is not known to be closed. It prunes first, as the pass does, reads
+each entry once with `gh pr view`, and starts no review, no worktree and no `codex`. `--repo` limits it to one
+repo; `--checkout` is not needed.
+
+Exit codes: 0 the pass ran (`--list`: nothing counts); 1 `--list` only, an entry counts; 2 usage, or a track whose tracker is not a regular file of yours (stderr says "no
 blocker can be rechecked"); 7 the tracker could not be read. Standard library only.
 """
 from __future__ import annotations
@@ -53,7 +62,7 @@ import tracker
 WORKTREE_PREFIX = "boss-recheck-"
 DEFAULT_AUTHOR = "recheck"
 LOCK_WAIT = 20.0
-EXIT_OK, EXIT_USAGE, EXIT_INFRA = 0, 2, 7
+EXIT_OK, EXIT_COUNTS, EXIT_USAGE, EXIT_INFRA = 0, 1, 2, 7
 
 
 class Unusable(Exception):
@@ -299,18 +308,45 @@ def recheck(track: str, repo: str, checkout: str, author: str = DEFAULT_AUTHOR, 
         return lines
 
 
+def list_entries(track: str, repo: str | None = None, *, io_timeout: int = policy.REVIEW_IO_TIMEOUT) -> list[str]:
+    """The lines of the entries of `track` (of `repo`, when given) that count for the release stop: every entry
+    but one whose PR reads as CLOSED without a merge. The same errors as `recheck` (`Unusable`, ValueError, OSError)."""
+    key = br.repo_key(repo) if repo is not None else None
+    path = codex_blocker.usable_tracker(track, "rechecked")
+    if path is None:
+        raise Unusable(track)
+    for each in sorted({e.repo for e in br.provisional_entries(_read(path)) if key is None or e.repo == key}):
+        _prune(track, each, io_timeout)
+    lines = []
+    for entry in br.provisional_entries(_read(path)):
+        if key is not None and entry.repo != key:
+            continue
+        live = br._live_state(entry, io_timeout)
+        if live is not None and live[0] == "CLOSED":
+            continue
+        lines.append("PROVISIONAL %s#%d round %02d state=%s head=%s"
+                     % (entry.repo, entry.pr, entry.round, live[0] if live else "unreadable", live[1] if live else entry.head))
+    return lines
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="boss_recheck.py", description=__doc__.splitlines()[0])
     ap.add_argument("--track", required=True, metavar="T")
-    ap.add_argument("--repo", required=True, metavar="OWNER/REPO")
-    ap.add_argument("--checkout", required=True, metavar="DIR", help="the repo's shared checkout; never moved")
+    ap.add_argument("--repo", metavar="OWNER/REPO", help="required without --list; with it, limits the list to this repo")
+    ap.add_argument("--checkout", metavar="DIR", help="the repo's shared checkout; never moved (not used by --list)")
     ap.add_argument("--author", default=DEFAULT_AUTHOR, metavar="NAME", help="who runs the reviews (default recheck)")
+    ap.add_argument("--list", action="store_true", help="print the entries that count; exit 1 when there is one")
     args = ap.parse_args(argv)
+    if not args.list and (args.repo is None or args.checkout is None):
+        ap.error("--repo and --checkout are required without --list")
     if not boss_store.valid_track(args.track):
         _say("track must match %s and hold no '..': %r" % (boss_store.TRACK_RE.pattern, args.track))
         return EXIT_USAGE
     try:
-        lines = recheck(args.track, args.repo, args.checkout, args.author)
+        if args.list:
+            lines = list_entries(args.track, args.repo)
+        else:
+            lines = recheck(args.track, args.repo, args.checkout, args.author)
     except Unusable:
         return EXIT_USAGE            # usable_tracker has said why
     except (OSError, UnicodeDecodeError) as exc:      # before ValueError, which UnicodeDecodeError is one of
@@ -321,7 +357,7 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_USAGE
     for line in lines:
         print(line)
-    return EXIT_OK
+    return EXIT_COUNTS if args.list and lines else EXIT_OK
 
 
 if __name__ == "__main__":

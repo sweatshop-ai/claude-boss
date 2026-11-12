@@ -205,8 +205,14 @@ each review, and reviews each entry in a detached worktree of its own (`boss-rec
 round <NN> author=<name>` and keeps the entry. A Codex NO-GO on a merged PR writes an open blocker (`fx` and 8 hex of the
 sha1 of "<repo>#<N> round <NN>", so one id per round; `boss-alert 0` once), removes that exact entry line, and prints
 `DISPATCH <repo>#<N> author=<name> round=<NN>`; a crash between the two is resumed from the round on disk, with no new review,
-no second blocker and no second alert, even after the blocker was cleared. No Codex answer leaves the entry. `--list` and
-the release stop are ticket 10b.
+no second blocker and no second alert, even after the blocker was cleared. No Codex answer leaves the entry.
+
+**Release stop**: `boss_recheck.py --track T --list [--repo OWNER/REPO]` (ticket 10b) prunes, then prints
+`PROVISIONAL <repo>#<N> round <NN> state=<S> head=<sha>` for each entry that counts and exits 1 when there is one, else 0
+(2 an unusable tracker or bad argument, 7 an unreadable tracker). An entry counts unless its PR reads as `CLOSED` without a
+merge; a state `gh` cannot read (`state=unreadable`) counts. It starts no review, no worktree and no `codex`, and needs no
+`--checkout`. SKILL.md has the boss run the recheck whenever a Codex review answers and at wrap-up, dispatch on a `DISPATCH`
+line, and stop Phase E and any release request (a version bump, a tag, a publish, a reinstall) while `--list` exits 1.
 
 **Round record**: `round<NN>.json`, what a gate reads. A round is `posted` only
 after `gh pr comment` returned success, so a comment on the PR with no `posted`
