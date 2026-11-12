@@ -2,7 +2,7 @@
 
 **Blocked by:** 09a
 
-**Status:** ready-for-agent
+**Status:** done (Rhea built it, PR 114)
 
 Found by Codex round 1 on PR 102 (real Codex, GO, no class a or b finding). Review file: `09a-reviews/round-1.md` beside the 09a worktree.
 
