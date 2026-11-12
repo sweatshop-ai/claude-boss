@@ -10,7 +10,7 @@
 
 **Order:** 22 blocks 04 and 10: it is the gate's own correctness, so it lands before either is built. It writes the two rules that 04 and 10 must implement as boxes in their ticket files (the first two boxes below); 04 and 10 build the code and the tests for cases A and B.
 
-**Status:** in progress (Piotr, 2026-11-12, PR for 22)
+**Status:** done (Piotr built it, PR 105, merge c1a2c6c)
 
 - [x] Add to ticket 04 a box, with a test for case A: in 04's gate, a provisional or waived GO decides only when it is the PR's highest-numbered round file of any status (`posted`, `post-failed`, `head-moved`, `no-verdict`, `list-failed`); any later round, whatever its head or status, means the GO no longer decides and the PR needs a new round. This covers a later `post-failed` provisional GO that replaced the entry (06a replaces the entry before posting and keeps it when posting fails). Test: provisional GO on A posted, provisional GO on B `post-failed`, force-push back to A: the gate refuses.
 - [x] Add to ticket 10 a box, with a test for case B: in 10's recheck, a merged PR is reviewed at its merged `headRefOid`, not at the entry's `head=`. A Codex GO on the merged head removes the entry by 06b's rule 4 (done in 22 below); a NO-GO writes 10's post-merge blocker and then removes the entry as 10 already says; a failed or stalled review leaves the entry and the release stop holds. The box also says: 10's recheck does not review a PR that is `CLOSED` without a merge, and 10's release stop (`--list`) does not count its entry while it is closed; a closed PR whose state cannot be read counts.
