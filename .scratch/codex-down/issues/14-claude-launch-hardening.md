@@ -9,4 +9,8 @@
 
 **Blocked by:** 03
 
-**Status:** open
+**Status:** in progress (claimed by Nour, branch nour/ticket-14)
+
+- [x] `claude_launch` takes the `realpath` of the `claude` it found and returns None (attempt "absent") when it lies inside the checkout; tested with a real symlink in a tmp PATH directory pointing into a tmp checkout, a relative symlink, a chain of links, a checkout that is itself a symlink (both ways), and a link to a `claude` outside the checkout that is still started
+- [x] With `cwd` None the exclusion base is `os.getcwd()`; tested by changing into a tmp checkout
+- [x] `Fallback(env_unset=...)` raises `ValueError` naming PATH at construction

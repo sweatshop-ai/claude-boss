@@ -94,6 +94,9 @@ class Fallback:
                                                              and "=" not in n and "," not in n for n in self.env_unset)):
             raise ValueError("env_unset must be a tuple of variable names, without = , or surrounding space: %r"
                              % (self.env_unset,))
+        if "PATH" in self.env_unset:
+            raise ValueError("env_unset cannot name PATH: claude_launch gives the child its own filtered PATH, "
+                             "so the entry would be silently ignored")
         if "--" in self.extra_args:
             raise ValueError("extra_args cannot hold a bare --: it would end option parsing before -p")
         unknown = set(self.when) - CODEX_FAILURES
@@ -386,25 +389,29 @@ def claude_launch(fb: Fallback, prompt: str, cwd: str | None = None) -> tuple[li
     """The argv and environment to start the fallback's `claude` with, or None when it is not there.
 
     A spec that unsets variables is the confined one, and for it `claude` is looked up on a PATH
-    without the entries a PR checkout could supply (empty or relative ones, and any inside `cwd`),
-    and started by its absolute path: a bare name is resolved after the process has changed into the
+    without the entries a PR checkout could supply (empty or relative ones, and any inside `cwd`, or
+    the current directory when `cwd` is None), refused when the `claude` found is a link into that
+    directory, and started by its absolute path: a bare name is resolved after the process has changed into the
     checkout, where `PATH=.:...` or a checkout-local `.venv/bin` would run the PR's own `claude`
     before any confinement flag is read. Any other spec runs as it always did."""
     argv, env = claude_argv(fb, prompt), child_env(fb)
     if env is None:
         return (argv, None) if shutil.which("claude") else None
-    base = os.path.realpath(cwd) if cwd else None
+    base = os.path.realpath(cwd or os.getcwd())
     keep = []
     for entry in os.environ.get("PATH", "").split(os.pathsep):
         if not entry or not os.path.isabs(entry):
             continue
         real = os.path.realpath(entry)
-        if base and (real == base or real.startswith(base + os.sep)):
+        if real == base or real.startswith(base + os.sep):
             continue
         keep.append(entry)
     env["PATH"] = os.pathsep.join(keep)
     exe = shutil.which("claude", path=env["PATH"])
     if exe is None:
+        return None
+    real_exe = os.path.realpath(exe)    # a symlink in a safe directory may lead into the checkout
+    if real_exe.startswith(base + os.sep):
         return None
     argv[0] = exe
     return argv, env
