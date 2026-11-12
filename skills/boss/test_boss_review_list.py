@@ -137,6 +137,34 @@ class TheEntry(ListBase):
         self.assertEqual([e.line for e in br.provisional_entries(text)], [good])
         self.assertEqual(br.provisional_entries("# t\n"), [])
 
+    def test_a_hand_edited_line_that_breaks_the_contract_is_left_alone(self):
+        sha, at = "a" * 40, "2026-11-01T10:00:00Z"
+        bad = [
+            "- [prov repo#5] head=%s round=01 base=main at=%s" % (sha, at),                  # no owner
+            "- [prov a/b/c#5] head=%s round=01 base=main at=%s" % (sha, at),                 # three parts
+            "- [prov owner/repo#5] head=a round=01 base=main at=%s" % at,                    # head too short
+            "- [prov owner/repo#5] head=%s round=01 base=main at=%s" % ("a" * 41, at),       # head too long
+            "- [prov owner/repo#5] head=%s round=1 base=main at=%s" % (sha, at),             # round of one digit
+            "- [prov owner/repo#5] head=%s round=001 base=main at=%s" % (sha, at),           # round of three
+            "- [prov owner/repo#5] head=%s round=01 base=main at=x" % sha,                   # at= no date
+            "- [prov owner/repo#5] head=%s round=01 base=main at=2026-11-01" % sha,          # at= no time
+        ]
+        for line in bad:
+            with self.subTest(line=line):
+                self.assertEqual(br.provisional_entries("## Provisional GO\n" + line + "\n"), [])
+        self.tracker.write_text(TRACKER + "\n## Provisional GO\n" + "\n".join(bad) + "\n", encoding="utf-8")
+        before = self.text()
+        self.provisional_go()
+        self.assertEqual(self.text(), before + self.line() + "\n")          # all of them stay, the entry is added
+        self.assertEqual([e.line for e in self.entries()], [self.line()])
+
+    def test_a_head_of_seven_characters_and_a_zone_offset_are_entries(self):
+        for line in ("- [prov owner/repo#5] head=abcdef0 round=01 base=main at=2026-11-01T10:00:00Z",
+                     "- [prov owner/repo#5] head=%s round=12 base=main at=2026-11-01T10:00:00+01:00" % ("a" * 40)):
+            with self.subTest(line=line):
+                self.assertEqual([e.line for e in br.provisional_entries("## Provisional GO\n" + line + "\n")],
+                                 [line])
+
     def test_a_crlf_tracker_gets_crlf_lines_a_replaced_line_and_one_line_per_tag(self):
         old = lambda head, n, repo="repo", pr=PR: (   # noqa: E731
             "- [prov owner/%s#%d] head=%s round=%02d base=main at=2026-11-01T10:00:00Z" % (repo, pr, head, n))
@@ -233,6 +261,15 @@ class WhenTheListCannotBeWritten(ListBase):
         self.assertListFailed(result)
         self.assertEqual(self.text(), TRACKER)
 
+    def test_a_pr_that_cannot_be_read_after_the_write_keeps_the_entry_and_posts_nothing(self):
+        self.gh.configure(view=[{}, {}, {}, {"rc": 1, "err": "HTTP 502"}])       # the read after the list write
+        result = self.provisional_go()
+        self.assertEqual((result.exit_code, result.status, result.verdict), (7, "post-failed", "GO"))
+        self.assertEqual(self.record(1)["status"], "post-failed")
+        self.assertEqual(self.comments(), [])
+        self.assertEqual([e.line for e in self.entries()], [self.line()])      # kept: 10 rechecks it
+        self.assertGhVerbs("view", "diff", "view", "view", "view")
+
     def test_a_failing_comment_after_a_good_entry_keeps_the_entry(self):
         self.gh.configure(comment=[{"rc": 1, "err": "boom"}])
         result = self.provisional_go()
@@ -319,7 +356,8 @@ class NoTrackNoProvisionalReview(ListBase):
                 self.assertEqual(self.sb.calls_of("claude"), [])
                 self.assertEqual(self.comments(), [])
                 self.assertEqual(self.record(1)["kind"], "codex")
-                self.assertIn("fallback review needs a usable track", err)
+                self.assertEqual(err.count("fallback review needs a usable track"), 1, err)
+                self.assertEqual(err.count("no blocker can be raised"), 1, err)      # said once, not again by the sync
                 self.assertTrue(out.startswith("Codex review 1: no verdict (no-verdict) "), out)
                 self.sb.guard()
 
