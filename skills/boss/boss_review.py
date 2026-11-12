@@ -1164,7 +1164,12 @@ def _prunable(entry: ProvEntry, io_timeout: float) -> bool:
         return True
     if live_head == entry.head:
         return False
-    return _latest_codex_says_go(rounds, live_head) is not None     # rule 2 (open) and rule 4 (merged)
+    go = _latest_codex_says_go(rounds, live_head)
+    if go is None:
+        return False
+    # rule 4 (merged): final, the merged head is Codex-cleared. Rule 2 (open): the GO must also be above the entry's
+    # round, else a force-push back to an older Codex-cleared head would drop the entry of a later provisional round
+    return state == "MERGED" or go.number > entry.round
 
 
 def prune_provisional(track: str, repo: str, io_timeout: float = policy.REVIEW_IO_TIMEOUT) -> list[str]:

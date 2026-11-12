@@ -83,6 +83,10 @@ class RemovalRows(PruneBase):
         ("a Codex GO on a later head of a merged PR", "MERGED", A, line(), [(2, B, "GO")], False),
         # rule 2
         ("an open PR whose live head has a Codex GO", "OPEN", B, line(), [(2, B, "GO")], True),
+        ("an open PR whose live head has a GO older than the entry's round (force-push back to a cleared head)",
+         "OPEN", B, line(round=2), [(1, B, "GO")], False),
+        ("a merged PR whose merged head has a GO older than the entry's round: merged is final", "MERGED", B,
+         line(round=2), [(1, B, "GO")], True),
         ("an open PR whose live head has a Codex NO-GO", "OPEN", B, line(), [(2, B, "NO-GO")], False),
         ("an open PR whose live head has a GO and then a NO-GO", "OPEN", B, line(),
          [(2, B, "GO"), (3, B, "NO-GO")], False),
