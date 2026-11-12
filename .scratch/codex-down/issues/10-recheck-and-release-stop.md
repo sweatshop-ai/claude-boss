@@ -13,4 +13,4 @@ What to build, in one line: when Codex answers again, each PR on 06a's provision
 
 **Blocked by:** 10a, 10b (this file is an index; the work is in the two)
 
-**Status:** ready-for-agent (10a, 10b)
+**Status:** done (10a: Otilia, PR 120; 10b: Zola, PR 125)

@@ -645,6 +645,28 @@ delete it. An `ANSWER q<n>` is recorded with `python3 skills/boss/codex_blocker.
 the blocker stays open. The question is the owner's whatever they once said about asking less: it is never
 recorded as a `boss-unask` kind.
 
+**A fallback GO is a loan: have Codex review again once it answers, and stop a release until it has** (ticket 10b).
+A PR that merged on a provisional (fallback) GO sits under `## Provisional GO` in the track's tracker until Codex has
+since said GO. Whenever a Codex review answers, and at wrap-up, run
+`python3 ${CLAUDE_PLUGIN_ROOT}/skills/boss/boss_recheck.py --track T --repo OWNER/REPO --checkout DIR` for each repo
+that has entries (`--author NAME` names who runs the reviews; the default is `recheck`). It reviews each entry with
+Codex alone, never with Claude, in a worktree of its own, and prints lines for you to act on:
+`NO-GO <repo>#<N> round <NN> author=<name>` is a Codex NO-GO on an open PR (the entry stays; send the author the round
+file as the brief), and a `DISPATCH <repo>#<N> author=<name> round=<NN>` line is a Codex NO-GO on a merged PR: the
+blocker is already open on the ladder and the entry is gone, so dispatch the author, or any free worker, with the
+round file as the brief (`pm/reviews/<repo>/pr<N>/round<NN>.out`). The blocker stays open until the fix has merged
+on a Codex GO; then you mark it cleared and post `boss-alert clear`.
+
+**While `boss_recheck.py --track T --list` exits 1, wrap-up (Phase E) and any release request stop**: a version
+bump, a tag, a publish, a reinstall. `--list` prints `PROVISIONAL <repo>#<N> round <NN> state=<S> head=<sha>` for each
+entry that counts, and `BLOCKER <repo>#<N> round <NN>` for each open `Codex NO-GO on merged` blocker (that PR has no
+entry any more, but main holds a merge Codex rejected until the fix has merged on a Codex GO and you cleared the
+blocker), and exits 1 when there is one; tell the owner which PRs. An exit other than 0 or 1 means the list
+could not be read (2 an unusable tracker, 7 an unreadable one): that stops the release too, and you say why. The
+entry of a PR that reads as `CLOSED` without a merge is not counted, and a state `gh` cannot read is counted. That
+entry stays in the tracker until the owner deletes its `[prov]` line by hand, with no age limit, so a reopened PR
+still finds it; every pass reads such a PR with `gh pr view` (twice, the prune reads it too), accepted.
+
 **Merging on tests alone needs a consent of its own** (ticket 09c). A `tests-alone` answer relayed by anyone
 else, the concierge's `ANSWER` included, is not a choice. When the owner picks it, or when you have no concierge
 and the three-option question is not enough, ask once more in your own turn with `AskUserQuestion`, exactly one
@@ -1108,6 +1130,10 @@ before closing**, and the closing after both the state line and the objective.
 1. `boss-lifecycle.sh list --mine`, plain `list` (it shows every pane on the server; keep those in
    your own tmux window), and a `SendMessage` round: closing state from every worker, your concierge excepted —
    what's done, in flight, uncommitted, unpushed, open branches and PRs.
+1b. **The release stop (ticket 10b).** For each repo that has entries, run `boss_recheck.py --track T --repo OWNER/REPO --checkout DIR`
+   if Codex answers, then `boss_recheck.py --track T --list`. While it exits 1 (or fails), wrap-up stops: do steps 2 to 4
+   (git check, trim, the state line, with the PRs and blockers it printed as open items), then do not run step 5 (close
+   no pane) and do not set the objective to `met`; the recap of step 6 names the PRs and blockers that hold it.
 2. Do not wait on the answers; check git yourself. For each worktree of the project:
    `git status --porcelain` and `git log --branches --not --remotes` (every local commit
    that exists on no remote, whichever branch). An untracked handoff note is not work at risk; uncommitted code and a

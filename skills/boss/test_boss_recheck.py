@@ -495,6 +495,15 @@ class TheNoGo(Base):
         self.assertEqual([a[0] for a in self.alerts()], ["0"])
         self.assertEqual(self.entries(), [])
 
+    def test_the_blocker_the_pass_writes_is_the_one_list_prints(self):
+        head = self.pr(5, "bad", state="MERGED", answer=NOGO)
+        self.put(self.prov(5, head))
+        self.rounds(5, (1, head, None, {"kind": "provisional"}))
+        self.assertEqual(self.run_pass(), ["DISPATCH owner/repo#5 author=worker-a round=02"])
+        run = subprocess.run([sys.executable, str(HERE / "boss_recheck.py"), "--track", "t", "--list"],
+                             env=dict(os.environ), capture_output=True, text=True, timeout=120)
+        self.assertEqual((run.returncode, run.stdout), (1, "BLOCKER owner/repo#5 round 02\n"), run.stderr)
+
     def test_an_entry_replaced_between_the_read_and_the_removal_stays(self):
         head = self.pr(5, "bad", state="MERGED", answer=NOGO)
         self.put(self.prov(5, head))
@@ -589,6 +598,212 @@ class TheCommand(Base):
         self.tracker.write_bytes(b"\xff\xfe\x00bad")
         run = self.run_cli()
         self.assertEqual(run.returncode, 7)
+
+
+class TheList(Base):
+    """`--list` (ticket 10b): the entries that count, exit 1 when there is one. It reads each entry's state with
+    `_live_state` (the prune reads it too, as the pass does) and makes no `review(...)` call: `codex` is never started."""
+
+    def tearDown(self):
+        self.sb.guard()
+        self.assertEqual(self.sb.calls_of("claude"), [])
+        self.assertEqual(self.sb.calls_of("codex"), [], "--list starts no review")
+        for call in self.sb.calls_of("gh"):
+            self.assertEqual(call.argv[:2], ["pr", "view"], "--list only reads states")
+
+    def run_list(self, *args, track="t"):
+        run = subprocess.run([sys.executable, str(HERE / "boss_recheck.py"), "--track", track, "--list", *args],
+                             env=dict(os.environ), capture_output=True, text=True, timeout=120)
+        self.assertEqual(self.codex_heads(), [], "--list started codex")
+        return run
+
+    def provisional(self, n, state="OPEN", answer=None):
+        head = self.pr(n, "pr%d" % n, state=state, answer=answer)
+        self.rounds(n, (1, head, None, {"kind": "provisional"}))
+        return head
+
+    def test_an_empty_list_exits_0_and_prints_nothing(self):
+        self.put()
+        run = self.run_list()
+        self.assertEqual((run.returncode, run.stdout), (0, ""), run.stderr)
+        self.assertEqual(self.sb.calls_of("gh"), [])
+
+    def test_a_tracker_with_no_provisional_section_exits_0(self):
+        run = self.run_list()
+        self.assertEqual((run.returncode, run.stdout), (0, ""), run.stderr)
+
+    def test_an_open_entry_counts_and_is_printed(self):
+        head = self.provisional(5)
+        self.put(self.prov(5, head))
+        run = self.run_list()
+        self.assertEqual(run.returncode, 1, run.stderr)
+        self.assertEqual(run.stdout, "PROVISIONAL owner/repo#5 round 01 state=OPEN head=%s\n" % head)
+        self.assertEqual([e.pr for e in self.entries()], [5])
+
+    def test_a_merged_entry_counts(self):
+        head = self.provisional(5, state="MERGED")
+        self.put(self.prov(5, head))
+        run = self.run_list()
+        self.assertEqual(run.returncode, 1, run.stderr)
+        self.assertIn("state=MERGED", run.stdout)
+
+    def test_a_list_holding_only_a_pr_closed_without_a_merge_exits_0_and_makes_no_review_call(self):
+        head = self.provisional(5, state="CLOSED", answer=GO)
+        self.put(self.prov(5, head))
+        run = self.run_list()
+        self.assertEqual((run.returncode, run.stdout), (0, ""), run.stderr)
+        self.assertEqual([e.pr for e in self.entries()], [5], "the entry stays until the owner deletes the line")
+        self.assertEqual(self.sb.calls_of("codex"), [])
+        self.assertEqual([c.argv[:2] for c in self.sb.calls_of("gh") if c.argv[:2] != ["pr", "view"]], [])
+
+    def test_a_closed_entry_beside_an_open_one_prints_only_the_open_one(self):
+        a = self.provisional(5, state="CLOSED")
+        b = self.provisional(6)
+        self.put(self.prov(5, a), self.prov(6, b))
+        run = self.run_list()
+        self.assertEqual(run.returncode, 1)
+        self.assertEqual(run.stdout.splitlines(), ["PROVISIONAL owner/repo#6 round 01 state=OPEN head=%s" % b])
+
+    def test_a_state_that_cannot_be_read_counts(self):
+        head = self.provisional(5)
+        self.put(self.prov(5, head))
+        self.fail_view(5)
+        run = self.run_list()
+        self.assertEqual(run.returncode, 1, run.stderr)
+        self.assertEqual(run.stdout, "PROVISIONAL owner/repo#5 round 01 state=unreadable head=%s\n" % head)
+        self.assertEqual([e.pr for e in self.entries()], [5])
+
+    def test_gh_is_only_ever_asked_for_the_state_of_each_entry(self):
+        a, b = self.provisional(5), self.provisional(6)
+        self.put(self.prov(5, a), self.prov(6, b))
+        self.run_list("--repo", REPO)
+        calls = [tuple(c.argv[:3]) for c in self.sb.calls_of("gh")]
+        self.assertEqual({c[:2] for c in calls}, {("pr", "view")})
+        # the prune reads each entry once (as the pass does), the list once more: two reads, never a review or a comment
+        self.assertEqual(sorted(c[2] for c in calls), ["5", "5", "6", "6"])
+
+    def test_an_entry_codex_has_since_cleared_does_not_count(self):
+        head = self.pr(5, "cleared")
+        self.rounds(5, (1, head, None, {"kind": "provisional"}), (2, head, "GO"))
+        self.put(self.prov(5, head))
+        run = self.run_list()
+        self.assertEqual((run.returncode, run.stdout), (0, ""), run.stderr)
+        self.assertEqual(self.entries(), [])
+
+    def test_the_repo_option_limits_the_list_to_that_repo(self):
+        head = self.provisional(5)
+        self.put(self.prov(5, head), self.prov(9, "a" * 40, repo="owner/other"))
+        self.set_pr(9, headRefOid="a" * 40)
+        run = self.run_list("--repo", "owner/other")
+        self.assertEqual(run.returncode, 1, run.stderr)
+        self.assertEqual([ln.split()[1] for ln in run.stdout.splitlines()], ["owner/other#9"])
+
+    def test_without_repo_it_lists_every_repo_of_the_track(self):
+        head = self.provisional(5)
+        self.put(self.prov(5, head), self.prov(9, "a" * 40, repo="owner/other"))
+        self.set_pr(9, headRefOid="a" * 40)
+        run = self.run_list()
+        self.assertEqual(run.returncode, 1, run.stderr)
+        self.assertEqual(sorted(ln.split()[1] for ln in run.stdout.splitlines()), ["owner/other#9", "owner/repo#5"])
+
+    BLOCKER = ("- Codex NO-GO on merged owner/repo#5 (round 02) - T+0 2026-11-12T10:00+00:00 "
+               "[ladder id=fx0a1b2c3d t0=2026-11-12T10:00+00:00 last=0 next=2026-11-12T10:05+00:00 ask=\"x\"%s]\n")
+
+    def test_an_open_codex_no_go_blocker_on_a_merged_pr_holds_the_stop_though_its_entry_is_gone(self):
+        self.put(blockers=self.BLOCKER % "")
+        run = self.run_list()
+        self.assertEqual((run.returncode, run.stdout), (1, "BLOCKER owner/repo#5 round 02\n"), run.stderr)
+
+    def test_a_cleared_blocker_does_not_hold_the_stop(self):
+        self.put(blockers=self.BLOCKER % " cleared=2026-11-12T11:00+00:00")
+        run = self.run_list()
+        self.assertEqual((run.returncode, run.stdout), (0, ""), run.stderr)
+
+    def test_the_repo_option_limits_the_blockers_too(self):
+        self.put(blockers=self.BLOCKER % "")
+        self.assertEqual(self.run_list("--repo", "owner/other").returncode, 0)
+        self.assertEqual(self.run_list("--repo", REPO).returncode, 1)
+
+    def test_a_hand_written_mixed_case_entry_is_found_by_repo(self):
+        head = self.provisional(5)
+        self.put(self.prov(5, head, repo="Owner/Repo"))
+        run = self.run_list("--repo", REPO)
+        self.assertEqual(run.returncode, 1, run.stderr)
+
+    def test_a_state_other_than_open_merged_or_closed_counts(self):
+        head = self.provisional(5, state="DRAFT")
+        self.put(self.prov(5, head))
+        run = self.run_list()
+        self.assertEqual(run.returncode, 1, run.stderr)
+        self.assertIn("state=DRAFT", run.stdout)
+
+    def test_a_prune_that_raises_leaves_the_entry_counting(self):
+        head = self.provisional(5)
+        self.put(self.prov(5, head))
+        with mock.patch.object(rk.br, "prune_provisional", side_effect=RuntimeError("boom")), \
+                contextlib.redirect_stderr(io.StringIO()):
+            lines = rk.list_entries("t")
+        self.assertEqual(len(lines), 1)
+
+    def test_an_empty_cleared_value_is_not_cleared(self):
+        self.put(blockers=self.BLOCKER % " cleared=")
+        self.assertEqual(self.run_list().returncode, 1)
+
+    def test_without_list_an_unexpected_exception_still_raises(self):
+        with mock.patch.object(rk, "recheck", side_effect=RuntimeError("boom")):
+            with self.assertRaises(RuntimeError):
+                rk.main(["--track", "t", "--repo", REPO, "--checkout", str(self.checkout)])
+
+    def test_a_crash_is_exit_7_never_exit_1(self):
+        self.put()
+        with mock.patch.object(rk, "list_entries", side_effect=RuntimeError("boom")), \
+                contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(rk.main(["--track", "t", "--list"]), 7)
+
+    def test_an_unusable_track_is_exit_2(self):
+        run = self.run_list(track="nope")
+        self.assertEqual(run.returncode, 2)
+        self.assertIn("no blocker can be", run.stderr)
+
+    def test_a_tracker_that_cannot_be_read_as_text_is_exit_7(self):
+        self.tracker.write_bytes(b"\xff\xfe\x00bad")
+        self.assertEqual(self.run_list().returncode, 7)
+
+    def test_list_takes_no_checkout_but_refuses_a_bad_repo(self):
+        self.assertEqual(self.run_list("--repo", "nope").returncode, 2)
+
+    def test_without_list_repo_and_checkout_are_still_required(self):
+        run = subprocess.run([sys.executable, str(HERE / "boss_recheck.py"), "--track", "t"], env=dict(os.environ),
+                             capture_output=True, text=True, timeout=60)
+        self.assertEqual(run.returncode, 2)
+
+
+class TheSkillText(unittest.TestCase):
+    """SKILL.md tells the boss to run the recheck, to dispatch on a DISPATCH line, and to stop on `--list`."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.text = (HERE / "SKILL.md").read_text(encoding="utf-8")
+        cls.flat = " ".join(cls.text.split())
+
+    def test_the_trigger_is_named(self):
+        self.assertIn("boss_recheck.py", self.text)
+        self.assertRegex(self.flat, r"(?i)whenever a Codex review answers")
+        self.assertRegex(self.flat, r"and at wrap-up")
+
+    def test_the_dispatch_rule_is_named(self):
+        self.assertRegex(self.flat, r"`DISPATCH <repo>#<N>[^`]*` line.{0,200}round file as the brief")
+
+    def test_the_stop_covers_wrap_up_and_every_release_request(self):
+        self.assertRegex(self.flat, r"--list` exits 1")
+        self.assertRegex(self.flat, r"--list` exits 1, wrap-up \(Phase E\) and any release request stop.{0,20}"
+                                    r"a version bump, a tag, a publish, a reinstall")
+        self.assertRegex(self.flat, r"wrap-up stops: do steps 2 to 4.{0,200}do not run step 5")
+        self.assertRegex(self.flat, r"`BLOCKER <repo>#<N> round <NN>`")
+
+    def test_a_closed_pr_is_not_counted_and_its_entry_stays_until_the_owner_deletes_it(self):
+        self.assertRegex(self.flat, r"CLOSED.{0,200}not counted")
+        self.assertRegex(self.flat, r"owner deletes its `\[prov\]` line by hand")
 
 
 if __name__ == "__main__":
