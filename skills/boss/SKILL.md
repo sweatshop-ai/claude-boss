@@ -619,8 +619,12 @@ Codex review before a worker builds from it, and every PR gets a Codex review on
 head that merges, before you merge it. The PR is the unit, not the commit: a commit is
 too small to judge and a merge is too late. The routine, run by the worker who wrote
 the thing: `codex exec -s read-only ... < /dev/null`, briefed to read and not execute,
-output checked in the first minute; posted on the PR (or the plan's PR) as "Codex
-review N (run by <name>)" with every citation marked VERIFIED or NOT FOUND; the
+output checked in the first minute. On a usage limit or an outage, the same turn runs the labelled
+fallback review (Opus, read-only), with the reset time Codex gave in the review file's header; the
+review is never held for that time, and no wakeup or loop is scheduled for it. Posted on the PR
+(or the plan's PR) as "Codex review N (run by <name>)" for a Codex answer and as "Fallback review N
+(Opus, Codex unavailable: <reason>; run by <name>)" for the fallback, never the second under the
+first's heading, with every citation marked VERIFIED or NOT FOUND; the
 author replies per finding, fixes the real ones, and reruns until GO, within the
 rounds the PR's size and risk allow (below). When the rounds run out, what is still open
 becomes a ticket and the PR merges, unless an open finding is of class a. A verdict on an
