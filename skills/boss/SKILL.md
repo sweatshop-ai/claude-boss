@@ -626,6 +626,7 @@ cap). Its exit code is the verdict: 0 GO posted, 3 NO-GO posted, 4 Codex gave no
 verdict, 6 the head or base moved (nothing posted), 2 usage or wrong checkout, 7
 infrastructure. Codex counts as down after 3 failed attempts in a row (`absent`, `timeout`, `error`;
 all repos together) and as back after 2 answered ones in a row (`codex_health.py` reads the attempts log).
+Pass `--track T` (the track from your dispatch header) and the same command raises a `Codex down` blocker in `pm/T.md` after the 3rd failure, with a ladder marker and a `boss-alert 0`, and clears it after the 2nd answer (`codex_blocker.py`); without it nothing is written to a tracker.
 A plan is reviewed by hand: `codex exec -s read-only ... < /dev/null`,
 briefed to read and not execute, output checked in the first minute. On a usage limit or an outage, the same turn runs the labelled
 fallback review (Opus, read-only), with the reset time Codex gave in the review file's header; the

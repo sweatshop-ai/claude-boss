@@ -14,4 +14,4 @@ What to build, in one line: after N failed Codex attempts in a row the boss's tr
 
 **Blocked by:** 05a, 05b, 05c (this file is an index; the work is in the three)
 
-**Status:** ready-for-agent (the three tickets).
+**Status:** done (05a, 05b and 05c are merged).

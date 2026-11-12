@@ -840,9 +840,10 @@ class Contract(Base):
         sig = inspect.signature(br.review)
         self.assertEqual(list(sig.parameters),
                          ["repo", "pr", "checkout", "author", "codex_timeout", "io_timeout",
-                          "fallback_timeout", "allow_fallback"])
+                          "fallback_timeout", "allow_fallback", "track"])
         self.assertEqual([p.kind.name for p in sig.parameters.values()],
-                         ["POSITIONAL_OR_KEYWORD"] * 4 + ["KEYWORD_ONLY"] * 4)
+                         ["POSITIONAL_OR_KEYWORD"] * 4 + ["KEYWORD_ONLY"] * 5)
+        self.assertIsNone(sig.parameters["track"].default)
         self.assertEqual((sig.parameters["codex_timeout"].default, sig.parameters["io_timeout"].default,
                           sig.parameters["fallback_timeout"].default, sig.parameters["allow_fallback"].default),
                          (policy.REVIEW_CODEX_TIMEOUT, policy.REVIEW_IO_TIMEOUT,
