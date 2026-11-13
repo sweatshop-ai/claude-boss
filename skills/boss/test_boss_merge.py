@@ -1352,6 +1352,16 @@ class MergedBase(Base):
         self.refused("pr-files-changed", merge_compare("src/new.py"), compare_answer("src/mine.py", "src/new.py"),
                      compare_answer("src/mine.py"))
 
+    def test_a_merge_that_undoes_a_change_of_main_refuses(self):
+        # src/f.py: main changed it, the merge kept the old text. SHA...head does not list it, base...head now does
+        self.refused("pr-file-set-changed", merge_compare("x.py"), compare_answer("src/mine.py", "src/f.py"),
+                     compare_answer("src/mine.py"))
+        self.assertIn("src/f.py", self.err)
+
+    def test_a_file_that_left_the_pr_set_without_a_difference_since_refuses_too(self):
+        self.refused("pr-file-set-changed", merge_compare("x.py"), compare_answer("src/mine.py"),
+                     compare_answer("src/mine.py", "src/other.py"))
+
     def test_a_rename_is_matched_by_either_name(self):
         self.refused("pr-files-changed", merge_compare("src/old.py"), compare_answer(("src/new.py", "src/old.py")),
                      compare_answer("src/mine.py"))

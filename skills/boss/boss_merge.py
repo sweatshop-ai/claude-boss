@@ -41,7 +41,8 @@ GO only by merging the base branch in needs no new review. It is looked at in th
 cannot be given together. Three compares are read: SHA...head (the files that differ between the GO'd head and the live
 one, and its commits), base...head and base...SHA (the PR's own files, each at its head). It passes only if the first
 compare is `ahead`, lists all its commits and holds a merge commit, and none of the PR's own files at either head is
-among the files that differ. The base-side files of a merge are not the PR's, so they do not count; anything the PR
+among the files that differ and the PR owns the same set of files at both heads (a merge that kept an old version of a file
+main changed would add one to the live head's set). The base-side files of a merge are not the PR's, so they do not count; anything the PR
 itself changed since the GO makes the PR's own files differ and refuses. The reason of a merge ends `-merged-base`.
 
 Rule 2 (also ticket 50): a provisional GO on a base that deploys (exit 4 above) is let through when every file the PR
@@ -493,15 +494,20 @@ def merged_base(rounds: list[Round], since: str, seen: Pr, deploy: Deploy, owner
         return refuse("compare-commits", "the compare does not list its commits whole")
     if not any(p >= 2 for p in changed.parents):
         return refuse("no-merge-commit", "no commit since %s is a merge" % since)
-    names = []
+    own_at = {}
     for end in (seen.head, since):
         own = read_compare(repo, seen.base, end, io_timeout, OWN_STATUSES)
         if own.problem:
             return refuse(own.problem, own.note)
-        names += own.files
-    stray = touched_by_the_pr(tuple(names), changed.files)
+        own_at[end] = set(own.files)
+    stray = touched_by_the_pr(tuple(own_at[seen.head] | own_at[since]), changed.files)
     if stray:
         return refuse("pr-files-changed", "differ since %s: %s" % (since, ", ".join(sorted(set(stray))[:5])))
+    # a merge that keeps an old version of a file main changed leaves that file out of SHA...head and into the PR's own
+    # files: the PR must own the same files at both heads, or the merge undid something no review saw
+    moved = sorted(own_at[seen.head] ^ own_at[since])
+    if moved:
+        return refuse("pr-file-set-changed", "owned at one head only: " + ", ".join(moved[:5]))
     return Decision(EXIT_MERGED, got.reason + "-merged-base", got.round, got.kind), ""
 
 

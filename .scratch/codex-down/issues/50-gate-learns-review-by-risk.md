@@ -17,6 +17,7 @@
 - **Green CI** is read from `commits/<head>/check-runs`: every run `completed` and `success`, `neutral` or `skipped`, all listed (total equals what came back), and at least one `success` (no check, or only skipped/neutral ones, is not green: nothing ran). Legacy commit statuses are not read.
 
 - **Round 1 (provisional Opus GO, two class b findings, both fixed in round 2):** an instruction file is refused even where a broad `test_paths` pattern matches it; all-skipped checks are not green.
+- **Round 2 (Opus NO-GO, class a, fixed):** a merge that kept an old version of a file main had changed passed, because SHA...head did not list it and base...SHA did not own it. The gate now also refuses unless the PR owns the same set of files at both heads (`pr-file-set-changed`).
 
 ## Done when
 
