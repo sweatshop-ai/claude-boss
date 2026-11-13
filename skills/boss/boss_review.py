@@ -1011,9 +1011,10 @@ class ProvEntry(NamedTuple):
 
 
 def _entry_of(line: str) -> ProvEntry | None:
-    """The entry a line of the exact form holds (a trailing CR ignored), else None."""
+    """The entry a line of the exact form holds (a trailing CR ignored), else None. The repo is kept as `repo_key`
+    spells it, so a hand-written `Owner/Repo` line is the same entry on every path (recheck, prune, list)."""
     m = PROV_LINE.fullmatch(line.rstrip("\r"))
-    return ProvEntry(m["repo"], int(m["pr"]), m["head"], int(m["round"]), m["base"], m["at"]) if m else None
+    return ProvEntry(m["repo"].lower(), int(m["pr"]), m["head"], int(m["round"]), m["base"], m["at"]) if m else None
 
 
 def _section(lines: list[str]) -> tuple[int, int] | None:
