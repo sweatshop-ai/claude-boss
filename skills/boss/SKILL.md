@@ -713,7 +713,10 @@ runs at about 75k tokens each used up the weekly Codex quota.
    the live head merges on any base when every file the PR changes is a test (`test_paths`) or
    docs (`README.md`, `CHANGELOG.md`, `docs/*.md`; never `SKILL.md`, `AGENTS.md`, `CLAUDE.md` or
    anything under `skills`, `commands`, `agents`, `hooks`, `.claude`, `.github`) and every check
-   run of the head is green. A round on file is still required, and a waived GO does not qualify.
+   the repo lists as `required_checks` in `.boss/deploy.json` has succeeded on the head and every other check run is
+   green (ticket 51: a list of the runs that exist now cannot say a slow workflow has not started yet, so a repo
+   without `required_checks` gets no rule 2 and a provisional GO on its deploying base stays exit 4). A round on file
+   is still required, and a waived GO does not qualify.
 3. A second review round happens only after a class a or b finding, never after class c or d.
 4. After main is merged into a branch there is no re-settle comment and no new review run by
    hand. You check that the code files are byte-identical to the reviewed head:
@@ -721,7 +724,12 @@ runs at about 75k tokens each used up the weekly Codex quota.
    files, and say so in the PR. `boss_merge.py` accepts a changed head only through
    `--merged-base-since <reviewed>` (ticket 50), which reads the compare and passes only when
    the live head is the reviewed head plus a merge of the base and none of the PR's own files
-   differ. Run it instead of a new review, and say so in the PR.
+   differ; the PR must own at least one file at both heads. Run it instead of a new review, and
+   say so in the PR. On a deploying base it needs a Codex GO on `<reviewed>`, or a provisional
+   GO on a PR that is docs and tests only (ticket 51: the flag then applies rule 2 as well, so
+   `required_checks` must have succeeded on the live head); a waived GO never qualifies. It does
+   not judge the merge's conflict resolutions beyond "no PR file differs", so a merge that had to
+   resolve a conflict in a PR file is refused and gets the diff check by hand.
 5. Re-measure on 2026-11-27: tokens, minutes and findings per PR, before the grades are
    touched again.
 
