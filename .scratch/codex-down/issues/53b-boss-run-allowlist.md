@@ -2,7 +2,7 @@
 
 **What to build:** `boss-run` stops handing the boss's text to `bash -lc`. The command is an argument list, executed directly, and the reviewer is shown exactly that list. A single-argument command is accepted only when it is plain words and quotes; a program that runs another command is refused by name; `gh` and `git` are refused when they name their own aliases or extensions. The merge rule then reads the literal list and needs no cleverness. Replaces PR 148 (ticket 53), which tried to prove a shell string harmless.
 
-**Status:** open (PR 150; allowlist built per the owner's decision; waiting for a real Codex round 2 after the usage limit resets at 19:10)
+**Status:** open (PR 150, wrap-up 2026-11-13: allowlist built and pushed, head e1dc685, CI green; real Codex round not run)
 
 ## Why not 53
 
