@@ -40,7 +40,9 @@ process of the same user can edit the tracker. What makes a choice the owner's i
     codex_blocker.py --choice TRACK           prints no-blocker (exit 2), none (1), malformed (2, reason on stderr)
                                               or the recorded choice (0)
 
-Failures (a missing tracker, a failed update, a failed alert) go to stderr and raise nothing.
+Failures (a missing tracker, a failed update, a failed alert) go to stderr and raise nothing. An unreadable
+attempts.jsonl (not a missing one) makes sync() raise OSError, so a caller catches it; the command says it in
+one line on stderr and exits 2, as codex_health.py does, and the tracker is left as it was.
 """
 from __future__ import annotations
 
@@ -364,6 +366,11 @@ def main() -> int:
         if argv[:1] == ["--choice"]:
             print("malformed")
         _say(str(exc))
+        return 2
+    except OSError as exc:          # sync reads attempts.jsonl inside the tracker's update: codex_health's exit 2
+        if argv[:1] == ["--choice"]:
+            print("malformed")
+        _say("cannot read %s: %s" % (exc.filename or codex_health.default_path(), exc.strerror or exc))
         return 2
     print("usage: codex_blocker.py TRACK | --choose TRACK wait|accept-fallback|tests-alone [--test-cmd CMD] | --choice TRACK", file=sys.stderr)
     return 2
