@@ -3,25 +3,29 @@
 
 boss-run used to hand the boss's text to `bash -lc` and try to prove the text harmless; a
 reviewer, hard rules and a lexer (PR 148) all read the text and Codex found twelve ways for
-shell syntax to hide a merge. This module turns that around. The command is an argument
-list, executed directly with no shell, and the reviewer is shown exactly that list:
+shell syntax to hide a merge. Then a denylist of program names (PR 150, rounds 1 and 2) grew by
+one finding set per round. This module is the allowlist. The command is an argument list,
+executed directly, and the reviewer is shown exactly that list:
 
-  1. A single-argument command is split into a list only when it is fully literal: plain
-     words and quotes. Anything a shell would expand, join or redirect is refused.
-  2. The program in argv[0] must not be one that runs another command or a code string.
-  3. `gh` and `git` are refused when argv names one of their own aliases or extensions,
-     read from the tool itself, and when they are asked to run a program.
-  4. The hard rules (in boss-run) then match the list joined with single spaces.
+  1. A single-argument command is split into a list only when it is fully literal: plain words
+     and quotes. Anything a shell would expand, join or redirect is refused.
+  2. argv[0] must be a bare name on PROGRAMS, the programs boss-run is for (sized from the 714
+     approved commands in the log of 2026-11-13). Everything else is refused: a shell, an
+     interpreter, `env`, `find`, `sed`, `curl`, `tar`, `ssh`, any program not named. A boss that
+     needs a script dispatches it to a worker.
+  3. `gh` and `git` take only the subcommands listed here and only options that cannot run a
+     program; `systemctl` only `status` and `show`.
+  4. After the reviewer's APPROVE the program is resolved from a fixed set of directories, never
+     from PATH, and that absolute path is what runs.
 
-Usage (as boss-run calls it): argv_gate.py [--single] [--cwd DIR] -- ARG...
-Prints one JSON object. Exit 0: {ok:true, argv, flat, display}. Exit 1: {ok:false, rule, detail}.
-Any other exit status or no JSON is no answer, and boss-run refuses.
+Usage (as boss-run calls it): argv_gate.py [--single|--resolve] [--config-dir DIR] [--cwd DIR] -- ARG...
+Prints one JSON object. Exit 0: {ok:true, argv, flat, display[, exec]}. Exit 1: {ok:false, rule,
+detail}. Any other exit status or no JSON is no answer, and boss-run refuses.
 """
 import json
 import os
 import re
 import shlex
-import shutil
 import subprocess
 import sys
 
@@ -38,7 +42,7 @@ class Refused(Exception):
 
 
 class Plan:
-    """What boss-run will execute: `argv`; `flat` for the hard rules; `display` for the reviewer."""
+    """What boss-run will run: `argv` as typed; `flat` for the hard rules; `display` for the reviewer."""
 
     def __init__(self, argv, flat):
         self.argv, self.flat, self.display = argv, flat, shlex.join(argv)
@@ -101,52 +105,63 @@ def split_literal(cmd):
     return words
 
 
-# ----------------------------------------------------------- programs refused ----
-RUNS_OTHER = "program that runs another command"
-HIDDEN_REQUEST = "program whose request or command the argument list does not show"
+# ------------------------------------------------------------ the allowlist ----
+NOT_ON_LIST = "program not on boss-run's list"
+BARE_NAME = re.compile(r"[a-z][a-z0-9-]*")
 
-# Exact names (lowercase) and patterns of programs whose job is to run something else, or to
-# run a code string, or to open a place where one can be typed.
-_NAMES = set("""
-bash sh zsh dash ksh mksh ash fish csh tcsh rbash rsh busybox toybox coproc
-env eval exec command builtin xargs find time nice nohup timeout sudo su doas watch script parallel
-setsid flock ionice taskset stdbuf chroot unshare nsenter runuser pkexec sg newgrp chrt
-systemd-run systemd-cat dbus-launch dbus-run-session xvfb-run tsocks proxychains unbuffer rlwrap entr
-tmux screen at batch crontab anacron
-make cmake ninja just task gmake
-perl ruby node nodejs deno bun bunx php lua luajit tclsh wish expect osascript java jshell
-awk gawk mawk nawk sed ed ex vi vim nvim nano emacs less more most man view pico
-ssh scp sftp mosh socat nc ncat netcat telnet
-strace ltrace gdb lldb valgrind perf
-claude codex gemini aider
-curl wget http https xh tar rsync zip unzip 7z 7za cpio ar
-npx npm pnpm yarn uv uvx pipx pip pip3 cargo go bc
-""".split())
-_PATTERNS = (re.compile(r"python[0-9.]*"), re.compile(r"pypy[0-9.]*"), re.compile(r"perl[0-9.]*"),
-             re.compile(r"ruby[0-9.]*"), re.compile(r"php[0-9.]*"), re.compile(r"lua[0-9.]*"),
-             re.compile(r"(gawk|mawk|nawk|ed|vi|vim|nvim)[-.0-9a-z]*"))
+FILE_PROGRAMS = {"cp", "mv", "mkdir", "touch", "rm"}
+READ_PROGRAMS = {"ls", "cat", "head", "tail", "jq", "grep", "date"}
+PROGRAMS = {"gh", "git", "systemctl", "rg"} | FILE_PROGRAMS | READ_PROGRAMS
+
+# The directories a program may resolve to. PATH is not consulted: a `gh` earlier on PATH, a
+# relative PATH entry or a link made in /tmp is not on this list. A real file's own directory
+# must be here too, so a link in a trusted directory cannot lead out of it. The coreutils
+# directory is where multi-call builds keep their binaries. The owner may name more in
+# <config dir>/boss-run-trusted-path (one directory per line); that file adds trust, so the
+# file programs refuse to touch it.
+FIXED_DIRS = ("/usr/local/bin", "/usr/bin", "/bin", "/usr/lib/cargo/bin/coreutils")
+TRUSTED_FILE = "boss-run-trusted-path"
 
 
-def _program_names(argv0, path):
-    """The names argv[0] answers to: as written and as it resolves through links and PATH."""
-    found = {os.path.basename(argv0).lower()}
-    resolved = argv0 if os.path.isabs(argv0) else shutil.which(argv0, path=path)
-    if resolved:
-        found.add(os.path.basename(os.path.realpath(resolved)).lower())
-    return found
+def trusted_dirs(config_dir):
+    extra = []
+    if config_dir:
+        try:
+            with open(os.path.join(config_dir, TRUSTED_FILE), encoding="utf-8") as f:
+                extra = [line.strip() for line in f if line.strip().startswith("/")]
+        except OSError:
+            pass
+    return [*extra, *FIXED_DIRS]
 
 
-_HIDES = set("curl wget http https xh tar rsync zip unzip 7z 7za cpio ar".split())
+def resolve(name, config_dir):
+    """The absolute path `name` runs as: the first executable of that name in a trusted
+    directory, whose real location is in a trusted directory too. Raises Refused."""
+    dirs = trusted_dirs(config_dir)
+    real_dirs = {os.path.realpath(d) for d in dirs}
+    for d in dirs:
+        path = os.path.join(d, name)
+        if os.path.isfile(path) and os.access(path, os.X_OK):
+            real = os.path.realpath(path)
+            if os.path.dirname(real) not in real_dirs:
+                raise Refused("program resolves outside the trusted directories", "%s -> %s" % (path, real))
+            return path
+    raise Refused("program not found in the trusted directories", "%s (looked in %s)" % (name, ":".join(dirs)))
 
 
-def _runs_other(name):
-    return name in _NAMES or any(p.fullmatch(name) for p in _PATTERNS)
-
-
-# ------------------------------------------------------------ the merge rule ----
-# A merge through the API: the endpoint, the branch merge endpoint and the two GraphQL mutations,
-# whatever the method. Only `gh api` is left that can send one (curl, wget and httpie are
-# refused by name); the hard rule in boss-run reads the same text.
+# --------------------------------------------------------------------- gh ----
+# Built from the commands in the log (pr 322, api 103, issue 26, run 19, workflow 3, label 1, repo 1).
+# `merge` is not in it: boss_merge.py is the one way to merge.
+GH_SUBS = {
+    "pr": {"view", "list", "create", "comment", "checks", "diff", "close", "reopen", "edit", "ready",
+           "review", "status", "checkout"},
+    "issue": {"view", "list", "create", "comment", "close", "reopen", "edit", "status"},
+    "run": {"view", "list", "watch", "rerun", "cancel"},
+    "workflow": {"run", "view", "list"},
+    "label": {"list", "create", "edit"},
+    "repo": {"view", "list"},
+    "api": None,
+}
 _PULLS_MERGE = re.compile(r"pulls[^ ]*merge", re.I)
 _BRANCH_MERGE = re.compile(r"repos/[^ ]*/merges", re.I)
 _MUTATION = re.compile(r"mergePullRequest|enablePullRequestAutoMerge", re.I)
@@ -154,236 +169,200 @@ _PERCENT = re.compile(r"%[0-9a-fA-F]{2}")
 _DATA_FROM_FILE = re.compile(r"(^@|=@)")
 
 
-def _check_api(argv, names):
-    if "gh" not in names or len(argv) < 2 or argv[1] != "api":
-        return
-    flat = " ".join(argv)
-    for rx, what in ((_PULLS_MERGE, "a pull request merge endpoint"), (_BRANCH_MERGE, "the branch merge endpoint"),
-                     (_MUTATION, "a merge mutation")):
-        if rx.search(flat):
-            raise Refused("PR merge outside boss_merge", "%s in the arguments: %s" % (what, flat))
-    if any(_PERCENT.search(a) for a in argv[2:]):
-        raise Refused("merge rule cannot see through", "a percent-encoded path or query in an API call")
-    if "graphql" in flat:
-        for a in argv[2:]:
-            if a == "--input" or _DATA_FROM_FILE.search(a):
-                raise Refused("merge rule cannot see through", "a GraphQL body read from a file (%s)" % a)
+def _gh_nested(rest):
+    """The word after `gh <sub>`: the first that is not an option or the value of -R/--repo."""
+    i = 0
+    while i < len(rest):
+        a = rest[i]
+        if a in ("-R", "--repo"):
+            i += 2
+            continue
+        if a.startswith("-"):
+            i += 1
+            continue
+        return a
+    return None
 
 
-# ------------------------------------------------------------------------ gh ----
-def _tool(argv0, args, env, cwd, what):
-    """Runs the tool's own report and returns its stdout. Anything but a clean answer refuses."""
-    try:
-        r = subprocess.run([argv0, *args], capture_output=True, text=True, timeout=20, env=env,
-                           cwd=cwd, stdin=subprocess.DEVNULL)
-    except (OSError, subprocess.SubprocessError) as e:
-        raise Refused(what[0], "%s did not answer: %s" % (what[1], e))
-    if r.returncode not in what[2]:
-        raise Refused(what[0], "%s exited %d: %s" % (what[1], r.returncode, r.stderr.strip()[:120]))
-    return r
-
-
-_GH_FORBIDDEN_SUBS = {"codespace": "runs commands on a remote machine", "cs": "runs commands on a remote machine"}
-
-
-def _check_gh(argv, path, env, cwd):
+def _check_gh(argv):
     if len(argv) < 2:
         raise Refused("gh without a subcommand", "nothing to check")
     sub = argv[1]
-    if sub in ("--version", "--help", "-h", "help"):
+    if sub == "--version":
         return
-    if sub.startswith("-"):
-        raise Refused("gh option before the subcommand", sub)
-    if sub in _GH_FORBIDDEN_SUBS:
-        raise Refused("gh " + sub, _GH_FORBIDDEN_SUBS[sub])
-    gh = argv[0]
-    # Names gh itself reports. A user alias or an extension may be `pr merge`; gh refuses ones
-    # that shadow a built-in, so a name in neither list is gh's own command.
-    out = _tool(gh, ["alias", "list"], env, cwd,
-                ("gh alias cannot be read", "`gh alias list`", (0,))).stdout
-    aliases = {m.group(1) for m in re.finditer(r"^([^\s:]+):", out, re.M)}
-    if sub in aliases:
-        raise Refused("gh alias", "%s is an alias in gh's config" % sub)
-    if sub in ("extension", "ext"):
-        if len(argv) > 2 and argv[2] in ("list", "ls", "search", "browse"):
-            return
-        raise Refused("gh extension", "installs or runs code the argument list does not show")
-    out = _tool(gh, ["extension", "list"], env, cwd,
-                ("gh extension cannot be read", "`gh extension list`", (0,))).stdout
-    exts = set()
-    for line in out.splitlines():
-        tokens = line.split()
-        exts.update(tokens[:2])
-    if sub in exts:
-        raise Refused("gh extension", "%s is an installed extension" % sub)
+    if sub not in GH_SUBS:
+        raise Refused("gh subcommand not on boss-run's list", "%s (allowed: %s)" % (sub, " ".join(sorted(GH_SUBS))))
+    if sub == "api":
+        flat = " ".join(argv)
+        for rx, what in ((_PULLS_MERGE, "a pull request merge endpoint"), (_BRANCH_MERGE, "the branch merge endpoint"),
+                         (_MUTATION, "a merge mutation")):
+            if rx.search(flat):
+                raise Refused("PR merge outside boss_merge", "%s in the arguments: %s" % (what, flat))
+        if any(_PERCENT.search(a) for a in argv[2:]):
+            raise Refused("merge rule cannot see through", "a percent-encoded path or query in an API call")
+        if "graphql" in flat:
+            for a in argv[2:]:
+                if a == "--input" or _DATA_FROM_FILE.search(a):
+                    raise Refused("merge rule cannot see through", "a GraphQL body read from a file (%s)" % a)
+        return
+    nested = _gh_nested(argv[2:])
+    if nested == "merge":
+        raise Refused("PR merge outside boss_merge", "gh %s merge" % sub)
+    if nested not in GH_SUBS[sub]:
+        raise Refused("gh subcommand not on boss-run's list", "gh %s %s (allowed: %s)"
+                      % (sub, nested, " ".join(sorted(GH_SUBS[sub]))))
 
 
-# ----------------------------------------------------------------------- git ----
-_GIT_FLAGS = {"--no-pager", "--no-replace-objects", "--literal-pathspecs", "--glob-pathspecs",
-              "--noglob-pathspecs", "--icase-pathspecs", "--no-optional-locks", "--bare", "--no-advice",
-              "--version", "--help", "-P", "-h", "-v"}
-_GIT_VALUE_OPTIONS = {"-C", "--git-dir", "--work-tree", "--namespace"}
-_GIT_SUBS = {"difftool": "runs the configured diff tool", "mergetool": "runs the configured merge tool",
-             "filter-branch": "runs shell snippets", "instaweb": "starts a web server",
-             "web--browse": "starts a browser", "help": "starts man or a browser",
-             "send-email": "runs a mail program", "daemon": "starts a server", "gui": "starts a program",
-             "gitk": "starts a program", "citool": "starts a program", "credential": "runs a helper"}
-_GIT_RUNS_PROGRAM_OPTION = re.compile(r"^--(exec|upload-pack|receive-pack|ext-cmd|editor|run|pager)\b", re.I)
-_GIT_CONFIG_KEYS = re.compile(r"^(alias|core|pager|credential|include|includeif|filter|diff|merge|sequence|"
-                              r"gpg|sendemail|url|submodule|difftool|mergetool|http|ssh|protocol|"
-                              r"safe|transfer|receive|uploadpack|uploadarchive|gc|rebase|commit|"
-                              r"interactive|web|browser|man|instaweb|mailcap|fsmonitor|trace2|"
-                              r"maintenance|worktree|init)\.", re.I)
+# -------------------------------------------------------------------- git ----
+GIT_SUBS = {"worktree", "push", "merge", "commit", "branch", "pull", "add", "restore", "fetch", "status",
+            "log", "diff", "show", "rev-parse"}
+# Long options that make git run a program or write where it is told. Git accepts any unambiguous
+# prefix of a long option, so a word of three characters or more that is a prefix of one of these
+# is refused too (`--exe`, `--upload-pa=`).
+_GIT_PROGRAM_OPTIONS = ("--upload-pack", "--receive-pack", "--exec", "--exec-path", "--ext-cmd", "--strategy",
+                        "--open-files-in-pager", "--output")
 
 
-def _git_globals(argv):
-    """(index of the subcommand or None, the directory -C chain, refused option or None)."""
-    i, dirs = 1, []
-    while i < len(argv):
-        a = argv[i]
-        if not a.startswith("-"):
-            return i, dirs
-        if a in _GIT_VALUE_OPTIONS:
-            if i + 1 >= len(argv):
-                raise Refused("git option without a value", a)
-            if a == "-C":
-                dirs.append(argv[i + 1])
+def _check_git(argv):
+    i = 1
+    while i < len(argv) and argv[i].startswith("-"):
+        if argv[i] == "-C" and i + 1 < len(argv) and not argv[i + 1].startswith("-"):
             i += 2
-            continue
-        if a in _GIT_FLAGS or re.match(r"^--(git-dir|work-tree|namespace)=", a):
+        elif argv[i] == "--no-pager":
             i += 1
-            continue
-        raise Refused("git option that can run a program", "%s before the subcommand" % a)
-    return None, dirs
-
-
-def _check_git(argv, env, cwd):
-    sub_at, _dirs = _git_globals(argv)
-    if sub_at is None:
-        return
-    sub, rest = argv[sub_at], argv[sub_at + 1:]
-    # The probe reads the aliases of the repository the command will use: every option before the
-    # subcommand (-C, --git-dir, --work-tree, --namespace) is passed on.
-    r = _tool(argv[0], [*argv[1:sub_at], "config", "--get-regexp", r"^alias\."], env, cwd,
-              ("git alias cannot be read", "`git config --get-regexp`", (0, 1)))
-    aliases = {line.split()[0][len("alias."):].lower() for line in r.stdout.splitlines() if line.strip()}
-    if sub.lower() in aliases:
-        raise Refused("git alias", "%s is an alias in git's config" % sub)
-    if sub in _GIT_SUBS:
-        raise Refused("git " + sub, _GIT_SUBS[sub])
+        else:
+            raise Refused("git option before the subcommand not on boss-run's list",
+                          "%s (only -C <dir> and --no-pager; -c and --config-env run programs)" % argv[i])
+    if i >= len(argv):
+        raise Refused("git without a subcommand", "nothing to check")
+    sub, rest = argv[i], argv[i + 1:]
+    if sub not in GIT_SUBS:
+        raise Refused("git subcommand not on boss-run's list", "%s (allowed: %s)" % (sub, " ".join(sorted(GIT_SUBS))))
     for a in rest:
-        if _GIT_RUNS_PROGRAM_OPTION.match(a) or "ext::" in a:
-            raise Refused("git option that runs a program", a)
-    if sub == "rebase" and any(a in ("-x", "-i", "--interactive") or a.startswith("-x") for a in rest):
-        raise Refused("git rebase that runs a program", "-x or -i")
-    if sub == "bisect" and "run" in rest:
-        raise Refused("git bisect run", "runs a program")
-    if sub == "submodule" and "foreach" in rest:
-        raise Refused("git submodule foreach", "runs a program in every submodule")
-    if sub in ("clone", "ls-remote", "fetch", "pull") and ("-u" in rest and sub == "clone"):
-        raise Refused("git clone -u", "names the upload-pack program")
-    if sub == "config":
-        for a in rest:
-            if a in ("-e", "--edit"):
-                raise Refused("git config --edit", "starts an editor")
-            if _GIT_CONFIG_KEYS.match(a.lower().split("=", 1)[0]):
-                raise Refused("git config of a key that can run a program", a)
+        if a == "--":
+            break
+        if "ext::" in a:
+            raise Refused("git transport that runs a program", a)
+        if a == "-c" or a.startswith("-c") and "=" in a or a == "--config" or a.startswith("--config="):
+            raise Refused("git option that sets config", "%s (a config key can run a program)" % a)
+        if a.startswith("--"):
+            name = a.split("=", 1)[0]
+            if len(name) >= 3 and any(p.startswith(name) for p in _GIT_PROGRAM_OPTIONS):
+                raise Refused("git option that can run a program", a)
+        elif sub == "merge" and re.match(r"^-[A-Za-z]*s", a):
+            raise Refused("git option that can run a program", "%s (a merge strategy runs a git-merge-<name> helper)" % a)
 
 
-def _git_flat(argv):
-    """The joined text the hard rules read: git without the options before the subcommand."""
-    try:
-        at, _ = _git_globals(argv)
-    except Refused:
-        return " ".join(argv)
-    return " ".join(["git", *argv[at:]]) if at else " ".join(argv)
+# ------------------------------------------------------------------- others ----
+_SYSTEMCTL_FLAGS = {"--user", "--system", "--no-pager", "--no-legend", "-l", "--full", "--no-ask-password"}
+_PROTECTED_PATH = re.compile(
+    r"(^|/)(\.git|\.ssh|\.gnupg|\.bashrc|\.bash_profile|\.bash_login|\.profile|\.zshrc|\.zprofile|\.zshenv|\.gitconfig|"
+    r"authorized_keys|boss-run-trusted-path|boss-hard-rules\.tsv|\.githooks|hooks)(/|$)"
+    r"|(^|/)\.config/(git|gh|systemd)(/|$)|(^|/)\.local/share/gh(/|$)", re.I)
 
 
-# -------------------------------------------------------------- other options ----
-_OPTION_RULES = {
-    "rg": (re.compile(r"^--(pre|hostname-bin)\b"), "runs a program on every file"),
-}
+def _check_systemctl(argv):
+    i = 1
+    while i < len(argv) and argv[i] in _SYSTEMCTL_FLAGS:
+        i += 1
+    if i >= len(argv) or argv[i] not in ("status", "show"):
+        raise Refused("systemctl subcommand not on boss-run's list",
+                      "only status and show; a restart goes to the owner (a restart changes a service, "
+                      "and none of the 714 logged commands used systemctl)")
+    for a in argv[i + 1:]:
+        if a in ("-H", "--host", "-M", "--machine") or a.startswith(("--host=", "--machine=", "-H", "-M")):
+            raise Refused("systemctl option that reaches another machine", a)
 
 
-def _check_options(argv, names):
-    for name in names:
-        if name in _OPTION_RULES:
-            rx, why = _OPTION_RULES[name]
-            for a in argv[1:]:
-                if rx.match(a):
-                    raise Refused(RUNS_OTHER, "%s %s (%s)" % (name, a, why))
+def _check_file_program(argv):
+    for a in argv[1:]:
+        if not a.startswith("-") and _PROTECTED_PATH.search(a):
+            raise Refused("write to a place that runs code or holds trust",
+                          "%s (.git, hooks, shell startup files, ssh keys, gh/git/systemd config, boss-run's own rule files)" % a)
+
+
+def _check_rg(argv):
+    for a in argv[1:]:
+        if re.match(r"^--(pre|hostname-bin)", a):
+            raise Refused("rg option that runs a program", a)
 
 
 # ---------------------------------------------------------------------- plan ----
-def check_argv(argv, cwd, path=None, env=None):
-    """Raises Refused unless the argument list is one boss-run may show a reviewer."""
+def check_argv(argv):
+    """Raises Refused unless the argument list is one boss-run may show a reviewer. Runs nothing."""
     if not argv or argv[0] == "":
         raise Refused("no command", "the argument list is empty")
-    argv0 = argv[0]
-    if "=" in argv0:
-        raise Refused("command begins with an assignment", argv0)
-    if "/" in argv0 and not os.path.isabs(argv0):
-        raise Refused("relative program path", "%s runs a file the reviewer cannot read" % argv0)
-    env = dict(os.environ if env is None else env)
-    path = path if path is not None else env.get("PATH", os.defpath)
-    names = _program_names(argv0, path)
-    for name in sorted(names):
-        if name in _HIDES:
-            # curl reads .curlrc, -K files and expands {a,b}; wget -i reads URLs from a file; tar
-            # -I, rsync -e and zip -T run programs. Their options hide what they do, in more ways than a
-            # list can close (Codex, PR 150 round 1), so boss-run does not run them.
-            raise Refused(HIDDEN_REQUEST, name)
-        if _runs_other(name):
-            raise Refused(RUNS_OTHER, name)
-    _check_api(argv, names)
-    _check_options(argv, names)
+    name = argv[0]
+    if not BARE_NAME.fullmatch(name):
+        raise Refused("program given by path or by an odd name",
+                      "%s: give the program's bare name; boss-run resolves it from its trusted directories" % name)
+    if name not in PROGRAMS:
+        raise Refused(NOT_ON_LIST, "%s (on the list: %s). A script or an interpreter goes to a worker."
+                      % (name, " ".join(sorted(PROGRAMS))))
+    if name == "gh":
+        _check_gh(argv)
+    elif name == "git":
+        _check_git(argv)
+    elif name == "systemctl":
+        _check_systemctl(argv)
+    elif name == "rg":
+        _check_rg(argv)
+    elif name in FILE_PROGRAMS:
+        _check_file_program(argv)
 
 
-def probe_tools(argv, cwd, path=None, env=None):
-    """Raises Refused when `gh` or `git` names one of its own aliases or extensions, or cannot say.
-
-    Separate from check_argv because it runs the tool (`gh alias list`), and boss-run wants the
-    hard rules to refuse first: a merge refused by its rule leaves no call on gh at all."""
-    env = dict(os.environ if env is None else env)
-    path = path if path is not None else env.get("PATH", os.defpath)
-    argv0 = argv[0]
-    names = _program_names(argv0, path)
-    # A program that does not exist cannot run (exec answers 127), so there is nothing to ask it.
-    found = argv0 if os.path.isabs(argv0) else shutil.which(argv0, path=path)
-    if found is None or not os.access(found, os.X_OK):
-        return
-    argv = [found, *argv[1:]]
-    if "gh" in names:
-        _check_gh(argv, path, env, cwd)
-    if "git" in names:
-        _check_git(argv, env, cwd)
+def _git_flat(argv):
+    """The joined text the hard rules read: git without -C <dir>, so `git -C x push origin main`
+    is `git push origin main`."""
+    i = 1
+    while i < len(argv) and argv[i] in ("-C", "--no-pager"):
+        i += 2 if argv[i] == "-C" else 1
+    return " ".join(["git", *argv[i:]])
 
 
-def plan(args, *, single, cwd, path=None, env=None, probe=True):
+def plan(args, *, single):
     """`args` is what follows `--`. One argument with `single` is a shell-looking string, and is
     taken only when literal; otherwise the arguments are the argument list as they are."""
     argv = split_literal(args[0]) if single and len(args) == 1 else list(args)
-    if not argv:
-        raise Refused("no command", "nothing to run")
-    check_argv(argv, cwd, path=path, env=env)
-    if probe:
-        probe_tools(argv, cwd, path=path, env=env)
-    names = _program_names(argv[0], path if path is not None else (env or os.environ).get("PATH", os.defpath))
-    flat = _git_flat(argv) if "git" in names else " ".join(argv)
-    return Plan(argv, flat)
+    for a in argv:
+        try:
+            a.encode("utf-8")
+        except UnicodeEncodeError:
+            raise Refused("argument that is not text",
+                          "bytes that are not valid UTF-8 cannot be shown to a reviewer as they run")
+    check_argv(argv)
+    return Plan(argv, _git_flat(argv) if argv[0] == "git" else " ".join(argv))
+
+
+def prepare(argv, config_dir, cwd, env=None):
+    """After the APPROVE: the list that runs, argv[0] resolved to an absolute path in a trusted
+    directory. For gh, `gh alias list` (on the binary that will run) must not name the subcommand."""
+    exe = resolve(argv[0], config_dir)
+    if argv[0] == "gh" and len(argv) > 1 and argv[1] != "--version":
+        try:
+            r = subprocess.run([exe, "alias", "list"], capture_output=True, text=True, timeout=20,
+                               env=dict(os.environ if env is None else env), cwd=cwd, stdin=subprocess.DEVNULL)
+        except (OSError, subprocess.SubprocessError) as e:
+            raise Refused("gh alias cannot be read", "`gh alias list` did not answer: %s" % e)
+        if r.returncode != 0:
+            raise Refused("gh alias cannot be read", "`gh alias list` exited %d: %s" % (r.returncode, r.stderr.strip()[:120]))
+        if argv[1] in {m.group(1) for m in re.finditer(r"^([^\s:]+):", r.stdout, re.M)}:
+            raise Refused("gh alias", "%s is an alias in gh's config" % argv[1])
+    return [exe, *argv[1:]]
 
 
 def main(argv):
-    single, probe_only, no_probe, cwd, i = False, False, False, os.getcwd(), 0
+    mode = "plan"
+    config_dir = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
+    cwd, i = os.getcwd(), 0
     while i < len(argv) and argv[i] != "--":
-        if argv[i] == "--single":
-            single = True
-        elif argv[i] == "--no-probe":
-            no_probe = True
-        elif argv[i] == "--probe-only":
-            probe_only = True
+        if argv[i] in ("--single", "--resolve"):
+            mode = argv[i][2:]
         elif argv[i] == "--cwd" and i + 1 < len(argv):
             cwd = argv[i + 1]
+            i += 1
+        elif argv[i] == "--config-dir" and i + 1 < len(argv):
+            config_dir = argv[i + 1]
             i += 1
         else:
             print("argv_gate: unknown argument %s" % argv[i], file=sys.stderr)
@@ -391,16 +370,11 @@ def main(argv):
         i += 1
     args = argv[i + 1:]
     try:
-        for a in args:
-            try:
-                a.encode("utf-8")
-            except UnicodeEncodeError:
-                raise Refused("argument that is not text", "bytes that are not valid UTF-8 cannot be shown to a reviewer as they run")
-        if probe_only:
-            probe_tools(args, cwd)
-            print(json.dumps({"ok": True, "argv": args, "flat": " ".join(args), "display": shlex.join(args)}))
+        if mode == "resolve":
+            run = prepare(args, config_dir, cwd)
+            print(json.dumps({"ok": True, "argv": args, "flat": " ".join(args), "display": shlex.join(args), "exec": run}))
             return 0
-        p = plan(args, single=single, cwd=cwd, probe=not no_probe)
+        p = plan(args, single=(mode == "single"))
     except Refused as e:
         print(json.dumps({"ok": False, "rule": e.name, "detail": e.detail}))
         return 1

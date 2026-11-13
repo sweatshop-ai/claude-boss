@@ -126,8 +126,8 @@ class Approve(Base):
 
     def test_the_commands_own_exit_status_passes_through(self):
         self.sb.stub("codex", answer=approve())
-        self.sb.stub_script("seven", "exit 7")
-        r = self.live("seven")
+        self.sb.stub_script("ls", "exit 7")        # a stub in the trusted directory stands in for a program on the list
+        r = self.live("ls", "x")
         self.assertEqual(r.returncode, 7)
         self.assertTrue(r.stdout.endswith("boss-run: command exited 7\n"), r.stdout)
         entry = self.only_log()
@@ -164,8 +164,8 @@ class Approve(Base):
 
     def test_the_command_runs_without_a_shell_so_a_dollar_in_an_argument_stays_a_dollar(self):
         self.sb.stub("codex", answer=approve())
-        self.sb.stub_script("show", 'printf "%s" "$1" > "$PWD/shown.txt"')
-        r = self.live("show", "$HOME `date` *")
+        self.sb.stub_script("head", 'printf "%s" "$1" > "$PWD/shown.txt"')
+        r = self.live("head", "$HOME `date` *")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual((self.sb.work / "shown.txt").read_text(), "$HOME `date` *")
         self.assertEqual(len(self.sb.calls_of("codex")), 1)
@@ -307,15 +307,17 @@ class HardRules(Base):
         self.assertNotCalled("codex", "claude")
 
     def test_each_built_in_rule_names_itself(self):
+        """The hard rules read the literal list; the programs are the allowed ones, the rule's words are arguments
+        (git reset and systemctl restart never get this far: the gate refuses them first, see below)."""
         cases = [
             ("git push origin dev --force", "force push"),
-            ("deploy-prod now", "prod deploy"),
-            ("systemctl restart nginx", "prod service restart"),
+            ("ls deploy-prod", "prod deploy"),
             ("rm -rf /home/x/Documents/old", "recursive delete of non-regenerable data"),
             ("cat CLAUDE.md", "edit of settings.json / CLAUDE.md"),
-            ("psql -c 'DROP TABLE users'", "DROP TABLE / DATABASE"),
-            ("git reset --hard 'HEAD~1'", "git reset --hard"),
-            ("git clean -fd", "git clean -f"),
+            ("grep 'DROP TABLE users' notes.sql", "DROP TABLE / DATABASE"),
+            ("grep 'git reset --hard' notes.md", "git reset --hard"),
+            ("grep 'git clean -fd' notes.md", "git clean -f"),
+            ("grep 'systemctl restart nginx' notes.md", "prod service restart"),
         ]
         for command, name in cases:
             with self.subTest(name):
@@ -327,14 +329,37 @@ class HardRules(Base):
                     "hard rule: %s (matched /" % name))
         self.assertNotCalled("codex", "claude")
 
+    def test_git_C_dir_does_not_hide_a_push_to_main_from_the_hard_rule(self):
+        for argv in (("git", "-C", "/some/dir", "push", "origin", "main"), ("git", "--no-pager", "-C", "x", "push", "--force", "origin", "dev")):
+            with self.subTest(argv):
+                r = self.dry(*argv)
+                self.assertEqual(r.returncode, 5, r.stdout)
+                self.assertTrue(r.stderr.startswith("boss-run: REFUSED by hard rule — "), r.stderr)
+        self.assertNotCalled("codex", "claude")
+
+    def test_path_is_not_consulted_a_stub_earlier_on_path_than_the_trusted_directories_does_not_run(self):
+        self.sb.stub("codex", answer=approve())
+        self.sb.stub_script("head", "exit 9")                 # first on PATH, and not in a trusted directory
+        (self.sb.cfg / "boss-run-trusted-path").unlink()      # back to the fixed directories
+        r = self.live("head", "-n", "1", "/nonexistent-file")
+        self.assertNotEqual(r.returncode, 9, r.stderr)        # the real head ran (and failed: no such file)
+        self.assertEqual(self.sb.calls_of("head"), [])
+        self.assertEqual(len(self.sb.calls_of("codex")), 1)
+
+    def test_what_the_hard_rules_guard_is_out_of_reach_of_the_gate_anyway(self):
+        for command in ("git reset --hard HEAD~1", "git clean -fd", "systemctl restart nginx", "systemctl --user restart nginx"):
+            with self.subTest(command):
+                r = self.dry(*shlex.split(command))
+                self.assertEqual(r.returncode, 5, r.stdout)
+                self.assertIn("not on boss-run's list", r.stderr.splitlines()[0])
+        self.assertNotCalled("codex", "claude")
+
     def test_a_merge_typed_by_hand_is_refused_in_every_shape(self):
         """Ticket 11a: `PR merge outside boss_merge`, a repo option on either side of `pr`, a path to gh, the REST PUT
         and the GraphQL mutation; every one exits 5 with --dry-run and asks no reviewer. Ticket 53b: the rule reads
         the argument list that would run, so a quoted spelling is the same text as a plain one."""
         cases = [
             "gh pr merge 5 --merge",
-            "gh --repo o/r pr merge 5",
-            "gh -R o/r pr merge 5",
             "gh pr --repo o/r merge 5",
             "gh pr -R o/r merge 5",
             "gh pr --repo=o/r merge 5",
@@ -343,15 +368,10 @@ class HardRules(Base):
             "gh pr --repo= merge 5",
             "gh pr -Ro/r -R o/r merge 5",
             "gh pr --repo o/r -Ro/r --repo=o/r merge 5",
-            "gh -Ro/r pr merge 5",
-            "gh --repo=o/r pr -Ro/r merge 5",
-            "/usr/bin/gh pr merge 5",
             "gh api -X PUT repos/o/r/pulls/5/merge",
             "gh api repos/o/r/pulls/5/merge --method PUT",
             "gh api --method=PUT repos/o/r/pulls/5/merge",
             "gh api graphql -f query='mutation { mergePullRequest(input: {}) { clientMutationId } }'",
-            "GH PR MERGE 5",
-            "echo gh pr merge",
             "gh api -X PUT 'repos/{owner}/{repo}/pulls/{n}/merge'",
             "gh pr merge 5 --auto",
             "gh api graphql -f query='mutation { enablePullRequestAutoMerge(input: {}) { clientMutationId } }'",
@@ -369,6 +389,12 @@ class HardRules(Base):
                 self.assertTrue(r.stderr.startswith("boss-run: REFUSED by "), r.stderr)
                 self.assertIn("PR merge outside boss_merge", r.stderr.splitlines()[0])
                 self.assertIn("PR merge outside boss_merge", self.sb.log_lines()[-1]["reason"])
+        for command in ("gh --repo o/r pr merge 5", "gh -R o/r pr merge 5", "gh -Ro/r pr merge 5", "/usr/bin/gh pr merge 5",
+                        "GH PR MERGE 5", "echo gh pr merge", "gh --repo=o/r pr -Ro/r merge 5"):
+            with self.subTest(command):      # not even a program on the list, or an option gh does not take there
+                r = self.dry(command)
+                self.assertEqual(r.returncode, 5, r.stdout + r.stderr)
+                self.assertTrue(r.stderr.startswith("boss-run: REFUSED by the argument gate — "), r.stderr)
         self.assertNotCalled("codex", "claude", "gh")
 
     def test_every_way_of_hiding_a_merge_that_codex_found_is_refused_by_the_gate_and_runs_nothing(self):
@@ -394,9 +420,10 @@ class HardRules(Base):
         self.assertNotCalled("codex", "claude", "gh")
 
     def test_a_gh_alias_gh_reports_is_refused_even_when_it_expands_to_a_merge(self):
+        # gh does not let an alias shadow its own commands; a gh that says one does is not believed
         self.sb.stub("codex", answer=approve())
-        self.sb.stub_script("gh", 'if [ "$1" = alias ]; then printf "m: pr merge\\nco: pr checkout\\n"; fi')
-        r = self.dry("gh", "m", "5")
+        self.sb.stub_script("gh", 'if [ "$1" = alias ]; then printf "pr: pr merge\\nco: pr checkout\\n"; fi')
+        r = self.dry("gh", "pr", "view", "5")
         self.assertEqual(r.returncode, 5, r.stdout)
         self.assertTrue(r.stderr.startswith("boss-run: REFUSED by the argument gate — gh alias\n"), r.stderr)
         self.assertEqual([c.argv for c in self.sb.calls_of("gh")], [["alias", "list"]])
@@ -421,8 +448,7 @@ class HardRules(Base):
         self.sb.stub("gh")
         r = self.dry("gh", "pr", "view", "5")
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual([c.argv for c in self.sb.calls_of("gh")],
-                         [["alias", "list"], ["alias", "list"], ["extension", "list"]])
+        self.assertEqual([c.argv for c in self.sb.calls_of("gh")], [["alias", "list"], ["alias", "list"]])
         self.assertEqual(len(self.sb.calls_of("codex")), 2)
 
     def test_the_merge_rule_works_on_an_argument_list_as_on_a_string(self):
@@ -439,6 +465,8 @@ class HardRules(Base):
         """A view, a comment that says the word, and the usage a boss has: gh with --body-file, gh api reads, cp,
         mkdir, systemctl --user status, git with plain arguments."""
         self.sb.stub("codex", answer=approve())
+        self.sb.stub("gh")
+        self.sb.stub_script("systemctl", "exit 0")
         commands = ("gh pr view 5",
                     "gh pr comment 5 --body 'merge when green'",
                     "gh pr comment 5 --body-file notes.md --repo o/r",
@@ -448,8 +476,6 @@ class HardRules(Base):
                     "gh pr -R=o/r checks 5",
                     "gh pr --repo= view 5",
                     "gh pr -R o/r -Ro/r comment 5 --body 'merge'",
-                    "github pr merge-notes",
-                    "my-gh pr merge-notes",
                     "gh api repos/o/r/pulls/5",
                     "gh api repos/o/r/commits/abc/check-runs -q .total_count",
                     "cp notes.md copy.md",
@@ -464,6 +490,9 @@ class HardRules(Base):
                 self.assertNotIn("REFUSED", r.stderr)
         # not refused means the reviewer was asked: once for each command
         self.assertEqual(len(self.sb.calls_of("codex")), len(commands))
+        # --dry-run resolves the program and asks gh for its aliases, as a real run would
+        self.assertEqual([c.argv for c in self.sb.calls_of("gh") if c.argv[:1] == ["alias"]],
+                         [["alias", "list"]] * sum(c.startswith("gh") for c in commands))
 
     def test_the_merge_endpoint_is_refused_for_any_method_since_gh_pr_view_answers_whether_it_merged(self):
         for command in ("gh api repos/o/r/pulls/5/merge", "gh api repos/o/r/pulls/5/merge --method GET",
@@ -481,7 +510,7 @@ class HardRules(Base):
                 r = self.dry(command)
                 self.assertEqual(r.returncode, 5, r.stdout)
                 self.assertTrue(r.stderr.startswith(
-                    "boss-run: REFUSED by the argument gate — program that runs another command\n"), r.stderr)
+                    "boss-run: REFUSED by the argument gate — program not on boss-run's list\n"), r.stderr)
         self.assertNotCalled("codex", "claude")
 
     def test_curl_wget_and_tar_are_refused_by_name_before_any_reviewer(self):
@@ -489,7 +518,7 @@ class HardRules(Base):
             with self.subTest(command):
                 r = self.dry(command)
                 self.assertEqual(r.returncode, 5, r.stdout)
-                self.assertIn("does not show", r.stderr.splitlines()[0])
+                self.assertIn("not on boss-run's list", r.stderr.splitlines()[0])
         self.assertNotCalled("codex", "claude")
 
     def test_an_argument_that_is_not_utf8_is_refused(self):
@@ -654,8 +683,8 @@ class SandboxSeal(Base):
     def test_inside_an_approved_command_no_real_reviewer_or_tool_resolves(self):
         self.sb.stub("codex", answer=approve())
         self.sb.stub("claude")
-        self.sb.stub_script("looker", 'command -v gh codex claude tmux > "$PWD/found.txt"')
-        r = self.live("looker")
+        self.sb.stub_script("ls", 'command -v gh codex claude tmux > "$PWD/found.txt"')
+        r = self.live("ls")
         self.assertEqual(r.returncode, 0, r.stderr)
         found = (self.sb.work / "found.txt").read_text().split()
         self.assertEqual(found, [str(self.sb.stubs / "codex"), str(self.sb.stubs / "claude")])
@@ -779,11 +808,11 @@ class RenderedPrompt(Base):
         for arg in ["a & b", "https://example.test/x?a=1&b=2", "\\& \\\\ \\n",
                     "$HOME `date` $(id) %s %d ${x//a/&}", "{{WHY}} {{CWD}}", "true && echo done", "ls 2>&1 | head -1"]:
             with self.subTest(arg=arg):
-                prompt = self.prompt_for(WHY, "echo", arg)
-                self.assertTrue(prompt.endswith("\nCOMMAND: " + shlex.join(["echo", arg])), prompt[-200:])
+                prompt = self.prompt_for(WHY, "cat", arg)
+                self.assertTrue(prompt.endswith("\nCOMMAND: " + shlex.join(["cat", arg])), prompt[-200:])
 
     def test_a_single_literal_argument_reaches_the_reviewer_as_the_argument_list_it_runs(self):
-        for cmd, shown in (("echo a'b'\"c d\"", "echo 'abc d'"),
+        for cmd, shown in (("cat a'b'\"c d\"", "cat 'abc d'"),
                            ("git   status   --short", "git status --short")):
             with self.subTest(cmd=cmd):
                 prompt = self.prompt_for(WHY, cmd)
@@ -794,8 +823,8 @@ class RenderedPrompt(Base):
         # Quoted back, a newline is never last; it is still shown as the byte it is.
         for arg in ("a\\\n", "true\n\n", "two\nlines"):
             with self.subTest(arg=arg):
-                prompt = self.prompt_for(WHY, "echo", arg)
-                self.assertTrue(prompt.endswith("\nCOMMAND: " + shlex.join(["echo", arg])), repr(prompt[-40:]))
+                prompt = self.prompt_for(WHY, "cat", arg)
+                self.assertTrue(prompt.endswith("\nCOMMAND: " + shlex.join(["cat", arg])), repr(prompt[-40:]))
 
     def test_the_whole_prompt_is_the_template_with_the_three_values_in_literally(self):
         why = "tidy up the A&B && C \\ branch"
@@ -806,9 +835,9 @@ class RenderedPrompt(Base):
         self.assertEqual(prompt, expected)
 
     def test_a_placeholder_written_inside_a_value_is_not_expanded_again(self):
-        prompt = self.prompt_for("explain {{CMD}} and {{CWD}}", "echo hi")
+        prompt = self.prompt_for("explain {{CMD}} and {{CWD}}", "cat hi")
         self.assertIn("INTENT: explain {{CMD}} and {{CWD}}\n", prompt)
-        self.assertEqual(prompt.count("COMMAND: echo hi"), 1)
+        self.assertEqual(prompt.count("COMMAND: cat hi"), 1)
 
 
 class FailClosed(Base):

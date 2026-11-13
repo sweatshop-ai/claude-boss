@@ -36,7 +36,7 @@ BOSS_RUN = HERE / "bin" / "boss-run"
 
 # The real binaries a boss-run needs, and nothing else.
 TOOLS = ("bash sh env jq date mkdir mktemp cat grep sed tr head tail rm timeout "
-         "dirname readlink sleep touch wc python3 sort cut setsid").split()
+         "dirname readlink sleep touch wc python3 sort cut setsid cp mv ls git").split()
 # Names that must never resolve to a real binary inside the sandbox.
 FORBIDDEN = ("codex", "claude", "gh", "tmux")
 
@@ -124,6 +124,9 @@ class Sandbox:
                 if real is None:
                     raise RuntimeError("sandbox needs the real %r on PATH" % name)
                 (self.tools / name).symlink_to(os.path.abspath(real))
+            # boss-run resolves argv[0] from fixed directories, never from PATH; the owner's file names
+            # more, and here that is the sandbox: its stubs, then its tools.
+            (self.cfg / "boss-run-trusted-path").write_text("%s\n%s\n" % (self.stubs, self.tools))
             self._bash = os.path.abspath(shutil.which("bash"))
             self.env = {
                 "PATH": "%s:%s" % (self.stubs, self.tools),

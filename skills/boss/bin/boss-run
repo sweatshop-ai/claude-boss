@@ -11,11 +11,14 @@
 # redirected after the reviewer has read it (ticket 53b; PR 148 tried to prove a shell
 # string harmless instead, and Codex found twelve ways around it in three rounds).
 #
-# Three gates, in order (the gh/git alias probe of gate 1 runs last, after the APPROVE):
+# Three gates, in order (after the APPROVE the program is resolved from fixed directories, not PATH):
 #   1. argv_gate.py. The command becomes an argument list, or is refused: a single
-#      argument must be plain words and quotes; argv[0] must not be a program that runs
-#      another command or a code string; gh and git may not name their own aliases or
-#      extensions or be asked to run a program. Nothing runs, no reviewer sees it.
+#      argument must be plain words and quotes; argv[0] must be a bare name on the gate's
+#      list of programs (gh, git, cp, mv, mkdir, touch, rm, ls, cat, head, tail, jq, grep,
+#      rg, date, systemctl status/show), with gh and git limited to listed subcommands and
+#      to options that cannot run a program. A shell, an interpreter or any other program
+#      is refused; a boss that needs a script dispatches it to a worker. Nothing runs and
+#      no reviewer sees a refused command.
 #   2. Hard rules. Pattern matches on that list joined with single spaces. No reviewer
 #      can override them and there is no flag to skip them.
 #   3. The reviewer (reviewer_chain.py). Codex first, Opus if Codex is missing or
@@ -135,22 +138,26 @@ check_hard_rules() {
 # argv_gate.py answers one JSON object: exit 0 {ok:true, argv, flat, display}, exit 1
 # {ok:false, rule, detail}. Anything else (a crash, a signal, no python3, output that is not
 # one whole answer) is no answer, and a gate that cannot look refuses.
-# Two calls: the first reads the text and the program's name and runs nothing; the second asks
-# gh and git for their own aliases and extensions, and comes after the reviewer's APPROVE, right
-# before the command runs, so nothing is executed for a command that is refused or rejected.
-ARGV=() ; ARGS=()
+# Two calls: the first reads the text and the program's name and runs nothing; the second comes
+# after the reviewer's APPROVE, right before the command runs: it resolves argv[0] from the gate's
+# fixed directories (PATH is not used) and, for gh, reads the aliases gh reports. Nothing is
+# executed for a command that is refused or rejected, and what runs is the absolute path it found.
+ARGV=() ; ARGS=() ; EXEC=()
 run_gate() {
   local out rc ok rule detail mode=("$@")
-  out=$(python3 -I "${HERE}/../argv_gate.py" "${mode[@]}" --cwd "$CWD" -- "${ARGS[@]}" 2>/dev/null); rc=$?
+  out=$(python3 -I "${HERE}/../argv_gate.py" "${mode[@]}" --cwd "$CWD" --config-dir "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" -- "${ARGS[@]}" 2>/dev/null); rc=$?
   ok=$(jq -r 'select(type == "object") | .ok' <<<"$out" 2>/dev/null) || ok=""
   if [[ $rc -eq 0 && $ok == true ]] && jq -e '(.argv | type == "array" and length > 0 and all(type == "string"))
         and (.flat | type == "string") and (.display | type == "string")' <<<"$out" >/dev/null 2>&1; then
-    if [[ ${mode[0]:-} != --probe-only ]]; then
+    if [[ ${mode[0]:-} == --resolve ]]; then
+      mapfile -d '' -t EXEC < <(jq -j '.exec[] + "\u0000"' <<<"$out")
+      [[ ${#EXEC[@]} -gt 0 && ${EXEC[0]} == /* ]] || { rc=2; ok=""; }
+    else
       mapfile -d '' -t ARGV < <(jq -j '.argv[] + "\u0000"' <<<"$out")
       FLAT=$(jq -r '.flat' <<<"$out")
       CMD=$(jq -r '.display' <<<"$out")
     fi
-    return 0
+    [[ $rc -eq 2 ]] || return 0
   fi
   if [[ $rc -eq 1 && $ok == false ]]; then
     rule=$(jq -r '.rule' <<<"$out"); detail=$(jq -r '.detail' <<<"$out")
@@ -242,9 +249,9 @@ selftest() {
   if [[ $rc -eq 5 ]]; then printf '   ok (exit 5)\n'
   else printf '   FAIL: exit %s\n%s\n' "$rc" "$(sed 's/^/   | /' <<<"$out")"; fails=1; fi
 
-  printf '2. reviewer approves a regenerable-artefact delete matching its intent (exit 0)\n'
-  out=$("$self" --why "delete a docker image of a PR build no longer needed" --dry-run \
-        -- docker rmi memorizer:pr36-selftest 2>&1); rc=$?
+  printf '2. reviewer approves a worktree removal matching its intent (exit 0)\n'
+  out=$("$self" --why "remove the git worktree of a PR build no longer needed" --dry-run \
+        -- git worktree remove /tmp/boss-selftest-pr36-worktree 2>&1); rc=$?
   if [[ $rc -eq 0 ]]; then printf '   ok (exit 0, %s)\n' "$(grep -o 'reviewer: [a-z-]*' <<<"$out" | head -1)"
   else printf '   FAIL: exit %s\n%s\n' "$rc" "$(sed 's/^/   | /' <<<"$out")"; fails=1; fi
 
@@ -259,9 +266,9 @@ selftest() {
   if [[ $rc -eq 5 && $out == *"not fully literal"* ]]; then printf '   ok (exit 5)\n'
   else printf '   FAIL: exit %s\n%s\n' "$rc" "$(sed 's/^/   | /' <<<"$out")"; fails=1; fi
 
-  printf '5. a program that runs another command is refused by name (exit 5)\n'
+  printf '5. a program off the list (a shell) is refused by name (exit 5)\n'
   out=$("$self" --why "say hi" --dry-run -- bash -c 'echo hi' 2>&1); rc=$?
-  if [[ $rc -eq 5 && $out == *"runs another command"* ]]; then printf '   ok (exit 5)\n'
+  if [[ $rc -eq 5 && $out == *"not on boss-run's list"* ]]; then printf '   ok (exit 5)\n'
   else printf '   FAIL: exit %s\n%s\n' "$rc" "$(sed 's/^/   | /' <<<"$out")"; fails=1; fi
 
   if [[ $fails -eq 0 ]]; then printf 'selftest: all ok\n'; exit 0; fi
@@ -294,7 +301,7 @@ if [[ $# -eq 1 ]]; then CMD=$1; else CMD=$(printf '%q ' "$@"); CMD=${CMD% }; fi
 FLAT="$*"
 
 ARGS=("$@")
-if [[ $# -eq 1 ]]; then run_gate --single --no-probe || finish 5; else run_gate --no-probe || finish 5; fi
+if [[ $# -eq 1 ]]; then run_gate --single || finish 5; else run_gate || finish 5; fi
 check_hard_rules || finish 5
 
 # The command is the template's last text, and $(...) strips trailing newlines: the reviewer
@@ -319,7 +326,7 @@ fi
 # starts the program, and the answer is as fresh as it can be when the command runs.
 APPROVED_BY=$REVIEWER ; APPROVED_VERDICT=$VERDICT ; APPROVED_REASON=$REASON
 ARGS=("${ARGV[@]}")
-run_gate --probe-only || finish 5
+run_gate --resolve || finish 5
 REVIEWER=$APPROVED_BY ; VERDICT=$APPROVED_VERDICT ; REASON=$APPROVED_REASON
 printf 'boss-run: APPROVE (reviewer: %s) — %s\n' "$REVIEWER" "$REASON"
 if [[ $DRY -eq 1 ]]; then
@@ -328,7 +335,7 @@ if [[ $DRY -eq 1 ]]; then
 fi
 
 # No shell: the list the reviewer read is the list that runs.
-( cd "$CWD" && exec "${ARGV[@]}" )
+( cd "$CWD" && exec -- "${EXEC[@]}" )
 rc=$?
 printf 'boss-run: command exited %s\n' "$rc"
 log_line "$rc"
