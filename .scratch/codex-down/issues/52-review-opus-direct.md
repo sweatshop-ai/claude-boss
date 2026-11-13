@@ -18,4 +18,4 @@
 
 - [x] Tests first: `test_boss_review_direct.py` (review, record, gate reading, comment, refusals, `_sound`, command), `SkipCodex` and a Cli test in `test_reviewer_chain.py`, `files_problem` in `test_boss_merge.py`
 - [x] CHANGELOG (Unreleased), SKILL.md rule 2
-- [ ] CI green, review round recorded
+- [x] CI green (1513881), review round recorded (round 1, provisional Opus GO on 0028f9e)
