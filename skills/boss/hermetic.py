@@ -119,7 +119,7 @@ class Sandbox:
                   self.work, self.tmp, self.side):
             d.mkdir()
         try:
-            for name in (*TOOLS, *extra_tools):
+            for name in dict.fromkeys((*TOOLS, *extra_tools)):
                 real = shutil.which(name)
                 if real is None:
                     raise RuntimeError("sandbox needs the real %r on PATH" % name)
