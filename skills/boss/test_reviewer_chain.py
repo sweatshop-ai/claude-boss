@@ -103,6 +103,33 @@ class Fallbacks(Base):
         self.assertNotCalled("claude")
 
 
+class SkipCodex(Base):
+    """Ticket 52: a caller that was never going to ask Codex (review by risk) runs the fallback alone."""
+
+    def test_skip_codex_runs_only_the_fallback_and_codex_is_never_started(self):
+        self.sb.stub("codex", answer=approve())
+        self.sb.stub("claude", answer=approve())
+        result = self.chain(fallback=rc.OPUS, skip_codex=True)
+        self.assertEqual(result.reviewer, "opus")
+        self.assertEqual([(a.reviewer, a.reason) for a in result.attempts], [("opus", "answered")])
+        self.assertNotCalled("codex")
+        self.assertEqual(len(self.sb.calls_of("claude")), 1)
+
+    def test_skip_codex_with_a_fallback_that_says_nothing_is_none_with_one_attempt(self):
+        self.sb.stub("claude", answer=RAMBLE)
+        result = self.chain(fallback=rc.OPUS, skip_codex=True)
+        self.assertEqual(result.reviewer, "none")
+        self.assertEqual([(a.reviewer, a.reason) for a in result.attempts], [("opus", "noverdict")])
+        self.assertNotCalled("codex")
+        self.assertEqual(len(self.sb.calls_of("claude")), 1)
+
+    def test_skip_codex_without_a_fallback_is_a_value_error_and_nothing_runs(self):
+        self.sb.stub("codex", answer=approve())
+        with self.assertRaises(ValueError):
+            self.chain(skip_codex=True)
+        self.assertNotCalled("codex", "claude")
+
+
 RAMBLE = "I would need more context before I can say anything about this."
 
 
@@ -874,6 +901,25 @@ class Cli(Base):
                      "--fallback-when", "absent,timeout,error")
         self.assertEqual(r.returncode, 1)
         self.assertNotCalled("claude")
+
+    def test_the_command_takes_skip_codex_and_prints_one_attempt(self):
+        self.sb.stub("codex", answer=approve())
+        self.sb.stub("claude", answer="VERDICT: GO")
+        r = self.cli("--words", "GO,NO-GO", "--fallback", "opus", "--skip-codex")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        data = json.loads(r.stdout)
+        self.assertEqual((data["reviewer"], [a["reviewer"] for a in data["attempts"]]), ("opus", ["opus"]))
+        self.assertNotCalled("codex")
+        self.assertEqual(len(self.sb.calls_of("claude")), 1)
+
+    def test_the_command_refuses_skip_codex_without_a_fallback_or_with_no_fallback(self):
+        self.sb.stub("codex", answer=approve())
+        for args in (["--skip-codex"], ["--skip-codex", "--no-fallback"]):
+            with self.subTest(args):
+                r = self.cli("--words", "GO,NO-GO", *args)
+                self.assertEqual(r.returncode, 2, r.stderr)
+                self.assertEqual(r.stdout, "")
+        self.assertNotCalled("codex", "claude")
 
     def test_no_fallback_is_codex_only_and_the_match_rule_defaults_to_whole_tokens(self):
         self.sb.stub("codex", answer="VERDICT: GOOD")

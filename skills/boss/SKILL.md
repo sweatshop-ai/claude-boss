@@ -707,9 +707,12 @@ runs at about 75k tokens each used up the weekly Codex quota.
 
 1. Codex reviews a PR once (one more run only under rule 3), and only a PR whose code touches gates (merge, review, claim,
    guard or consent code), security (the sensitive list below), deploys or data.
-2. A tests-only or docs-only PR merges on green CI with at most one Opus pass, run as a fresh
-   Opus agent over the diff. Not `boss_review.py`: it always asks Codex first and runs Opus
-   only when Codex does not answer. The gate knows the rule (ticket 50): a provisional GO on
+2. A tests-only or docs-only PR merges on green CI with at most one Opus pass. Run it with
+   `boss_review.py --repo R --pr N --checkout DIR --author NAME --opus-direct` (ticket 52; no `--track`): it refuses
+   (exit 5, the file named) unless every file the PR changes is a test or narrow docs by the gate's own
+   classification, runs Opus without asking Codex, and records the provisional round the gate accepts, with no Codex
+   failure counted and no Codex recheck owed. Without the flag `boss_review.py` always asks Codex first.
+   The gate knows the rule (ticket 50): a provisional GO on
    the live head merges on any base when every file the PR changes is a test (`test_paths`) or
    docs (`README.md`, `CHANGELOG.md`, `docs/*.md`; never `SKILL.md`, `AGENTS.md`, `CLAUDE.md` or
    anything under `skills`, `commands`, `agents`, `hooks`, `.claude`, `.github`) and every check

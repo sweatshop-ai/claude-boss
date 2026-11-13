@@ -462,6 +462,15 @@ def touched_by_the_pr(own: tuple, since_changes: tuple) -> list[str]:
 OWN_STATUSES = ("ahead", "diverged", "identical")       # a PR's files against a base that may have moved on
 
 
+def files_problem(files: tuple, deploy: Deploy) -> str | None:
+    """Why these files, the PR's own against its base, are not all docs or tests (rule 2's file condition, which
+    `boss_review.py --opus-direct` asks too, ticket 52), None when they are. Fails closed: no `test_paths`, no file."""
+    if deploy.test_paths is None:
+        return "no test_paths in the deploy list"
+    stray = not_docs_or_tests(files, deploy.test_paths)
+    return "not docs or tests: " + ", ".join(stray[:5]) if stray else None
+
+
 def docs_tests_problem(files: tuple, head: str, deploy: Deploy, repo: str, io_timeout: float) -> str | None:
     """Why the PR is not a docs/tests-only PR with all its CI green on `head` (rule 2's conditions), None when it is.
     `files` are the PR's own files against its base."""
@@ -469,9 +478,9 @@ def docs_tests_problem(files: tuple, head: str, deploy: Deploy, repo: str, io_ti
         return "no test_paths in the deploy list"
     if not deploy.required_checks:
         return "no required_checks in the deploy list (the check runs that exist now do not say all of CI has run)"
-    stray = not_docs_or_tests(files, deploy.test_paths)
-    if stray:
-        return "not docs or tests: " + ", ".join(stray[:5])
+    why = files_problem(files, deploy)
+    if why:
+        return why
     green, why = read_checks(repo, head, io_timeout, deploy.required_checks)
     return None if green else why
 
