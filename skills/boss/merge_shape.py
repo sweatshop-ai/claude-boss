@@ -29,18 +29,17 @@ MAX_DEPTH = 8   # nested $( ), sh -c, eval; deeper is refused rather than follow
 
 SHELLS = {"sh", "bash", "dash", "zsh", "ksh", "mksh", "ash", "fish", "csh", "tcsh"}
 # Run another command given in their own arguments: the command is found among the later words.
-WRAPPERS = {"env", "command", "exec", "builtin", "nohup", "nice", "time", "timeout", "sudo", "doas",
-            "stdbuf", "setsid", "ionice", "watch", "unbuffer", "chronic", "script", "flock"}
+WRAPPERS = {"env", "command", "exec", "builtin", "nohup", "nice", "time", "coproc", "timeout", "sudo", "doas",
+            "stdbuf", "setsid", "ionice", "watch", "unbuffer", "chronic", "script", "flock", "su", "runuser"}
 # Feed the command more arguments from stdin, which is not in the text: gh behind them is refused.
 STDIN_FEEDERS = {"xargs", "parallel"}
 FIND_EXEC = {"-exec", "-execdir", "-ok", "-okdir"}
-SKIPPED_RESERVED = {"if", "then", "else", "elif", "while", "until", "do", "!", "{", "}", "time", "coproc"}
-# gh's own commands. A first word outside this list may be an alias (`gh alias set m 'pr merge'`)
-# or an extension, and neither can be read from the text.
-GH_KNOWN = {"agent-task", "alias", "api", "attestation", "auth", "browse", "cache", "codespace", "completion",
-            "config", "copilot", "extension", "gist", "gpg-key", "help", "issue", "label", "licenses", "org",
-            "pr", "preview", "project", "release", "repo", "ruleset", "run", "search", "secret", "ssh-key",
-            "status", "variable", "version", "workflow"}
+SKIPPED_RESERVED = {"if", "then", "else", "elif", "while", "until", "do", "!", "{", "}"}
+# Environment a command may set to change what runs or where gh looks: an unseen startup file for
+# bash, another gh config, another home.
+ENV_TRICKS = re.compile(r"^(BASH_ENV|ENV|GH_CONFIG_DIR|XDG_CONFIG_HOME|XDG_DATA_HOME|HOME)=")
+# Text that writes gh's own config, where aliases live, or its extensions.
+GH_FILES = re.compile(r"gh/(config|hosts)\.yml|gh/extensions|\.config/gh\b")
 API_VALUE_LONG = {"--method", "--field", "--raw-field", "--header", "--jq", "--template", "--input",
                   "--hostname", "--cache", "--preview"}
 API_VALUE_SHORT = {"-X", "-F", "-f", "-H", "-q", "-t", "-p"}
@@ -72,7 +71,7 @@ class Word:
 
 class Cmd:
     def __init__(self):
-        self.words, self.subs, self.bodies, self.here = [], [], [], None
+        self.words, self.subs, self.bodies, self.here, self.targets = [], [], [], None, []
 
 
 # ------------------------------------------------------------------ lexer ----
@@ -332,6 +331,7 @@ def parse(src):
         elif t[0] == "redir":
             _, op, target, body = t
             cur.subs += target.subs
+            cur.targets.append(target)
             if op == "<<<":
                 cur.here = None if target.exp else target.val
             elif body is not None:
@@ -376,6 +376,21 @@ def check_cmd(cmd, stdin, depth):
     while i < len(words) and (ASSIGN.match(words[i].val) or (words[i].val in SKIPPED_RESERVED and not words[i].quoted)):
         i += 1
     words = words[i:]
+    for w in cmd.words + cmd.targets:
+        if ENV_TRICKS.match(w.val):
+            raise opaque("%s changes what runs or where gh looks: %s" % (w.val.partition("=")[0], _shown(cmd.words)))
+        if GH_FILES.search(w.val):
+            raise opaque("a command that touches gh's own config or extensions: %s" % _shown(cmd.words))
+    # A word of several tokens may be a command line handed to a program that runs it (`env -S '...'`,
+    # `flock -c '...'`, `script -c '...'`, `ssh host '...'`): read it as one, and keep only a merge.
+    for w in cmd.words:
+        text = w.val.partition("=")[2] if w.val.startswith("-") else w.val     # `--split-string='...'`
+        if re.search(r"\s", text) and not w.exp:
+            try:
+                scan_src(text, depth + 1)
+            except Finding as f:
+                if f.name == MERGE:
+                    raise
     if not words:
         return
     head = words[0]
@@ -422,7 +437,9 @@ def check_shell(words, stdin, depth):
         if s == "--":
             i += 1
             break
-        if s in ("-o", "+o", "-O", "+O", "--rcfile", "--init-file"):
+        if s in ("--rcfile", "--init-file") or s.startswith(("--rcfile=", "--init-file=")):
+            raise opaque("a shell started with a startup file the rule cannot read: %s" % _shown(words))
+        if s in ("-o", "+o", "-O", "+O"):
             i += 2
             continue
         if s.startswith("-") and len(s) > 1:
@@ -490,23 +507,73 @@ def _gh_positionals(args, want):
     return pos, i
 
 
+def _gh_dirs():
+    home = os.path.expanduser("~")
+    conf = os.environ.get("GH_CONFIG_DIR") or os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.join(home, ".config"), "gh")
+    data = os.path.join(os.environ.get("XDG_DATA_HOME") or os.path.join(home, ".local", "share"), "gh", "extensions")
+    return conf, data
+
+
+def _gh_alias(name):
+    """The expansion of gh alias `name` in the installed gh's config, or None. Anything the small
+    reader cannot be sure of is a Finding."""
+    conf, _ = _gh_dirs()
+    path = os.path.join(conf, "config.yml")
+    try:
+        with open(path, encoding="utf-8") as fh:
+            lines = fh.read().splitlines()
+    except FileNotFoundError:
+        return None
+    except OSError:
+        raise opaque("gh's config cannot be read, so an alias for %s cannot be ruled out" % name)
+    in_aliases = False
+    for line in lines:
+        if re.match(r"^aliases:\s*$", line):
+            in_aliases = True
+            continue
+        if in_aliases and line and not line[0].isspace():
+            break
+        m = in_aliases and re.match(r"^\s+(\S+?):\s*(.*)$", line)
+        if m and m.group(1).strip("'\"") == name:
+            val = m.group(2).strip()
+            if not val or val[0] in "|>&*[{":
+                raise opaque("gh alias %s is written in a form the rule cannot read" % name)
+            if val[0] in "'\"" and val[-1] == val[0] and len(val) > 1:
+                val = val[1:-1].replace("''", "'") if val[0] == "'" else val[1:-1]
+            return val
+    return None
+
+
 def check_gh(args, gh):
     pos, i = _gh_positionals(args, 1)
     if not pos:
         return
     p0 = pos[0]
-    if p0 in ("pr", "alias"):
+    if p0 in ("pr", "alias", "extension"):
         pos, _ = _gh_positionals(args, 2)
         p1 = pos[1] if len(pos) > 1 else None
         if p0 == "pr" and p1 == "merge":
             raise Finding(MERGE, "gh pr merge, as the shell reads it: %s %s" % (gh, _shown(args)))
         if p0 == "alias" and p1 in ("set", "import"):
             raise opaque("gh alias %s defines a command the rule cannot read: %s" % (p1, _shown(args)))
+        if p0 == "extension" and p1 not in ("list", "ls", "search", "browse", None):
+            raise opaque("gh extension %s installs or runs code the rule cannot read: %s" % (p1, _shown(args)))
     elif p0 == "api":
         _, k = _gh_positionals(args, 1)
         check_api(args[k:], gh, args)
-    elif p0 not in GH_KNOWN:
-        raise opaque("gh %s is not a built-in command; it may be an alias for pr merge" % p0)
+    else:
+        # not one of the commands above: a user's alias or an extension may be a merge, and gh
+        # keeps both where this can look (an alias in its config, an extension as a directory)
+        expansion = _gh_alias(p0)
+        if expansion is not None:
+            if expansion.startswith("!"):
+                scan_src(expansion[1:], MAX_DEPTH - 1)
+            else:
+                words = [t[1] for t in Lexer(expansion).tokens() if t[0] == "word"]
+                check_gh(words + args[i:], gh)
+        _, data = _gh_dirs()
+        if os.path.isdir(os.path.join(data, "gh-" + p0)):
+            raise opaque("gh %s is an extension, whose code the rule cannot read" % p0)
 
 
 def check_api(rest, gh, args):

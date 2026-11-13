@@ -18,6 +18,13 @@
 - **Cost accepted:** `gh pr view $N` (variable in an argument) and `echo $(date)` still pass to the reviewer; `$GH pr view`, `gh pr $S` and `timeout $T gh ...` are refused. A boss that hand-types literal numbers loses nothing.
 - **Out of scope, said plainly:** other languages (`python3 -c`, `perl -e`, `ssh host '...'`) can still spell a merge; they stay with the reviewer and the owner's own rules. Shell functions and aliases defined earlier in the same command are not tracked (`bash -lc` has no aliases).
 
+## Round 1 (Codex NO-GO on 4c516e9, four class a findings) and what changed
+
+- **A command line handed to a program that runs it** (`env -S '"gh" pr merge 5'`, `flock -c`, `script -c`, `watch`, `su -c`, `ssh host '...'`): any word of several tokens (also the part after `=` of an option) is now read as shell text, and a merge found in it refuses. Other findings in it are ignored, so a `git commit -m 'a b c'` still passes. This replaces listing each program's string option: the list is unbounded, the shape is not.
+- **`time -p` and `coproc JOB`** are wrappers, not skipped reserved words: the command is looked for behind their options and name.
+- **Startup files and other config**: `BASH_ENV=`, `ENV=`, `GH_CONFIG_DIR=`, `XDG_CONFIG_HOME=`, `XDG_DATA_HOME=` and `HOME=` set anywhere (a prefix, `export`, `env`, a redirection target), `--rcfile`/`--init-file`, and any text naming gh's own config or extension files are refused: each changes what runs or where gh looks, from a place the text does not show.
+- **No list of gh's built-in commands.** A list is right for one gh version only. For a first word that is not `pr`, `api`, `alias` or `extension`, the scanner now looks where gh keeps what could be a merge: an alias in gh's `config.yml` (`GH_CONFIG_DIR`, else `XDG_CONFIG_HOME/gh`, else `~/.config/gh`) is expanded and scanned (a `!` alias as shell); an extension directory `gh-<name>` under `XDG_DATA_HOME/gh/extensions` is refused by name; a config that cannot be read, or an alias in a form the small reader is not sure of (block scalar, anchor, loop), is refused. A word that is neither (`gh copilot`, a typo) is gh's own to answer. `gh extension` other than `list`, `search` and `browse` is refused (it installs or runs code the text does not show), so an alias or extension cannot appear inside the same command that creates it.
+
 ## Done when
 
 - [x] Tests first: `test_merge_shape.py` (54 hidden merges, 51 opaque forms, 54 clean commands, the CLI contract, nesting limit); `test_boss_run.py` HardRules: the hidden merges refused with `seen:` in the message, the log and the exit, the same as an argument list, the opaque ones named, harmless look-alikes still reach the reviewer, a shape check that does not answer refuses

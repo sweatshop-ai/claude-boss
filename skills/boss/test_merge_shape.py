@@ -3,10 +3,14 @@
 
 Run: python3 skills/boss/test_merge_shape.py
 """
+import os
+import shutil
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -71,6 +75,21 @@ MERGES = [
     "2>/dev/null gh pr 'merge' 5",
     "gh pr merge\n",
     "echo ok\ngh pr 'merge' 5",
+    # round 1 of the review: a command line handed to a program that runs it
+    "env -S '\"gh\" pr merge 5'",
+    "env --split-string='\"gh\" pr merge 5'",
+    "flock -c '\"gh\" pr merge 5' lockfile",
+    "script -c '\"gh\" pr merge 5' /dev/null",
+    "watch '\"gh\" pr merge 5'",
+    "watch -n 5 '\"gh\" pr merge 5'",
+    "su -c '\"gh\" pr merge 5' user",
+    "ssh host '\"gh\" pr merge 5'",
+    "python3 -c 'import os; os.system(\"\\\"gh\\\" pr merge 5\")'",
+    # a reserved word and its options in front of the command
+    "time -p sh -c '\"gh\" pr merge 5'",
+    "time -p gh pr 'merge' 5",
+    "coproc JOB sh -c '\"gh\" pr merge 5'",
+    "coproc gh pr 'merge' 5",
 ]
 
 # What the shell cannot be seen through: refused, and the reason says so.
@@ -109,8 +128,6 @@ OPAQUE_CMDS = [
     "find . -exec $GH {} \\;",
     "gh alias set m 'pr merge'",
     "gh alias import aliases.yml",
-    "gh m 5",
-    "gh extension-name 5",
     "gh api -X PUT repos/o/r/pulls/$N/merge",
     "gh api -X PUT $EP",
     "gh api graphql -f query=@q.graphql",
@@ -126,6 +143,21 @@ OPAQUE_CMDS = [
     "echo $(echo (",
     "bash <<EOF\n$X\nEOF",
     "cat <<EOF\nnever closed",
+    # round 1: a startup file or another config changes what runs
+    "BASH_ENV=/tmp/unseen bash -c true",
+    "export BASH_ENV=/tmp/unseen; bash -c true",
+    "env BASH_ENV=/tmp/unseen bash -c true",
+    "ENV=/tmp/unseen sh -c true",
+    "bash --rcfile /tmp/unseen -ic true",
+    "bash --init-file=/tmp/unseen -c true",
+    "GH_CONFIG_DIR=/tmp/x gh pr view 5",
+    "XDG_CONFIG_HOME=/tmp/x gh pr view 5",
+    "HOME=/tmp/x gh pr view 5",
+    "echo 'aliases:' >> ~/.config/gh/config.yml",
+    "cp x /root/.config/gh/config.yml",
+    "gh extension install o/gh-x",
+    "gh extension exec x",
+    "gh extension upgrade --all",
 ]
 
 CLEAN = [
@@ -180,6 +212,17 @@ CLEAN = [
     "for f in a b; do echo $f; done",
     "while read x; do echo $x; done < in.txt",
     "gh alias list",
+    "gh extension list",
+    "gh copilot",              # a gh command newer than any list: no alias and no extension of that name
+    "gh m 5",                  # nothing by that name in gh's config, so gh itself will refuse it
+    "time -p ls",
+    "time ls",
+    "coproc JOB ls",
+    "watch -n 5 ls",
+    "ssh host 'ls -l'",
+    "env -S 'ls -l'",
+    "flock -c 'ls -l' lockfile",
+    "git commit -m 'a b c'",
     "gh pr view 5 && gh pr checks 5",
     "FOO=\"a b\" gh pr view 5",
     "echo 'it'\"'\"'s'",
@@ -204,7 +247,7 @@ class Scan(unittest.TestCase):
                 self.assertIn(f[0], (MERGE, OPAQUE), f)
 
     def test_the_opaque_ones_name_the_opacity_not_a_merge(self):
-        for cmd in ("$GH pr view 5", "bash script.sh", "gh m 5", "eval \"$X\"", "echo $("):
+        for cmd in ("$GH pr view 5", "bash script.sh", "gh extension exec x", "eval \"$X\"", "echo $("):
             with self.subTest(cmd):
                 self.assertEqual(merge_shape.scan(cmd)[0], OPAQUE)
 
@@ -222,6 +265,53 @@ class Scan(unittest.TestCase):
     def test_a_deeply_nested_command_cannot_exhaust_the_scanner(self):
         f = merge_shape.scan("echo " + "$(" * 400 + "x" + ")" * 400)
         self.assertEqual(f[0], OPAQUE)
+
+
+class GhConfig(unittest.TestCase):
+    """An alias lives in gh's config and an extension is a directory; the scanner looks both up
+    where the installed gh keeps them, not in a list of names."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="merge-shape-")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.conf, self.data = Path(self.tmp, "conf"), Path(self.tmp, "data")
+        self.conf.mkdir()
+        (self.data / "gh" / "extensions").mkdir(parents=True)
+        patch = mock.patch.dict(os.environ, {"GH_CONFIG_DIR": str(self.conf), "XDG_DATA_HOME": str(self.data)})
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def config(self, aliases):
+        (self.conf / "config.yml").write_text("version: 1\naliases:\n" + aliases + "other: x\n")
+
+    def test_an_alias_for_pr_merge_is_a_merge_however_it_is_spelled(self):
+        self.config("    m: pr merge\n    mm: 'pr merge $1 --squash'\n    shell: '!gh pr \"merge\" \"$1\"'\n"
+                    "    quoted: \"pr 'merge'\"\n")
+        for cmd in ("gh m 5", "gh mm 5", "gh shell 5", "gh quoted 5", '"gh" "m" 5', "gh -R o/r m 5"):
+            with self.subTest(cmd):
+                self.assertEqual(merge_shape.scan(cmd)[0], MERGE)
+
+    def test_an_alias_for_something_else_passes(self):
+        self.config("    v: pr view\n    co: pr checkout\n")
+        for cmd in ("gh v 5", "gh co 5", "gh nothing-by-that-name"):
+            with self.subTest(cmd):
+                self.assertIsNone(merge_shape.scan(cmd))
+
+    def test_an_alias_in_a_form_the_reader_cannot_be_sure_of_is_refused(self):
+        self.config("    long: |\n      pr merge\n")
+        self.assertEqual(merge_shape.scan("gh long 5")[0], OPAQUE)
+        self.config("    loop: loop\n")
+        self.assertEqual(merge_shape.scan("gh loop 5")[0], OPAQUE)
+
+    def test_an_unreadable_config_refuses_a_gh_word_it_cannot_place(self):
+        (self.conf / "config.yml").mkdir()
+        self.assertEqual(merge_shape.scan("gh m 5")[0], OPAQUE)
+        self.assertIsNone(merge_shape.scan("gh pr view 5"))
+
+    def test_an_extension_is_refused_by_name(self):
+        (self.data / "gh" / "extensions" / "gh-x").mkdir()
+        self.assertEqual(merge_shape.scan("gh x 5")[0], OPAQUE)
+        self.assertIsNone(merge_shape.scan("gh y 5"))
 
 
 class Cli(unittest.TestCase):

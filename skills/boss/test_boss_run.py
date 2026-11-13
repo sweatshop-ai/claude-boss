@@ -389,7 +389,9 @@ class HardRules(Base):
         """Ticket 53: the raw-text pattern misses `"gh" pr merge 5`; the rule also reads the shell's tokens."""
         cases = ['"gh" pr merge 5', 'gh pr "merge" 5', 'gh api -X "PUT" repos/o/r/pulls/5/merge',
                  r"g\h pr merge 5", "gh pr $'merge' 5", "env gh pr 'merge' 5", "echo $(gh pr 'merge' 5)",
-                 "bash -c 'gh pr \"merge\" 5'", "eval gh pr '\"merge\"' 5", "true && 'gh' pr merge 5"]
+                 "bash -c 'gh pr \"merge\" 5'", "eval gh pr '\"merge\"' 5", "true && 'gh' pr merge 5",
+                 "env -S '\"gh\" pr merge 5'", "time -p sh -c '\"gh\" pr merge 5'",
+                 "coproc JOB sh -c '\"gh\" pr merge 5'", "flock -c '\"gh\" pr merge 5' f"]
         self.sb.stub("gh")
         for command in cases:
             with self.subTest(command):
@@ -415,7 +417,8 @@ class HardRules(Base):
 
     def test_what_the_rule_cannot_see_through_is_refused_and_named(self):
         cases = ["$GH pr view 5", "gh pr $SUB 5", "eval \"$X\"", "bash script.sh", "echo gh | sh",
-                 "xargs gh pr view", "gh m 5", "gh alias set m 'pr merge'", "gh api graphql -f query=@q.graphql",
+                 "xargs gh pr view", "gh extension exec x", "gh alias set m 'pr merge'",
+                 "BASH_ENV=/tmp/unseen bash -c true", "bash --rcfile /tmp/unseen -ic true", "gh api graphql -f query=@q.graphql",
                  "echo $(", "source ./x.sh"]
         for command in cases:
             with self.subTest(command):
@@ -426,6 +429,17 @@ class HardRules(Base):
                 self.assertIn("  seen: ", r.stderr)
                 self.assertIn("No reviewer can override this", r.stderr)
         self.assertNotCalled("codex", "claude")
+
+    def test_an_alias_in_gh_config_that_is_a_merge_is_refused_and_one_that_is_not_is_not(self):
+        conf = self.sb.home / ".config" / "gh"
+        conf.mkdir(parents=True)
+        (conf / "config.yml").write_text("aliases:\n    m: pr merge\n    v: pr view\n")
+        self.sb.stub("codex", answer=approve())
+        r = self.dry("gh m 5")
+        self.assertEqual(r.returncode, 5, r.stdout + r.stderr)
+        self.assertIn("REFUSED by hard rule — PR merge outside boss_merge", r.stderr)
+        self.assertEqual(self.dry("gh v 5").returncode, 0)
+        self.assertEqual(len(self.sb.calls_of("codex")), 1)     # only the view reached the reviewer
 
     def test_a_command_that_only_looks_like_it_builds_a_command_still_goes_to_the_reviewer(self):
         self.sb.stub("codex", answer=approve())
