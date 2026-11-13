@@ -738,9 +738,10 @@ runs at about 75k tokens each used up the weekly Codex quota.
    the diff check by hand, and so does one where the base changed 300 files or more.
    The gate reads the base's tip once and makes every compare against that sha, reads it again
    right before `gh pr merge` (moved: `base-moved`, run it again), and after the merge alerts if the
-   merge commit's first parent is not that sha: check what was merged by hand. A `gh pr merge` that
-   returns without merging (a merge queue, auto-merge) is switched off with `--disable-auto` and
-   read back, then refused as `merge-not-completed` with an alert; merge queues are not supported.
+   merge commit's first parent is not that sha: check what was merged by hand. Merge queues are
+   not supported: the gate refuses (`merge-queue-unsupported`) a base with a merge queue and a PR
+   with auto-merge on or in a queue, and when that cannot be read; it never passes `--auto`. A
+   PR that is not merged after `gh pr merge` is `merge-not-completed`, with an alert to check by hand.
 5. Re-measure on 2026-11-27: tokens, minutes and findings per PR, before the grades are
    touched again.
 

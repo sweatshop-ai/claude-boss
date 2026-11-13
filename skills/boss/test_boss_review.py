@@ -179,6 +179,10 @@ class Base(unittest.TestCase):
         if argv[0] == "pr":
             self.assertIn("--repo", argv, argv)
             self.assertEqual(argv[argv.index("--repo") + 1].lower(), REPO.lower(), argv)
+        elif argv[:2] == ["api", "graphql"]:        # the merge gate's one query (ticket 54): the repo is in its variables
+            given = [a.lower() for a in argv]
+            self.assertIn("owner=" + owner, given, argv)
+            self.assertIn("name=" + name, given, argv)
         elif argv[0] == "api":
             self.assertTrue(argv[1].lower().startswith("repos/%s/%s/" % (owner, name)), argv)
         else:

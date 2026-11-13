@@ -328,35 +328,42 @@ def read_first_parent(repo: str, commit: str, io_timeout: float) -> str:
     return sha
 
 
-_QUEUE_QUERY = ("query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name)"
-                "{pullRequest(number:$number){state autoMergeRequest{enabledAt} isInMergeQueue}}}")
+_QUEUE_QUERY = ("query($owner:String!,$name:String!,$base:String!,$number:Int!){repository(owner:$owner,name:$name)"
+                "{mergeQueue(branch:$base){id} pullRequest(number:$number){autoMergeRequest{enabledAt} isInMergeQueue}}}")
 
 
-def stop_queued_merge(repo: str, pr: int, io_timeout: float) -> str:
-    """After a `gh pr merge` that left the PR unmerged (queued, or auto-merge enabled): turn auto-merge off and read
-    back that no auto-merge request and no merge-queue entry is left. "" when verified off, else why not (ticket 54:
-    a merge that completes later is made on a base tip nobody compared)."""
-    run = boss_review._spawn(["gh", "pr", "merge", str(pr), "--repo", repo, "--disable-auto"], io_timeout)
-    if run.timed_out or run.code != 0:
-        return "gh pr merge --disable-auto %s" % ("ran past %ss" % io_timeout if run.timed_out else
-                                                  "failed (%s): %s" % (run.code, run.err.strip()[-200:]))
-    owner, _, name = repo.partition("/")
-    run = boss_review._spawn(["gh", "api", "graphql", "-f", "query=" + _QUEUE_QUERY, "-f", "owner=" + owner,
-                              "-f", "name=" + name, "-F", "number=%d" % pr], io_timeout)
+def queue_problem(repo: str, pr: int, base: str, io_timeout: float) -> tuple[str, str] | None:
+    """(reason, note) when the merge must not be made because something could be left scheduled: a merge queue on the
+    base (a ruleset of type merge_queue, or the queue GitHub reports for the branch, which covers legacy protection too),
+    or an auto-merge request or queue entry the PR already has. None when all of that was read and is absent. Fails
+    closed: whatever cannot be read refuses (ticket 54: the gate never passes `--auto`, so on a base with no queue
+    `gh pr merge` merges or fails and schedules nothing)."""
+    run = boss_review._spawn(["gh", "api", "repos/%s/rules/branches/%s" % (repo, urllib.parse.quote(base, safe="/"))],
+                             io_timeout)
     try:
         if run.timed_out or run.code != 0:
-            raise ValueError("the read-back failed")
-        node = json.loads(run.out.decode("utf-8"))["data"]["repository"]["pullRequest"]
-        auto, queued, state = node["autoMergeRequest"], node["isInMergeQueue"], node["state"]
-        if type(queued) is not bool or not isinstance(state, str):
-            raise ValueError("a field of the wrong kind")
-    except (ValueError, KeyError, TypeError, RecursionError):
-        return "it could not be verified that auto-merge and the merge queue are off"
-    if state == "MERGED":
-        return "the PR merged meanwhile"
-    if auto is not None or queued:
-        return "after --disable-auto the PR still has %s" % ("a merge-queue entry" if queued else "an auto-merge request")
-    return ""
+            raise ValueError("the branch rules could not be read")
+        rules = json.loads(run.out.decode("utf-8"))
+        if not isinstance(rules, list) or not all(isinstance(r, dict) and isinstance(r.get("type"), str) for r in rules):
+            raise ValueError("the branch rules are not a list I can read")
+        if any(r["type"] == "merge_queue" for r in rules):
+            return "merge-queue-unsupported", "%s has a merge-queue rule" % base
+        owner, _, name = repo.partition("/")
+        run = boss_review._spawn(["gh", "api", "graphql", "-f", "query=" + _QUEUE_QUERY, "-f", "owner=" + owner,
+                                  "-f", "name=" + name, "-f", "base=" + base, "-F", "number=%d" % pr], io_timeout)
+        if run.timed_out or run.code != 0:
+            raise ValueError("the merge queue could not be read")
+        repo_node = json.loads(run.out.decode("utf-8"))["data"]["repository"]
+        node = repo_node["pullRequest"]
+        if "mergeQueue" not in repo_node or "autoMergeRequest" not in node or type(node["isInMergeQueue"]) is not bool:
+            raise ValueError("a field is missing")
+        if repo_node["mergeQueue"] is not None:
+            return "merge-queue-unsupported", "%s has a merge queue" % base
+        if node["autoMergeRequest"] is not None or node["isInMergeQueue"]:
+            return "merge-queue-unsupported", "the PR already has an auto-merge request or a merge-queue entry"
+    except (ValueError, KeyError, TypeError, RecursionError) as exc:
+        return "gh-read-failed", "merge queues are not supported and cannot be ruled out: %s" % exc
+    return None
 
 
 class Compare(NamedTuple):
@@ -686,6 +693,9 @@ def merge(repo: str, pr: int, *, dry_run: bool = False, since: str | None = None
         line.update(round=got.round, kind=got.kind)
         if got.exit != EXIT_MERGED:
             return finish(got.exit, got.reason, "refused", note)
+        queued = queue_problem(repo, pr, seen.base, io_timeout)       # before the dry run too: it must say what the merge would
+        if queued:
+            return finish(EXIT_GH_READ if queued[0] == "gh-read-failed" else EXIT_REFUSED, queued[0], "refused", queued[1])
         if dry_run:
             return finish(EXIT_MERGED, got.reason, "allowed")
         try:        # no gh option pins the base: if it moved since the compares, they say nothing about this merge
@@ -729,14 +739,9 @@ def merge(repo: str, pr: int, *, dry_run: bool = False, since: str | None = None
     except (GhRead, KeyError, AttributeError):
         state, now_base, problem = None, None, "unverified"
     if problem:
-        undone = ""
-        if problem == "merge-not-completed":        # queued, or auto-merge on: it would merge later, on a tip nobody compared
-            why = stop_queued_merge(repo, pr, io_timeout)
-            undone = ("; the queued merge was stopped (auto-merge off, not in a merge queue)" if not why else
-                      "; THE MERGE MAY STILL COMPLETE LATER on an unchecked base (%s): the owner must stop it by hand" % why)
         _alert("boss_merge: %s#%d (head %s) after gh pr merge: %s (state %s, base %s, checked on %s, compares made on %s, "
-               "merge made on %s)%s. A merge cannot be undone: the owner must check by hand what was merged"
-               % (key, pr, seen.head, problem, state, now_base, seen.base, seen.base_sha, merged_on, undone))
+               "merge made on %s). A merge cannot be undone: the owner must check by hand what was merged"
+               % (key, pr, seen.head, problem, state, now_base, seen.base, seen.base_sha, merged_on))
         return finish(EXIT_MERGE_FAILED, problem, "failed")
     return finish(EXIT_MERGED, got.reason, "merged")
 
