@@ -2,7 +2,7 @@
 
 **What to build:** the hard rule `PR merge outside boss_merge` in `skills/boss/bin/boss-run` also matches the command after the shell has tokenised it, and refuses what it cannot see through (Codex NO-GO on PR 121, recheck round 5; class a).
 
-**Status:** done
+**Status:** open (Codex NO-GO after 3 rounds, round 3 findings below)
 
 ## The finding, checked on origin/main (7bffd52)
 
@@ -37,3 +37,12 @@
 - [x] Tests first: `test_merge_shape.py` (54 hidden merges, 51 opaque forms, 54 clean commands, the CLI contract, nesting limit); `test_boss_run.py` HardRules: the hidden merges refused with `seen:` in the message, the log and the exit, the same as an argument list, the opaque ones named, harmless look-alikes still reach the reviewer, a shape check that does not answer refuses
 - [x] The existing 59 `test_boss_run.py` tests stay green
 - [x] CHANGELOG (Unreleased)
+
+## Round 3 (Codex NO-GO on d3d7f57, the last round review-by-risk allows) — not fixed
+
+- `${x@P}` (prompt expansion) executes command substitutions in the value of `x`, built piecemeal; a `${...}` is treated as safe outside command position.
+- `check_wrapper` returns after the first `find -exec`; a later `-exec "$GH" pr m'er'ge 5 \;` is not read.
+- The alias reader accepts only a bare `aliases:` line: `aliases: # comment` and flow mappings read as "no aliases".
+- Alias resolution reads gh's config before the command runs; a command can build the config path, write a merge alias and call it in the same approved command.
+
+Pattern across 3 rounds: 12 findings, each a new way for text to hide a command. Each fix added a refusal class, and the next round found the next. The design question for the owner (in the handoff): keep growing the scanner, or refuse by default (an allowlist of simple commands that need no reading), or make the boss not hand-type merges at all.
