@@ -313,11 +313,12 @@ def recheck(track: str, repo: str, checkout: str, author: str = DEFAULT_AUTHOR, 
 
 
 def _cleared(line: str) -> bool:
-    """Does the marker on `line` carry a `cleared=` that tracker reads as an ISO 8601 time with an offset? Anything
-    else (an empty value, `bogus`, a marker tracker cannot read) is not cleared: the release stays stopped."""
+    """Is the marker on `line` one `tracker.validate` accepts, with a `cleared=` in it? A marker tracker cannot
+    validate (a bad t0 or id, a missing or unknown field), an empty value or `cleared=bogus` is not cleared:
+    the release stays stopped."""
     try:
         found = tracker.scan_marker(line)
-        return found is not None and tracker.parse_ts(found[1].get("cleared", ""), "cleared") is not None
+        return found is not None and bool(tracker.validate(found[1])["cleared"])
     except tracker.MarkerError:
         return False
 

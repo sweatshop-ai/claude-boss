@@ -796,6 +796,16 @@ class TheList(Base):
                 run = self.run_list()
                 self.assertEqual((run.returncode, run.stdout), (1, "BLOCKER owner/repo#5 round 02\n"), run.stderr)
 
+    def test_a_valid_cleared_on_a_marker_tracker_rejects_is_not_cleared(self):
+        for what, line in (("bad t0", self.BLOCKER.replace("t0=2026-11-12T10:00+00:00", "t0=bad")),
+                           ("no ask", self.BLOCKER.replace('ask=\"x\"', "")),
+                           ("unknown field", self.BLOCKER.replace("last=0", "last=0 extra=1")),
+                           ("bad id", self.BLOCKER.replace("id=fx0a1b2c3d", "id=fx"))):
+            with self.subTest(what=what):
+                self.put(blockers=line % " cleared=2026-11-12T11:00+00:00")
+                run = self.run_list()
+                self.assertEqual((run.returncode, run.stdout), (1, "BLOCKER owner/repo#5 round 02\n"), run.stderr)
+
     def test_a_cleared_value_with_a_z_offset_clears(self):
         self.put(blockers=self.BLOCKER % " cleared=2026-11-12T11:00Z")
         run = self.run_list()
