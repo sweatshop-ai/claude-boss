@@ -56,6 +56,7 @@ class GoalReviewers(unittest.TestCase):
         self.sb.stub("claude", answer="VERDICT: INCOMPLETE\nREASON: never asked")
         r = self.goal("review", "demo")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(len(self.sb.calls_of("codex")), 1)
         self.assertEqual(self.sb.calls_of("claude"), [])
 
     def test_review_says_so_when_the_chain_itself_did_not_run(self):
@@ -75,6 +76,8 @@ class GoalReviewers(unittest.TestCase):
         r = self.goal("review", "demo")
         self.assertEqual(r.returncode, 3, r.stderr)
         self.assertIn("--- reviewer: opus\n", r.stdout)
+        self.assertEqual(len(self.sb.calls_of("codex")), 1)
+        self.assertEqual(len(self.sb.calls_of("claude")), 1)
         self.assertEqual(self.sb.calls_of("claude")[0].argv[:3], ["-p", "--model", "claude-opus-5-5"])
 
     def test_review_with_no_answer_is_exit_four_and_says_why_each_reviewer_failed(self):
@@ -82,6 +85,7 @@ class GoalReviewers(unittest.TestCase):
         r = self.goal("review", "demo")
         self.assertEqual(r.returncode, 4, r.stderr)
         self.assertIn("codex: error, opus: absent", r.stdout)
+        self.assertEqual(len(self.sb.calls_of("codex")), 1)
         self.assertIn("not a pass", r.stdout)
 
     def test_premortem_numbers_the_risks_and_fable_is_its_fallback(self):
@@ -93,6 +97,8 @@ class GoalReviewers(unittest.TestCase):
         self.assertEqual(lines[0], "R1. risk number 1")
         self.assertEqual(lines[8], "R9. risk number 9")
         self.assertEqual(lines[9], "--- from: fable")
+        self.assertEqual(len(self.sb.calls_of("codex")), 1)
+        self.assertEqual(len(self.sb.calls_of("claude")), 1)
         self.assertEqual(self.sb.calls_of("claude")[0].argv[:3], ["-p", "--model", "claude-fable-5-1"])
 
     def test_premortem_with_a_directory_lets_both_reviewers_read_it_and_cuts_at_25(self):
@@ -114,6 +120,7 @@ class GoalReviewers(unittest.TestCase):
         r = self.goal("premortem", "demo")
         self.assertEqual(r.returncode, 4, r.stderr)
         self.assertIn("codex: noverdict, fable: absent", r.stdout)
+        self.assertEqual(len(self.sb.calls_of("codex")), 1)
 
 
 class Tools(unittest.TestCase):
