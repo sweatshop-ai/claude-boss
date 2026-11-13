@@ -2,7 +2,7 @@
 
 **What to build:** `boss-run` stops handing the boss's text to `bash -lc`. The command is an argument list, executed directly, and the reviewer is shown exactly that list. A single-argument command is accepted only when it is plain words and quotes; a program that runs another command is refused by name; `gh` and `git` are refused when they name their own aliases or extensions. The merge rule then reads the literal list and needs no cleverness. Replaces PR 148 (ticket 53), which tried to prove a shell string harmless.
 
-**Status:** open
+**Status:** open (PR 150; Codex round 1 NO-GO fixed; round 2 fell back to Opus because Codex hit its usage limit; needs a real Codex round)
 
 ## Why not 53
 
@@ -53,4 +53,22 @@ PR 148 added a bash lexer (`merge_shape.py`) in front of the reviewer. Codex ans
 
 ## Review
 
-(rounds are recorded here)
+| Round | Head | Reviewer | Verdict | Tokens |
+|---|---|---|---|---|
+| 1 | 227e794 | codex (real) | NO-GO, 6 class a | 94,168 |
+| 2 | 7c5721d | codex hit its usage limit (25,026 tokens, error), then opus fallback (provisional, read-only, tokens not reported) | NO-GO, 9 findings | not a Codex round |
+
+Round 1 fixed in 7c5721d: probe moved after the APPROVE and onto the command's own repository (`--git-dir`); `curl wget http xh tar rsync zip ...` refused by name.
+
+Round 2 (Opus, provisional, NOT counted as the real second round) findings, unfixed:
+1. `exec "${ARGV[@]}"`: an argv[0] starting with `-` makes bash `exec` read options (`-a x /bin/bash -c ...`). Fix: `exec --` and refuse argv[0] starting with `-`.
+2. git options by exact spelling only: abbreviations (`--exe`, `--upload-pa=`), clustered shorts (`-mx cmd`), attached `-ush`.
+3. `git grep -O<cmd>` / `--open-files-in-pager`.
+4. git helper names (`git-push`, `/usr/lib/git-core/git-push`) skip the git checks and the hard-rule text (`git-push origin main`).
+5. gh under another name (`ln -s gh /tmp/hub`): the flat text does not start with `gh`, so the merge regex misses `pr merge`.
+6. git config keys `remote.<n>.uploadpack/receivepack/vcs`; `git clone -c key=value`.
+7. Laundering: the dynamic loader (`ld-linux ... /bin/bash`), `cp /bin/bash /tmp/x` then run it; more program-runners (`ssh-agent`, `sqlite3 .shell`, `psql -c '\!'`, `nix-shell --run`, `pwsh`, `fakeroot`, `bwrap`, `xterm -e`).
+8. PATH searched from boss-run's directory by the gate and again after `cd "$CWD"` by `exec`: a relative PATH entry makes them differ. Fix: exec the path the gate found.
+9. Over-refusal: the pattern `ed|vi|vim...[-.0-9a-z]*` refuses `editorconfig-checker`, `virsh`.
+
+Pattern to weigh: items 2, 4, 6, 7 are the same shape as PR 148's findings (a denylist of option spellings and program names that grows with each review). Items 1, 5, 8, 9 are plain bugs. A smaller allowlist of argv[0] (positive list: gh, git with a fixed subcommand list, cp, mkdir, touch, ls, cat, jq, grep, rg, date, head, tail, systemctl --user status ...) would close 2, 4, 6, 7 by construction; that is a decision for the owner.
