@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """The merge gate (ticket 04): check the review record of one PR and merge it only if the record allows it.
 
-    boss_merge.py --repo OWNER/REPO --pr N [--dry-run] [--test-only-since SHA]       the command
-    merge(repo, pr, dry_run=False, since=None) -> int        the same, returning the exit code
+    boss_merge.py --repo OWNER/REPO --pr N [--dry-run] [--test-only-since SHA | --merged-base-since SHA]   the command
+    merge(repo, pr, dry_run=False, since=None, merged_since=None) -> int      the same, returning the exit code
     decide(rounds, head, base, non_deploying, owner) -> Decision      the rule, pure
     read_rounds(pr_dir) -> list[Round]            the PR's round<NN>.json files, as 02 wrote them
     read_deploy(repo, base) -> Deploy             the repo's own list of branches that do not deploy
@@ -34,6 +34,23 @@ round, and every file `gh api repos/R/compare/SHA...head` lists, a rename by bot
 base branch's `test_paths` (`fnmatch.fnmatchcase` on the whole path, so `*` also crosses `/`). A compare that fails,
 is not `ahead` or `identical`, or fills a page of 300 files refuses (3). A SHA that is not 40 lowercase hex digits is
 exit 2. The `merges.jsonl` lines carry `since`, and the reason of a merge ends `-test-only`.
+
+`--merged-base-since SHA` (ticket 50, review-by-risk rule 4) is the owner's rule that a head which differs from the last
+GO only by merging the base branch in needs no new review. It is looked at in the same place as `--test-only-since`
+(only on `no-round`), SHA is held to the same conditions (a GO `decide` allows, no NO-GO above it), and the two flags
+cannot be given together. Three compares are read: SHA...head (the files that differ between the GO'd head and the live
+one, and its commits), base...head and base...SHA (the PR's own files, each at its head). It passes only if the first
+compare is `ahead`, lists all its commits and holds a merge commit, and none of the PR's own files at either head is
+among the files that differ and the PR owns the same set of files at both heads (a merge that kept an old version of a file
+main changed would add one to the live head's set). The base-side files of a merge are not the PR's, so they do not count; anything the PR
+itself changed since the GO makes the PR's own files differ and refuses. The reason of a merge ends `-merged-base`.
+
+Rule 2 (also ticket 50): a provisional GO on a base that deploys (exit 4 above) is let through when every file the PR
+changes (base...head, a rename by both names) matches `test_paths` or `DOCS_PATHS`, and the head's check runs are all
+complete and green. The GO is still required: no round on file is no merge. Docs are narrow on purpose: `README.md`,
+`CHANGELOG.md` and `docs/*.md`, never a file an agent acts on (`SKILL.md`, `AGENTS.md`, `CLAUDE.md`, or anything under
+a `skills`, `commands`, `agents`, `hooks`, `.claude` or `.github` directory). A waived GO does not qualify. The reason
+of a merge is `provisional-go-docs-tests-only`.
 """
 from __future__ import annotations
 
@@ -57,6 +74,11 @@ import codex_blocker
 import policy
 
 EXIT_MERGED, EXIT_USAGE, EXIT_REFUSED, EXIT_DEPLOYING, EXIT_MERGE_FAILED, EXIT_GH_READ = 0, 2, 3, 4, 5, 7
+
+DOCS_PATHS = ("README.md", "CHANGELOG.md", "docs/*.md")     # what counts as docs: nothing an agent acts on
+INSTRUCTION_NAMES = ("skill.md", "agents.md", "claude.md")      # compared in lower case, on the file's own name
+INSTRUCTION_DIRS = ("skills", "commands", "agents", "hooks", ".claude", ".github")
+GREEN = ("success", "neutral", "skipped")       # a check run's conclusions that do not block a merge
 
 ALERT_TIMEOUT = 20      # seconds, as codex_blocker's
 COMPARE_FILES = 300     # the most files a compare answers with: a page this long may have more behind it
@@ -282,11 +304,14 @@ class Compare(NamedTuple):
     problem: str | None         # None, or the reason the compare cannot be used
     files: tuple = ()           # every name a changed file had, before and after a rename
     note: str = ""
+    parents: tuple | None = None    # the number of parents of each commit listed, None when the list is not whole
 
 
-def read_compare(repo: str, since: str, head: str, io_timeout: float) -> Compare:
-    """The files changed from `since` to `head`. Both are full SHAs already checked, so nothing here needs quoting."""
-    run = boss_review._spawn(["gh", "api", "repos/%s/compare/%s...%s" % (repo, since, head)], io_timeout)
+def read_compare(repo: str, since: str, head: str, io_timeout: float,
+                 statuses: tuple = ("ahead", "identical")) -> Compare:
+    """The files changed from `since` to `head`. Each is a full SHA or a branch name; the endpoint quotes both."""
+    run = boss_review._spawn(["gh", "api", "repos/%s/compare/%s...%s" % (
+        repo, urllib.parse.quote(since, safe=""), urllib.parse.quote(head, safe=""))], io_timeout)
     if run.timed_out or run.code != 0:
         why = "ran past %ss" % io_timeout if run.timed_out else "failed (%s): %s" % (run.code, run.err.strip()[-200:])
         return Compare("compare-failed", note="gh api compare " + why)
@@ -297,7 +322,7 @@ def read_compare(repo: str, since: str, head: str, io_timeout: float) -> Compare
     files = data.get("files") if isinstance(data, dict) else None
     if not isinstance(files, list):
         return Compare("compare-failed", note="gh api compare listed no files")
-    if data.get("status") not in ("ahead", "identical"):
+    if data.get("status") not in statuses:
         return Compare("compare-not-ahead", note="the compare says %r" % (data.get("status"),))
     if not files and data["status"] == "ahead":       # commits ahead and no file listed: not trusted
         return Compare("compare-no-files", note="the compare is ahead and lists no file")
@@ -309,7 +334,45 @@ def read_compare(repo: str, since: str, head: str, io_timeout: float) -> Compare
                 or not isinstance(f.get("previous_filename", ""), str):
             return Compare("compare-failed", note="a file entry I cannot read")
         names += [f["filename"]] + ([f["previous_filename"]] if f.get("previous_filename") else [])
-    return Compare(None, tuple(names))
+    return Compare(None, tuple(names), parents=_parents(data))
+
+
+def _parents(data: dict) -> tuple | None:
+    """How many parents each listed commit has; None when the commits are missing, cut short or unreadable."""
+    commits, total = data.get("commits"), data.get("total_commits")
+    if not isinstance(commits, list) or type(total) is not int or total != len(commits):
+        return None
+    counts = []
+    for c in commits:
+        parents = c.get("parents") if isinstance(c, dict) else None
+        if not isinstance(parents, list):
+            return None
+        counts.append(len(parents))
+    return tuple(counts)
+
+
+def read_checks(repo: str, head: str, io_timeout: float) -> tuple[bool, str]:
+    """(are the check runs of `head` all complete and green, why not). No check run is not green: it means nothing ran."""
+    run = boss_review._spawn(["gh", "api", "repos/%s/commits/%s/check-runs?per_page=100" % (repo, head)], io_timeout)
+    if run.timed_out or run.code != 0:
+        return False, "the check runs could not be read"
+    try:
+        data = json.loads(run.out.decode("utf-8"))
+        runs, total = data["check_runs"], data["total_count"]
+    except (ValueError, RecursionError, KeyError, TypeError):
+        return False, "the check runs gave no list I can read"
+    if not isinstance(runs, list) or type(total) is not int or total != len(runs):
+        return False, "the check runs are not all listed"
+    if not runs:
+        return False, "no check ran on this head"
+    if not any(isinstance(r, dict) and r.get("conclusion") == "success" for r in runs):
+        return False, "no check run succeeded (all skipped or neutral means nothing ran)"
+    for r in runs:
+        if not isinstance(r, dict) or r.get("status") != "completed" or r.get("conclusion") not in GREEN:
+            return False, "check %r is %s/%s" % (r.get("name") if isinstance(r, dict) else None,
+                                                  r.get("status") if isinstance(r, dict) else None,
+                                                  r.get("conclusion") if isinstance(r, dict) else None)
+    return True, ""
 
 
 # ----------------------------------------------------------------------- the command ----
@@ -360,10 +423,99 @@ def test_only(rounds: list[Round], since: str, seen: Pr, deploy: Deploy, owner: 
     return Decision(EXIT_MERGED, got.reason + "-test-only", got.round, got.kind), ""
 
 
-def merge(repo: str, pr: int, *, dry_run: bool = False, since: str | None = None,
+def is_instruction(name: str) -> bool:
+    """A file an agent acts on (ticket 50: SKILL.md and its kin are code), whatever pattern would otherwise match it."""
+    parts = name.split("/")
+    return parts[-1].casefold() in INSTRUCTION_NAMES or any(p.casefold() in INSTRUCTION_DIRS for p in parts[:-1])
+
+
+def is_doc(name: str) -> bool:
+    """A file that is documentation: the narrow docs set, never an instruction file."""
+    if is_instruction(name):
+        return False
+    return any(fnmatch.fnmatchcase(name, pat) for pat in DOCS_PATHS)
+
+
+def not_docs_or_tests(names: tuple, test_paths: tuple) -> list[str]:
+    """The names that are neither docs nor a match of `test_paths`; none at all is a PR with nothing to judge, refused."""
+    if not names:
+        return ["(no file)"]
+    return [n for n in names if is_instruction(n) or not (
+        is_doc(n) or any(fnmatch.fnmatchcase(n, pat) for pat in test_paths))]
+
+
+def touched_by_the_pr(own: tuple, since_changes: tuple) -> list[str]:
+    """The PR's own files that differ between the GO'd head and the live one: a merge of the base brings none."""
+    return [n for n in since_changes if n in own]
+
+
+OWN_STATUSES = ("ahead", "diverged", "identical")       # a PR's files against a base that may have moved on
+
+
+def docs_tests_only(seen: Pr, got: Decision, deploy: Deploy, repo: str, io_timeout: float) -> tuple[Decision, str]:
+    """Review-by-risk rule 2 for a provisional GO that `decide` refused as `deploying-base`: allowed when every file the
+    PR changes is docs or a test and the head's checks are green. Otherwise the refusal stands (4), with the reason."""
+    def stay(note: str) -> tuple[Decision, str]:
+        return got, "deploy list %s; docs/tests-only rule: %s" % (deploy.state, note)
+
+    if deploy.test_paths is None:
+        return stay("no test_paths in the deploy list")
+    own = read_compare(repo, seen.base, seen.head, io_timeout, OWN_STATUSES)
+    if own.problem:
+        return stay("%s: %s" % (own.problem, own.note))
+    stray = not_docs_or_tests(own.files, deploy.test_paths)
+    if stray:
+        return stay("not docs or tests: " + ", ".join(stray[:5]))
+    green, why = read_checks(repo, seen.head, io_timeout)
+    if not green:
+        return stay(why)
+    return Decision(EXIT_MERGED, "provisional-go-docs-tests-only", got.round, got.kind), ""
+
+
+def merged_base(rounds: list[Round], since: str, seen: Pr, deploy: Deploy, owner: tuple[str, int], repo: str,
+                io_timeout: float) -> tuple[Decision, str]:
+    """Review-by-risk rule 4 for a PR whose live head has no deciding round: allowed only if SHA is a GO `decide` allows
+    as the head, nothing says no after it, and the live head is SHA plus a merge of the base that touches none of the
+    PR's own files."""
+    got = decide(rounds, since, seen.base, deploy.non_deploying, owner)
+    if got.exit != EXIT_MERGED:
+        return (got, "") if got.reason != "no-round" else (got, "%s is the head of no GO round" % since)
+    no = no_go_above(rounds, got.round, owner)
+    if no is not None:
+        return Decision(EXIT_REFUSED, "no-go-after-since", got.round, got.kind), "round %d says NO-GO" % no
+
+    def refuse(reason: str, note: str) -> tuple[Decision, str]:
+        return Decision(EXIT_REFUSED, reason, got.round, got.kind), note
+
+    changed = read_compare(repo, since, seen.head, io_timeout)
+    if changed.problem:
+        return refuse(changed.problem, changed.note)
+    if changed.parents is None:
+        return refuse("compare-commits", "the compare does not list its commits whole")
+    if not any(p >= 2 for p in changed.parents):
+        return refuse("no-merge-commit", "no commit since %s is a merge" % since)
+    own_at = {}
+    for end in (seen.head, since):
+        own = read_compare(repo, seen.base, end, io_timeout, OWN_STATUSES)
+        if own.problem:
+            return refuse(own.problem, own.note)
+        own_at[end] = set(own.files)
+    stray = touched_by_the_pr(tuple(own_at[seen.head] | own_at[since]), changed.files)
+    if stray:
+        return refuse("pr-files-changed", "differ since %s: %s" % (since, ", ".join(sorted(set(stray))[:5])))
+    # a merge that keeps an old version of a file main changed leaves that file out of SHA...head and into the PR's own
+    # files: the PR must own the same files at both heads, or the merge undid something no review saw
+    moved = sorted(own_at[seen.head] ^ own_at[since])
+    if moved:
+        return refuse("pr-file-set-changed", "owned at one head only: " + ", ".join(moved[:5]))
+    return Decision(EXIT_MERGED, got.reason + "-merged-base", got.round, got.kind), ""
+
+
+def merge(repo: str, pr: int, *, dry_run: bool = False, since: str | None = None, merged_since: str | None = None,
           io_timeout: float = policy.REVIEW_IO_TIMEOUT) -> int:
     """Check, then merge. Raises ValueError for a `repo`, `pr` or `since` that is not a plain one (the command says
-    exit 2). `since` is the head of the last GO, for the test-only exception."""
+    exit 2). `since` is the head of the last GO, for the test-only exception; `merged_since` is the same for the merge-of-base one,
+    and the two are not given together."""
     key = boss_review.repo_key(repo)
     if type(pr) is not int or pr < 1:
         raise ValueError("pr must be a positive integer: %r" % (pr,))
@@ -371,8 +523,12 @@ def merge(repo: str, pr: int, *, dry_run: bool = False, since: str | None = None
         raise ValueError("--test-only-since must be 40 lowercase hex digits: %r" % (since,))
     line = {"ts": boss_review._now(), "repo": key, "pr": pr, "head": None, "base": None, "round": None,
             "kind": None, "decision": None, "exit": None, "reason": None, "config": None, "dry_run": dry_run}
-    if since is not None:
-        line["since"] = since
+    if merged_since is not None and (not isinstance(merged_since, str) or not _SINCE.fullmatch(merged_since)):
+        raise ValueError("--merged-base-since must be 40 lowercase hex digits: %r" % (merged_since,))
+    if since is not None and merged_since is not None:
+        raise ValueError("--test-only-since and --merged-base-since are not given together")
+    if since is not None or merged_since is not None:
+        line["since"] = since or merged_since
 
     def finish(code: int, reason: str, decision: str, note: str = "") -> int:
         line.update(decision=decision, exit=code, reason=reason)
@@ -408,8 +564,12 @@ def merge(repo: str, pr: int, *, dry_run: bool = False, since: str | None = None
         everything = read_rounds(pr_dir)
         got = decide(everything, seen.head, seen.base, deploy.non_deploying, (key, pr))
         note = "deploy list " + deploy.state if got.exit == EXIT_DEPLOYING else ""
+        if got.exit == EXIT_DEPLOYING and got.kind == "provisional":        # rule 2; a waived GO never qualifies
+            got, note = docs_tests_only(seen, got, deploy, repo, io_timeout)
         if since is not None and got.reason == "no-round":      # any other answer for the live head stands
             got, note = test_only(everything, since, seen, deploy, (key, pr), repo, io_timeout)
+        if merged_since is not None and got.reason == "no-round":
+            got, note = merged_base(everything, merged_since, seen, deploy, (key, pr), repo, io_timeout)
         line.update(round=got.round, kind=got.kind)
         if got.exit != EXIT_MERGED:
             return finish(got.exit, got.reason, "refused", note)
@@ -459,9 +619,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--test-only-since", metavar="SHA", dest="since",
                     help="the head of the last GO: allow the merge if every file changed since matches the base "
                          "branch's test_paths (40 lowercase hex digits)")
+    ap.add_argument("--merged-base-since", metavar="SHA", dest="merged_since",
+                    help="the head of the last GO: allow the merge if the live head is that head plus a merge of the "
+                         "base branch that changes none of the PR's own files (40 lowercase hex digits)")
     args = ap.parse_args(argv)
     try:
-        return merge(args.repo, args.pr, dry_run=args.dry_run, since=args.since)
+        return merge(args.repo, args.pr, dry_run=args.dry_run, since=args.since, merged_since=args.merged_since)
     except ValueError as exc:
         _say(str(exc))
         return EXIT_USAGE

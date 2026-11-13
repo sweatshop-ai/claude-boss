@@ -709,15 +709,19 @@ runs at about 75k tokens each used up the weekly Codex quota.
    guard or consent code), security (the sensitive list below), deploys or data.
 2. A tests-only or docs-only PR merges on green CI with at most one Opus pass, run as a fresh
    Opus agent over the diff. Not `boss_review.py`: it always asks Codex first and runs Opus
-   only when Codex does not answer. `boss_merge.py` still wants a GO on the live head and
-   merges a provisional GO only where the repo marks the branch non-deploying, so on a
-   deploying base this rule needs the follow-up in ticket 49 before the gate lets it through.
+   only when Codex does not answer. The gate knows the rule (ticket 50): a provisional GO on
+   the live head merges on any base when every file the PR changes is a test (`test_paths`) or
+   docs (`README.md`, `CHANGELOG.md`, `docs/*.md`; never `SKILL.md`, `AGENTS.md`, `CLAUDE.md` or
+   anything under `skills`, `commands`, `agents`, `hooks`, `.claude`, `.github`) and every check
+   run of the head is green. A round on file is still required, and a waived GO does not qualify.
 3. A second review round happens only after a class a or b finding, never after class c or d.
 4. After main is merged into a branch there is no re-settle comment and no new review run by
    hand. You check that the code files are byte-identical to the reviewed head:
    `git diff <reviewed> <final> -- <files>` is empty, where `<files>` are the PR's own code
    files, and say so in the PR. `boss_merge.py` accepts a changed head only through
-   `--test-only-since`, so the gate may still refuse the merge commit (ticket 49 follow-up).
+   `--merged-base-since <reviewed>` (ticket 50), which reads the compare and passes only when
+   the live head is the reviewed head plus a merge of the base and none of the PR's own files
+   differ. Run it instead of a new review, and say so in the PR.
 5. Re-measure on 2026-11-27: tokens, minutes and findings per PR, before the grades are
    touched again.
 
@@ -895,7 +899,7 @@ exists only in a message**, whoever produced it.
 
 **The merge is ordered through the gate.** The command is
 `python3 ${CLAUDE_PLUGIN_ROOT}/skills/boss/boss_merge.py --repo OWNER/REPO --pr N`; `--dry-run` decides without
-merging, and `--test-only-since SHA`, the head of the last GO, allows fixes after it that touch only the repo's test paths (`test_paths` in `.boss/deploy.json`; `*` crosses `/`, so anchor a pattern to a directory: `tests/*`, not `*test_*.py`). Its exit
+merging, `--merged-base-since SHA` (the head of the last GO) allows a head that is that head plus a merge of the base when none of the PR's own files differ (not together with the next flag), and `--test-only-since SHA`, the head of the last GO, allows fixes after it that touch only the repo's test paths (`test_paths` in `.boss/deploy.json`; `*` crosses `/`, so anchor a pattern to a directory: `tests/*`, not `*test_*.py`). Its exit
 codes: 0 merged, 3 and 4 refused, 5 failed or unverified (the merge or the check after it), 7 a read failed. A
 refusal (3 or 4) is an instruction to get the right review, not to work around it. `boss-run` refuses a merge typed
 by hand under the hard rule `PR merge outside boss_merge`. The gate has three limits. A `gh pr merge` typed by hand
