@@ -344,6 +344,18 @@ class ReadersSkipBlocks(unittest.TestCase):
         self.assertEqual(objective.comment_blocks(new), [HEADY])
         self.assertIn("1. new\n\n" + HEADY + "\n\n## Notes", new)
 
+    def test_a_criterion_with_a_block_on_its_line_ticks_and_keeps_the_block(self):
+        text = GOAL.replace("- [ ] `gh pr view 3` says MERGED", "- [ ] shipped" + LISTY)
+        self.assertIn((False, "shipped"), objective.criteria(text))
+        new, n = objective.tick(text, ["shipped"])
+        self.assertEqual(n, 1)
+        self.assertIn("- [x] shipped" + LISTY, new)
+
+    def test_an_item_after_a_block_at_the_line_start_is_still_an_item(self):
+        text = GOAL.replace("1. first", LISTY + "1. first")
+        self.assertEqual(objective.next_items(text), ["1. first", "- a bullet counts too"])
+        self.assertEqual(objective.next_count(text), 2)
+
     def test_the_section_reader_hides_a_block(self):
         text = GOAL.replace("Ship it.", "Ship it.\n" + HEADY)
         self.assertEqual(objective.section(text, "Outcome"), "Ship it.")

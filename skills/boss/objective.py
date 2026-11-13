@@ -138,6 +138,15 @@ def comment_blocks(text: str) -> list:
     return [text[a:b] for a, b in _block_spans(text)]
 
 
+def _read(ln: str, m: str) -> str:
+    """The line `ln` as a reader sees it, `m` being its masked form: `ln` itself
+    when no block touched it, else `m` without the blanks the block left, at the
+    end and, where it began the line, at the start."""
+    if m == ln:
+        return ln
+    return m.rstrip() if len(m) - len(m.lstrip()) <= len(ln) - len(ln.lstrip()) else m.strip()
+
+
 def _masked(text: str) -> str:
     """`text` with every sheaf comment blanked to spaces, newlines kept: the same
     lines at the same indices, so a reader never sees inside a block (a `- x`,
@@ -251,8 +260,7 @@ def next_items(text: str) -> list:
     if not span:
         return []
     seen = _masked("\n".join(lines)).split("\n")
-    return [m.rstrip() if m != ln else ln
-            for ln, m in zip(lines[slice(*span)], seen[slice(*span)]) if m.strip()]
+    return [_read(ln, m) for ln, m in zip(lines[slice(*span)], seen[slice(*span)]) if m.strip()]
 
 
 ITEM_RE = re.compile(r"^(\d+[.)]|[-*+])\s")
@@ -288,7 +296,7 @@ def criteria(text: str) -> list:
     lines = text.splitlines()
     span = _section_span(lines, "Done when")
     seen = _masked("\n".join(lines)).split("\n")
-    return [(m.group(1) == "x", m.group(2))
+    return [(m.group(1) == "x", m.group(2).rstrip())
             for m in map(BOX_RE.match, seen[slice(*span)] if span else []) if m]
 
 
@@ -306,8 +314,8 @@ def tick(text: str, done) -> tuple:
     n = 0
     for c in done:
         for i in range(*span) if span else ():
-            if seen[i] == "- [ ] " + c:
-                lines[i] = "- [x] " + c
+            if seen[i].rstrip() == "- [ ] " + c:
+                lines[i] = "- [x] " + lines[i][6:]
                 n += 1
                 break
     return "\n".join(lines), n
