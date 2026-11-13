@@ -218,9 +218,16 @@ class Sandbox:
         """
         return self._write_stub(name, [*self._prologue(name), body])
 
+    def gate_passthrough(self):
+        """A bash line for a `python3` stub: boss-run's argument gate (argv_gate.py) runs on the
+        real python3 and is not logged. The stub stands in for the reviewer chain only."""
+        return ('case "$*" in *argv_gate.py*) exec %s "$@" ;; esac'
+                % shlex.quote(os.path.realpath(self.tools / "python3")))
+
     def _prologue(self, name):
         return [
             "#!" + self._bash,
+            *([self.gate_passthrough()] if name == "python3" else []),
             "R=" + shlex.quote(str(self.root)),
             'ID="$(date +%%s%%N)-%s"' % name,
             'if [ "$#" -gt 0 ]; then printf \'%s\\0\' "$@" > "$R/calls/$ID.argv"; '

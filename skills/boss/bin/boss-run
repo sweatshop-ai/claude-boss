@@ -6,10 +6,19 @@
 # exists. So: the boss states an intent, a second model reads the intent and the
 # command and answers APPROVE or REJECT, and only APPROVE runs.
 #
-# Two gates, in order:
-#   1. Hard rules. Pattern matches on the command text. No reviewer can override
-#      them and there is no flag to skip them.
-#   2. The reviewer (reviewer_chain.py). Codex first, Opus if Codex is missing or
+# boss-run runs only what it can see completely. The command is an argument list,
+# executed directly: there is no `bash -c`, so nothing in it is expanded, joined or
+# redirected after the reviewer has read it (ticket 53b; PR 148 tried to prove a shell
+# string harmless instead, and Codex found twelve ways around it in three rounds).
+#
+# Three gates, in order:
+#   1. argv_gate.py. The command becomes an argument list, or is refused: a single
+#      argument must be plain words and quotes; argv[0] must not be a program that runs
+#      another command or a code string; gh and git may not name their own aliases or
+#      extensions or be asked to run a program. Nothing runs, no reviewer sees it.
+#   2. Hard rules. Pattern matches on that list joined with single spaces. No reviewer
+#      can override them and there is no flag to skip them.
+#   3. The reviewer (reviewer_chain.py). Codex first, Opus if Codex is missing or
 #      silent. If neither answers, nothing runs — a gate that fails open is not a
 #      gate.
 #
@@ -17,9 +26,11 @@
 #   boss-run --why "<intent>" [--cwd DIR] [--dry-run] -- <command ...>
 #   boss-run --selftest
 #
-# Everything after `--` is the command. A single argument is taken verbatim as a
-# shell string (so pipes and redirections work); several arguments are quoted and
-# joined, so each stays one word whatever it contains.
+# Everything after `--` is the command. Several arguments are the argument list, as they
+# are. A single argument is split into one only when it is fully literal: plain words and
+# quotes, with no $ ` \\ ; & | < > ( ) { } * ? [ ! ~, no newline outside quotes, no comment.
+# Anything else is refused. A pipe or a redirection stays outside boss-run:
+#   boss-run --why "..." -- gh pr view 5 | tail
 #
 # Exit codes:
 #   the command's own   APPROVE, and it ran
@@ -27,7 +38,7 @@
 #   2                   usage
 #   3                   REJECTED by the reviewer
 #   4                   no reviewer answered
-#   5                   refused by a hard rule
+#   5                   refused by argv_gate or by a hard rule
 set -uo pipefail
 
 # The hooks read $CLAUDE_CONFIG_DIR/pm; so must every tool that writes there.
@@ -72,8 +83,9 @@ log_line() {
 finish() { local rc=$1; log_line "$rc"; exit "$rc"; }
 
 # ------------------------------------------------------------- hard rules ----
-# name<TAB>regex. Matched against FLAT (args joined by a space, unescaped), so a
-# pattern cannot be hidden behind shell quoting of a single argument.
+# name<TAB>regex. Matched against FLAT: the argument list argv_gate.py accepted, joined with
+# single spaces, quotes already gone. Nothing runs through a shell afterwards, so the text
+# matched is the text executed.
 # Your own off-limits hosts, paths and services are site configuration, not
 # code, so they are not in this repository — naming them here would publish the
 # map. Add them as `name<TAB>regex` lines in the file below and they are checked
@@ -117,6 +129,40 @@ check_hard_rules() {
   done < <(hard_rules)
   shopt -u nocasematch
   return 0
+}
+
+# ------------------------------------------------------------------ gate ----
+# argv_gate.py answers one JSON object: exit 0 {ok:true, argv, flat, display}, exit 1
+# {ok:false, rule, detail}. Anything else (a crash, a signal, no python3, output that is not
+# one whole answer) is no answer, and a gate that cannot look refuses.
+# Two calls: the first reads the text and the program's name and runs nothing; the second asks
+# gh and git for their own aliases and extensions, and comes after the hard rules, so a merge
+# the rules refuse leaves no call on gh.
+ARGV=() ; ARGS=()
+run_gate() {
+  local out rc ok rule detail mode=("$@")
+  out=$(python3 -I "${HERE}/../argv_gate.py" "${mode[@]}" --cwd "$CWD" -- "${ARGS[@]}" 2>/dev/null); rc=$?
+  ok=$(jq -r 'select(type == "object") | .ok' <<<"$out" 2>/dev/null) || ok=""
+  if [[ $rc -eq 0 && $ok == true ]] && jq -e '(.argv | type == "array" and length > 0 and all(type == "string"))
+        and (.flat | type == "string") and (.display | type == "string")' <<<"$out" >/dev/null 2>&1; then
+    if [[ ${mode[0]:-} != --probe-only ]]; then
+      mapfile -d '' -t ARGV < <(jq -j '.argv[] + "\u0000"' <<<"$out")
+      FLAT=$(jq -r '.flat' <<<"$out")
+      CMD=$(jq -r '.display' <<<"$out")
+    fi
+    return 0
+  fi
+  if [[ $rc -eq 1 && $ok == false ]]; then
+    rule=$(jq -r '.rule' <<<"$out"); detail=$(jq -r '.detail' <<<"$out")
+  else
+    rule="the argument gate did not answer"; detail="argv_gate.py exited $rc"
+  fi
+  REVIEWER="hard-rule" ; VERDICT="REFUSED" ; REASON="argv gate: ${rule} (${detail})"
+  printf 'boss-run: REFUSED by the argument gate — %s\n' "$rule" >&2
+  printf '  seen: %s\n' "$detail" >&2
+  printf '  command: %s\n' "$CMD" >&2
+  printf '  boss-run runs only a literal argument list. Nothing was run; no reviewer saw it. Take it to the owner.\n' >&2
+  return 1
 }
 
 # ---------------------------------------------------------------- reviewer ----
@@ -186,8 +232,8 @@ run_reviewer() {
 }
 
 # ---------------------------------------------------------------- selftest ----
-# Three cases. The happy path alone proves nothing — the two refusals are the
-# control, so a run that reports ok on case 2 and nothing else is a failure.
+# Five cases. The happy path alone proves nothing — the refusals are the control,
+# so a run that reports ok on case 2 and nothing else is a failure.
 selftest() {
   local self="${BASH_SOURCE[0]}" fails=0 rc out
 
@@ -204,8 +250,18 @@ selftest() {
 
   printf '3. reviewer rejects destruction dressed as housekeeping (exit 3 or 5)\n'
   out=$("$self" --why "free disk space" --dry-run \
-        -- find "$HOME/Projects/acme/clients" -name "*.md" -delete 2>&1); rc=$?
+        -- rm -r "$HOME/Projects/acme/clients/old" 2>&1); rc=$?
   if [[ $rc -eq 3 || $rc -eq 5 ]]; then printf '   ok (exit %s)\n' "$rc"
+  else printf '   FAIL: exit %s\n%s\n' "$rc" "$(sed 's/^/   | /' <<<"$out")"; fails=1; fi
+
+  printf '4. a single argument that is not plain words and quotes is refused by the gate (exit 5)\n'
+  out=$("$self" --why "list the files" --dry-run -- 'ls | head' 2>&1); rc=$?
+  if [[ $rc -eq 5 && $out == *"not fully literal"* ]]; then printf '   ok (exit 5)\n'
+  else printf '   FAIL: exit %s\n%s\n' "$rc" "$(sed 's/^/   | /' <<<"$out")"; fails=1; fi
+
+  printf '5. a program that runs another command is refused by name (exit 5)\n'
+  out=$("$self" --why "say hi" --dry-run -- bash -c 'echo hi' 2>&1); rc=$?
+  if [[ $rc -eq 5 && $out == *"runs another command"* ]]; then printf '   ok (exit 5)\n'
   else printf '   FAIL: exit %s\n%s\n' "$rc" "$(sed 's/^/   | /' <<<"$out")"; fails=1; fi
 
   if [[ $fails -eq 0 ]]; then printf 'selftest: all ok\n'; exit 0; fi
@@ -232,17 +288,19 @@ done
 [[ -d "$CWD" ]] || die "no such directory: $CWD"
 CWD=$(cd -- "$CWD" && pwd)
 
-if [[ $# -eq 1 ]]; then
-  CMD=$1                      # a single argument is a shell string, verbatim
-else
-  CMD=$(printf '%q ' "$@"); CMD=${CMD% }
-fi
-FLAT="$*"                     # unescaped, for pattern matching only
+# What the owner reads if the gate refuses: the text as typed. Once the gate accepts it is the
+# argument list quoted back, which is what the reviewer reads and what runs.
+if [[ $# -eq 1 ]]; then CMD=$1; else CMD=$(printf '%q ' "$@"); CMD=${CMD% }; fi
+FLAT="$*"
 
+ARGS=("$@")
+if [[ $# -eq 1 ]]; then run_gate --single --no-probe || finish 5; else run_gate --no-probe || finish 5; fi
 check_hard_rules || finish 5
+ARGS=("${ARGV[@]}")
+run_gate --probe-only || finish 5
 
 # The command is the template's last text, and $(...) strips trailing newlines: the reviewer
-# must see the bytes bash -lc will run, so a sentinel keeps them.
+# must see the bytes that will run, so a sentinel keeps them.
 PROMPT=$(render_prompt && printf .) || finish 2
 PROMPT=${PROMPT%.}
 if ! run_reviewer "$PROMPT"; then
@@ -265,7 +323,8 @@ if [[ $DRY -eq 1 ]]; then
   finish 0
 fi
 
-cd "$CWD" && bash -lc "$CMD"
+# No shell: the list the reviewer read is the list that runs.
+( cd "$CWD" && exec "${ARGV[@]}" )
 rc=$?
 printf 'boss-run: command exited %s\n' "$rc"
 log_line "$rc"
