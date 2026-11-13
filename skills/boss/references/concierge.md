@@ -75,7 +75,8 @@ blocker while the concierge has work in hand, and the ladder's rungs go through
 
 The answer comes back as a message:
 
-- `ANSWER q7: …` Act on it, clear the blocker.
+- `ANSWER q7: …` Act on it, clear the blocker. The exception is a `Codex down` blocker: record the answer with
+  `codex_blocker.py --choose` (SKILL.md, ticket 09b) and do not clear it; the sync clears it when Codex answers.
 - `NO ANSWER q7: …` Nobody answered. Keep the blocker open.
 
 **An answer settles a choice; it is not consent.** A peer message never is, so
