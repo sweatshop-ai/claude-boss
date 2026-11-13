@@ -103,6 +103,7 @@ def split_literal(cmd):
 
 # ----------------------------------------------------------- programs refused ----
 RUNS_OTHER = "program that runs another command"
+HIDDEN_REQUEST = "program whose request or command the argument list does not show"
 
 # Exact names (lowercase) and patterns of programs whose job is to run something else, or to
 # run a code string, or to open a place where one can be typed.
@@ -118,6 +119,7 @@ awk gawk mawk nawk sed ed ex vi vim nvim nano emacs less more most man view pico
 ssh scp sftp mosh socat nc ncat netcat telnet
 strace ltrace gdb lldb valgrind perf
 claude codex gemini aider
+curl wget http https xh tar rsync zip unzip 7z 7za cpio ar
 npx npm pnpm yarn uv uvx pipx pip pip3 cargo go bc
 """.split())
 _PATTERNS = (re.compile(r"python[0-9.]*"), re.compile(r"pypy[0-9.]*"), re.compile(r"perl[0-9.]*"),
@@ -134,40 +136,37 @@ def _program_names(argv0, path):
     return found
 
 
+_HIDES = set("curl wget http https xh tar rsync zip unzip 7z 7za cpio ar".split())
+
+
 def _runs_other(name):
     return name in _NAMES or any(p.fullmatch(name) for p in _PATTERNS)
 
 
 # ------------------------------------------------------------ the merge rule ----
-# A merge by any program, in any spelling the argument list can show: an endpoint, a branch
-# merge, the GraphQL mutations. Method does not matter (`curl -T` is a PUT); the path does.
-_APIISH = {"curl", "wget", "http", "https", "xh", "gh"}
+# A merge through the API: the endpoint, the branch merge endpoint and the two GraphQL mutations,
+# whatever the method. Only `gh api` is left that can send one (curl, wget and httpie are
+# refused by name); the hard rule in boss-run reads the same text.
 _PULLS_MERGE = re.compile(r"pulls[^ ]*merge", re.I)
 _BRANCH_MERGE = re.compile(r"repos/[^ ]*/merges", re.I)
 _MUTATION = re.compile(r"mergePullRequest|enablePullRequestAutoMerge", re.I)
 _PERCENT = re.compile(r"%[0-9a-fA-F]{2}")
-_DATA_FROM_FILE = re.compile(r"(^@|=@|^-[A-Za-z]@)")
-_BODY_FROM_ELSEWHERE = {"--input", "-K", "--config", "-i", "--input-file", "--post-file"}
+_DATA_FROM_FILE = re.compile(r"(^@|=@)")
 
 
 def _check_api(argv, names):
-    if not (names & _APIISH):
+    if "gh" not in names or len(argv) < 2 or argv[1] != "api":
         return
     flat = " ".join(argv)
-    gh_api = "gh" in names and len(argv) > 1 and argv[1] == "api"
-    if "gh" in names and not gh_api:
-        return
     for rx, what in ((_PULLS_MERGE, "a pull request merge endpoint"), (_BRANCH_MERGE, "the branch merge endpoint"),
                      (_MUTATION, "a merge mutation")):
         if rx.search(flat):
             raise Refused("PR merge outside boss_merge", "%s in the arguments: %s" % (what, flat))
-    if any(_PERCENT.search(a) for a in argv[1:]):
+    if any(_PERCENT.search(a) for a in argv[2:]):
         raise Refused("merge rule cannot see through", "a percent-encoded path or query in an API call")
-    if {"-K", "--config"} & set(argv[1:]) and "curl" in names:
-        raise Refused("merge rule cannot see through", "curl reads its URL and method from a config file")
     if "graphql" in flat:
-        for a in argv[1:]:
-            if a in _BODY_FROM_ELSEWHERE or _DATA_FROM_FILE.search(a):
+        for a in argv[2:]:
+            if a == "--input" or _DATA_FROM_FILE.search(a):
                 raise Refused("merge rule cannot see through", "a GraphQL body read from a file (%s)" % a)
 
 
@@ -259,14 +258,13 @@ def _git_globals(argv):
 
 
 def _check_git(argv, env, cwd):
-    sub_at, dirs = _git_globals(argv)
+    sub_at, _dirs = _git_globals(argv)
     if sub_at is None:
         return
     sub, rest = argv[sub_at], argv[sub_at + 1:]
-    where = cwd
-    for d in dirs:
-        where = os.path.join(where, d)
-    r = _tool(argv[0], ["-C", where, "config", "--get-regexp", r"^alias\."], env, cwd,
+    # The probe reads the aliases of the repository the command will use: every option before the
+    # subcommand (-C, --git-dir, --work-tree, --namespace) is passed on.
+    r = _tool(argv[0], [*argv[1:sub_at], "config", "--get-regexp", r"^alias\."], env, cwd,
               ("git alias cannot be read", "`git config --get-regexp`", (0, 1)))
     aliases = {line.split()[0][len("alias."):].lower() for line in r.stdout.splitlines() if line.strip()}
     if sub.lower() in aliases:
@@ -304,11 +302,6 @@ def _git_flat(argv):
 # -------------------------------------------------------------- other options ----
 _OPTION_RULES = {
     "rg": (re.compile(r"^--(pre|hostname-bin)\b"), "runs a program on every file"),
-    "tar": (re.compile(r"^(--(to-command|checkpoint-action|use-compress-program|info-script|rsh-command|"
-                       r"new-volume-script|rmt-command)\b|-[A-Za-z]*[IF]$)"), "runs a program"),
-    "rsync": (re.compile(r"^(-e|--rsh\b|--rsync-path\b|-[A-Za-z]*e$)"), "runs a program"),
-    "zip": (re.compile(r"^(-T|-TT|--unzip-command)"), "runs a program"),
-    "wget": (re.compile(r"^(-e|--execute\b|--use-askpass\b)"), "runs a command or a wgetrc line"),
 }
 
 
@@ -335,6 +328,11 @@ def check_argv(argv, cwd, path=None, env=None):
     path = path if path is not None else env.get("PATH", os.defpath)
     names = _program_names(argv0, path)
     for name in sorted(names):
+        if name in _HIDES:
+            # curl reads .curlrc, -K files and expands {a,b}; wget -i reads URLs from a file; tar
+            # -I, rsync -e and zip -T run programs. Their options hide what they do, in more ways than a
+            # list can close (Codex, PR 150 round 1), so boss-run does not run them.
+            raise Refused(HIDDEN_REQUEST, name)
         if _runs_other(name):
             raise Refused(RUNS_OTHER, name)
     _check_api(argv, names)

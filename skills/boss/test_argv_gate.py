@@ -273,6 +273,16 @@ class Git(Env):
                 self.assertIn("alias", self.refused("git", sub).name)
         self.assertIn("alias", self.refused("git", "-C", str(self.work), "mm").name)
 
+    def test_the_alias_probe_reads_the_repository_the_command_will_use(self):
+        other = self.tmp / "other"
+        other.mkdir()
+        subprocess.run(["git", "init", "-q", str(other)], check=True, env=self.env)
+        subprocess.run(["git", "config", "alias.mm", "!gh pr merge 5"], cwd=other, env=self.env, check=True)
+        for argv in (["git", "--git-dir=%s/.git" % other, "mm"], ["git", "--git-dir", "%s/.git" % other, "mm"],
+                     ["git", "--work-tree=%s" % other, "--git-dir=%s/.git" % other, "mm"]):
+            with self.subTest(argv):
+                self.assertIn("alias", self.refused(*argv).name)
+
     def test_a_git_that_cannot_report_its_aliases_refuses(self):
         e = self.refused("git", "-C", str(self.tmp / "no-such-dir"), "status")
         self.assertIn("alias", e.name)
@@ -308,11 +318,7 @@ class Gh(Env):
 
     def test_a_graphql_body_that_cannot_be_read_is_refused(self):
         for argv in (["gh", "api", "graphql", "-F", "query=@q.graphql"], ["gh", "api", "graphql", "--input", "q.json"],
-                     ["gh", "api", "graphql", "-f", "query=@q.graphql"],
-                     ["curl", "https://api.github.com/graphql", "-d", "@q.json"],
-                     ["curl", "https://api.github.com/graphql", "--data-binary", "@q.json"],
-                     ["curl", "https://api.github.com/graphql", "-d@q.json"],
-                     ["curl", "-K", "c.cfg"], ["curl", "--config", "c.cfg"]):
+                     ["gh", "api", "graphql", "-f", "query=@q.graphql"]):
             with self.subTest(argv):
                 self.refused(*argv)
 
@@ -320,40 +326,49 @@ class Gh(Env):
         argv = ["gh", "api", "graphql", "-f", "query={ viewer { login } }"]
         self.assertEqual(self.argv(*argv), argv)
 
-    def test_a_merge_endpoint_is_refused_for_every_program_and_every_spelling(self):
-        for argv in (["curl", "-T", "x", "https://api.github.com/repos/o/r/pulls/5/merge"],
-                     ["curl", "-X", "PUT", "https://api.github.com/repos/o/r/pulls/5/./merge"],
-                     ["curl", "-X", "PUT", "https://api.github.com/repos/o/r/pulls/5//merge"],
-                     ["curl", "--request", "PUT", "https://api.github.com/repos/o/r/pulls/5/merge"],
-                     ["wget", "--method=PUT", "https://api.github.com/repos/o/r/pulls/5/merge"],
-                     ["gh", "api", "repos/o/r/pulls/5/merge", "--method", "PUT"],
+    def test_a_merge_endpoint_is_refused_in_every_spelling_gh_api_can_send(self):
+        for argv in (["gh", "api", "repos/o/r/pulls/5/merge", "--method", "PUT"],
                      ["gh", "api", "repos/o/r/pulls/5/merge", "-X", "put"],
+                     ["gh", "api", "repos/o/r/pulls/5/merge"],
+                     ["gh", "api", "repos/o/r/pulls/5/./merge", "-X", "PUT"],
+                     ["gh", "api", "repos/o/r/pulls/5//merge", "-X", "PUT"],
                      ["gh", "api", "repos/o/r/merges", "-f", "base=main", "-f", "head=x"],
-                     ["curl", "https://api.github.com/repos/o/r/%70ulls/5/merge"],
                      ["gh", "api", "repos/o/r/pulls/5/%6derge", "-X", "PUT"],
-                     ["curl", "https://x/y", "-d", '{"query":"mutation{mergePullRequest(input:{})}"}'],
+                     ["gh", "api", "graphql", "-f", "query=mutation{mergePullRequest(input:{})}"],
                      ["gh", "api", "graphql", "-f", "query=mutation{enablePullRequestAutoMerge(input:{})}"]):
             with self.subTest(argv):
                 self.refused(*argv)
 
-    def test_a_curl_read_passes(self):
-        argv = ["curl", "-s", "https://api.github.com/repos/o/r/pulls/5"]
-        self.assertEqual(self.argv(*argv), argv)
+
+class ProgramsThatHideTheirRequest(Env):
+    """Codex, PR 150 round 1: curl reads .curlrc, -K files, `-Kfile`, `--config=file` and expands
+    {a,b}; wget -i reads URLs from a file; GNU tar takes `-I=cmd`. Their options hide what they do in
+    more ways than a list closes, so they are refused by name, whatever the arguments."""
+
+    def test_each_is_refused_whatever_the_arguments(self):
+        for argv in (["curl", "https://api.github.com/repos/o/r/pulls/5/mer{g,g}e", "-X", "PUT"],
+                     ["curl", "-Kc.cfg"], ["curl", "--config=c.cfg"], ["curl", "-s", "https://x/y"],
+                     ["curl", "--variable", "a=merge", "--expand-url", "https://x/pulls/5/{{a}}"],
+                     ["wget", "--method=PUT", "-i", "urls.txt"], ["wget", "-q", "https://x/y"],
+                     ["tar", "-I=sh /tmp/payload", "-xf", "x"], ["tar", "-Ish", "x"], ["tar", "tf", "x.tar"],
+                     ["rsync", "-e", "sh", "a", "b"], ["rsync", "-a", "a/", "b/"], ["zip", "-T", "x"],
+                     ["http", "PUT", "https://x/pulls/5/merge"], ["xh", "https://x"]):
+            with self.subTest(argv):
+                e = self.refused(*argv)
+                self.assertIn("does not show", e.name)
 
 
 class OtherUsage(Env):
     def test_normal_boss_usage_passes(self):
         for argv in (["cp", "a.md", "b.md"], ["mkdir", "-p", "x/y"], ["systemctl", "--user", "status", "foo.service"],
                      ["ls", "-la"], ["cat", "x"], ["jq", ".a", "x.json"], ["touch", "x"], ["grep", "-rn", "x", "."],
-                     ["rg", "-n", "x"], ["tar", "tf", "x.tar"], ["date", "-Is"], ["head", "-5", "x"]):
+                     ["rg", "-n", "x"], ["date", "-Is"], ["head", "-5", "x"]):
             with self.subTest(argv):
                 self.assertEqual(self.argv(*argv), argv)
 
     def test_options_that_run_programs_are_refused(self):
         for argv in (["rg", "--pre", "sh", "x"], ["rg", "--pre=sh", "x"], ["rg", "--hostname-bin", "sh", "x"],
-                     ["tar", "xf", "x.tar", "--to-command", "sh"], ["tar", "cf", "x.tar", "y", "--checkpoint-action=exec=sh"],
-                     ["tar", "-I", "sh", "x"], ["tar", "--use-compress-program=sh", "-xf", "x"],
-                     ["rsync", "-e", "sh", "a", "b"], ["rsync", "--rsh=sh", "a", "b"]):
+                     ):
             with self.subTest(argv):
                 self.refused(*argv)
 

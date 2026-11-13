@@ -11,7 +11,7 @@
 # redirected after the reviewer has read it (ticket 53b; PR 148 tried to prove a shell
 # string harmless instead, and Codex found twelve ways around it in three rounds).
 #
-# Three gates, in order:
+# Three gates, in order (the gh/git alias probe of gate 1 runs last, after the APPROVE):
 #   1. argv_gate.py. The command becomes an argument list, or is refused: a single
 #      argument must be plain words and quotes; argv[0] must not be a program that runs
 #      another command or a code string; gh and git may not name their own aliases or
@@ -136,8 +136,8 @@ check_hard_rules() {
 # {ok:false, rule, detail}. Anything else (a crash, a signal, no python3, output that is not
 # one whole answer) is no answer, and a gate that cannot look refuses.
 # Two calls: the first reads the text and the program's name and runs nothing; the second asks
-# gh and git for their own aliases and extensions, and comes after the hard rules, so a merge
-# the rules refuse leaves no call on gh.
+# gh and git for their own aliases and extensions, and comes after the reviewer's APPROVE, right
+# before the command runs, so nothing is executed for a command that is refused or rejected.
 ARGV=() ; ARGS=()
 run_gate() {
   local out rc ok rule detail mode=("$@")
@@ -296,8 +296,6 @@ FLAT="$*"
 ARGS=("$@")
 if [[ $# -eq 1 ]]; then run_gate --single --no-probe || finish 5; else run_gate --no-probe || finish 5; fi
 check_hard_rules || finish 5
-ARGS=("${ARGV[@]}")
-run_gate --probe-only || finish 5
 
 # The command is the template's last text, and $(...) strips trailing newlines: the reviewer
 # must see the bytes that will run, so a sentinel keeps them.
@@ -317,6 +315,12 @@ if [[ "$VERDICT" == "REJECT" ]]; then
   finish 3
 fi
 
+# The probe runs gh or git, so it waits for the APPROVE: a REJECT or a dead reviewer never
+# starts the program, and the answer is as fresh as it can be when the command runs.
+APPROVED_BY=$REVIEWER ; APPROVED_VERDICT=$VERDICT ; APPROVED_REASON=$REASON
+ARGS=("${ARGV[@]}")
+run_gate --probe-only || finish 5
+REVIEWER=$APPROVED_BY ; VERDICT=$APPROVED_VERDICT ; REASON=$APPROVED_REASON
 printf 'boss-run: APPROVE (reviewer: %s) — %s\n' "$REVIEWER" "$REASON"
 if [[ $DRY -eq 1 ]]; then
   printf '  --dry-run: not executed.\n'

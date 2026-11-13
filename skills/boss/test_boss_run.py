@@ -360,7 +360,6 @@ class HardRules(Base):
             "gh pr 'merge' 5",
             "g'h' pr m'er'ge 5",
             "gh api -X \"PUT\" repos/o/r/pulls/5/merge",
-            "\"curl\" -X \"PUT\" https://api.github.com/repos/o/r/pulls/5/merge",
         ]
         self.sb.stub("gh")      # a logging stub: a refused command must leave no call on it
         for command in cases:
@@ -401,7 +400,17 @@ class HardRules(Base):
         self.assertEqual(r.returncode, 5, r.stdout)
         self.assertTrue(r.stderr.startswith("boss-run: REFUSED by the argument gate — gh alias\n"), r.stderr)
         self.assertEqual([c.argv for c in self.sb.calls_of("gh")], [["alias", "list"]])
-        self.assertNotCalled("codex")
+        self.assertEqual(len(self.sb.calls_of("codex")), 1)     # the probe waits for the APPROVE
+
+    def test_gh_and_git_are_not_run_for_a_command_the_reviewer_rejects_or_nobody_answers(self):
+        self.sb.stub("gh")
+        self.sb.stub("codex", answer=reject())
+        self.sb.stub("claude", answer=reject())
+        r = self.dry("gh", "pr", "view", "5")
+        self.assertEqual(r.returncode, 3, r.stderr)
+        self.assertEqual(self.sb.calls_of("gh"), [])
+        self.assertEqual(len(self.sb.calls_of("codex")), 1)
+        self.assertNotCalled("claude")
 
     def test_a_gh_that_cannot_report_its_aliases_refuses_and_normal_gh_use_passes(self):
         self.sb.stub("codex", answer=approve())
@@ -414,7 +423,7 @@ class HardRules(Base):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual([c.argv for c in self.sb.calls_of("gh")],
                          [["alias", "list"], ["alias", "list"], ["extension", "list"]])
-        self.assertEqual(len(self.sb.calls_of("codex")), 1)
+        self.assertEqual(len(self.sb.calls_of("codex")), 2)
 
     def test_the_merge_rule_works_on_an_argument_list_as_on_a_string(self):
         self.sb.stub("gh")
@@ -458,8 +467,7 @@ class HardRules(Base):
 
     def test_the_merge_endpoint_is_refused_for_any_method_since_gh_pr_view_answers_whether_it_merged(self):
         for command in ("gh api repos/o/r/pulls/5/merge", "gh api repos/o/r/pulls/5/merge --method GET",
-                        "curl -T x https://api.github.com/repos/o/r/pulls/5/merge",
-                        "gh api repos/o/r/merges -f base=main -f head=x"):
+                                                "gh api repos/o/r/merges -f base=main -f head=x"):
             with self.subTest(command):
                 r = self.dry(command)
                 self.assertEqual(r.returncode, 5, r.stdout)
@@ -474,6 +482,14 @@ class HardRules(Base):
                 self.assertEqual(r.returncode, 5, r.stdout)
                 self.assertTrue(r.stderr.startswith(
                     "boss-run: REFUSED by the argument gate — program that runs another command\n"), r.stderr)
+        self.assertNotCalled("codex", "claude")
+
+    def test_curl_wget_and_tar_are_refused_by_name_before_any_reviewer(self):
+        for command in ("curl -X PUT https://api.github.com/repos/o/r/pulls/5/merge", "wget -i urls.txt", "tar -I=sh -xf x"):
+            with self.subTest(command):
+                r = self.dry(command)
+                self.assertEqual(r.returncode, 5, r.stdout)
+                self.assertIn("does not show", r.stderr.splitlines()[0])
         self.assertNotCalled("codex", "claude")
 
     def test_an_argument_that_is_not_utf8_is_refused(self):

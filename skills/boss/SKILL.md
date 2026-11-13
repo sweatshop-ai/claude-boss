@@ -88,8 +88,8 @@ asked) a command that holds `$` (so no variables, `$(…)` or `${…}`), a backt
 `;` `&` `|` `<` `>`, `( ) { }`, an unquoted `* ? [ ~ !`, a comment, a heredoc or a newline
 outside quotes. A program that runs another command or a code string is refused by name:
 a shell, `env`, `xargs`, `find`, `time`, `timeout`, `sudo`, `watch`, `script`, `make`,
-`python`, `perl`, `node`, `awk`, `sed`, `ssh`, `tmux`, `claude`, `codex`, an editor and
-the like. `gh` is refused when its subcommand is an alias or an extension (read from `gh`
+`python`, `perl`, `node`, `awk`, `sed`, `ssh`, `tmux`, `claude`, `codex`, an editor, and
+`curl`, `wget` and `tar` (their options hide what they do; use `gh api`). `gh` is refused when its subcommand is an alias or an extension (read from `gh`
 itself, and refused if `gh` cannot say), and `git` when it is given `-c`, a config key
 that runs a program, `--exec`, an alias, or a subcommand such as `difftool`. A pipe or a
 redirection stays outside, in your own shell: `boss-run … -- gh pr view 5 | tail`.
