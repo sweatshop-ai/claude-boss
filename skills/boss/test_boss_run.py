@@ -89,6 +89,7 @@ class Approve(Base):
              "exit": 0})
         self.assertRegex(entry["ts"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(Z|[+-]\d\d:\d\d)$")
         self.assertFalse((self.sb.work / "dry.flag").exists())
+        self.assertEqual(len(self.sb.calls_of("codex")), 1)
 
     def test_codex_is_called_once_with_a_read_only_sandbox_and_the_prompt_last(self):
         self.sb.stub("codex", answer=approve())
@@ -120,6 +121,7 @@ class Approve(Base):
         self.assertTrue(r.stdout.endswith("boss-run: command exited 0\n"), r.stdout)
         entry = self.only_log()
         self.assertEqual((entry["exit"], entry["cwd"]), (0, str(proj)))
+        self.assertEqual(len(self.sb.calls_of("codex")), 1)
 
     def test_the_commands_own_exit_status_passes_through(self):
         self.sb.stub("codex", answer=approve())
@@ -128,6 +130,7 @@ class Approve(Base):
         self.assertTrue(r.stdout.endswith("boss-run: command exited 7\n"), r.stdout)
         entry = self.only_log()
         self.assertEqual((entry["verdict"], entry["exit"]), ("APPROVE", 7))
+        self.assertEqual(len(self.sb.calls_of("codex")), 1)
 
     def test_several_arguments_are_quoted_so_each_stays_one_word(self):
         self.sb.stub("codex", answer=approve())
@@ -143,6 +146,7 @@ class Approve(Base):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual((self.sb.work / "out.txt").read_text(), "Hi\n")
         self.assertEqual(self.only_log()["cmd"], "echo hi | tr h H > out.txt")
+        self.assertEqual(len(self.sb.calls_of("codex")), 1)
 
 
 class Reject(Base):
@@ -161,6 +165,7 @@ class Reject(Base):
         self.assertEqual((entry["reviewer"], entry["verdict"], entry["reason"], entry["exit"]),
                          ("codex", "REJECT", "deletes more than asked", 3))
         self.assertNotCalled("claude")
+        self.assertEqual(len(self.sb.calls_of("codex")), 1)
 
 
 class Fallback(Base):
@@ -186,6 +191,7 @@ class Fallback(Base):
         self.assertEqual(r.returncode, 3)
         self.assertTrue(r.stderr.startswith("boss-run: REJECTED by opus — not what was asked\n"))
         self.assertFalse((self.sb.work / "must-not-run.flag").exists())
+        self.assertEqual(len(self.sb.calls_of("claude")), 1)
 
     def test_codex_that_fails_without_an_answer_falls_to_opus(self):
         self.sb.stub("codex", rc=1)
@@ -203,11 +209,14 @@ class Fallback(Base):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("(reviewer: opus)", r.stdout)
         self.assertEqual(self.only_log()["reviewer"], "opus")
+        self.assertEqual(len(self.sb.calls_of("codex")), 1)
+        self.assertEqual(len(self.sb.calls_of("claude")), 1)
 
     def test_a_codex_answer_means_claude_is_never_called(self):
         self.sb.stub("codex", answer=approve())
         self.sb.stub("claude", answer=reject())
         self.assertEqual(self.dry().returncode, 0)
+        self.assertEqual(len(self.sb.calls_of("codex")), 1)
         self.assertNotCalled("claude")
 
     def test_a_hung_codex_is_cut_off_with_its_children_and_opus_answers(self):
@@ -346,19 +355,22 @@ class HardRules(Base):
     def test_what_is_not_a_merge_is_not_refused(self):
         """The gate, a view, a comment that says the word, and the GET that asks whether a PR is merged."""
         self.sb.stub("codex", answer=approve())
-        for command in ("python3 skills/boss/boss_merge.py --repo o/r --pr 5",
-                        "python3 skills/boss/boss_merge.py --repo o/r --pr 5 --dry-run",
-                        "gh pr view 5",
-                        "gh pr comment 5 --body 'merge when green'",
-                        "gh pr checks 5 --repo o/r",
-                        "github pr merge-notes",
-                        "my-gh pr merge-notes",
-                        "gh api repos/o/r/pulls/5/merge",
-                        "gh api repos/o/r/pulls/5/merge --method GET"):
+        commands = ("python3 skills/boss/boss_merge.py --repo o/r --pr 5",
+                    "python3 skills/boss/boss_merge.py --repo o/r --pr 5 --dry-run",
+                    "gh pr view 5",
+                    "gh pr comment 5 --body 'merge when green'",
+                    "gh pr checks 5 --repo o/r",
+                    "github pr merge-notes",
+                    "my-gh pr merge-notes",
+                    "gh api repos/o/r/pulls/5/merge",
+                    "gh api repos/o/r/pulls/5/merge --method GET")
+        for command in commands:
             with self.subTest(command):
                 r = self.dry(command)
                 self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
                 self.assertNotIn("REFUSED by hard rule", r.stderr)
+        # not refused means the reviewer was asked: once for each command
+        self.assertEqual(len(self.sb.calls_of("codex")), len(commands))
 
     def test_the_owners_own_rules_in_the_config_dir_are_checked_too(self):
         (self.sb.cfg / "boss-hard-rules.tsv").write_text("our host\tsecret-host\n")
@@ -439,6 +451,7 @@ class VerdictParsing(Base):
                 entry = self.sb.log_lines()[-1]
                 self.assertEqual((entry["reviewer"], entry["verdict"], entry["reason"], entry["exit"]),
                                  ("codex", verdict, reason, code))
+        self.assertEqual(len(self.sb.calls_of("codex")), len(cases))
 
 
 class ReviewerIsolation(Base):
@@ -464,16 +477,21 @@ class ReviewerIsolation(Base):
         self.noisy("codex", answer=approve())
         self.noisy("claude", answer=approve())
         self.assertQuiet(self.dry())
+        self.assertEqual(len(self.sb.calls_of("codex")), 1)
+        self.assertNotCalled("claude")
         self.sb.stub("codex", answer=RAMBLE, out="NOISE-CODEX-OUT", err="NOISE-CODEX-ERR")
         r = self.dry()
         self.assertIn("(reviewer: opus)", r.stdout)
         self.assertQuiet(r)
+        self.assertEqual(len(self.sb.calls_of("codex")), 2)
+        self.assertEqual(len(self.sb.calls_of("claude")), 1)
 
     def test_reviewer_noise_stays_out_of_a_reject(self):
         self.noisy("codex", answer=reject())
         r = self.live("touch must-not-run.flag")
         self.assertEqual(r.returncode, 3)
         self.assertQuiet(r)
+        self.assertEqual(len(self.sb.calls_of("codex")), 1)
 
     def test_reviewer_noise_stays_out_of_a_no_answer(self):
         self.noisy("codex", rc=1)
@@ -499,6 +517,9 @@ class SandboxSeal(Base):
         self.assertEqual(r.returncode, 0, r.stderr)
         found = (self.sb.work / "found.txt").read_text().split()
         self.assertEqual(found, [str(self.sb.stubs / "codex"), str(self.sb.stubs / "claude")])
+        # the reviewer was asked once, by boss-run before the command; the command only looked
+        self.assertEqual(len(self.sb.calls_of("codex")), 1)
+        self.assertNotCalled("claude")
 
 
 class MoreCharacterization(Base):
@@ -522,6 +543,7 @@ class MoreCharacterization(Base):
                 r = self.dry()
                 self.assertEqual(r.returncode, code, r.stderr)
                 self.assertEqual(self.sb.log_lines()[-1]["verdict"], verdict)
+        self.assertEqual(len(self.sb.calls_of("codex")), 2)   # one per answer
 
     def test_a_nul_byte_inside_codexs_verdict_is_dropped_so_its_reject_stands(self):
         # bash's $(...) dropped NUL bytes from a reviewer's answer: `RE\0JECT` was a REJECT, and Haiku
@@ -530,6 +552,7 @@ class MoreCharacterization(Base):
         self.sb.stub("claude", answer=approve("opus would approve"))
         r = self.dry()
         self.assertEqual(r.returncode, 3, r.stderr)
+        self.assertEqual(len(self.sb.calls_of("codex")), 1)
         self.assertNotCalled("claude")
         self.assertEqual(self.sb.log_lines()[-1]["verdict"], "REJECT")
 
@@ -541,6 +564,7 @@ class MoreCharacterization(Base):
         self.sb.stub("claude", answer=approve("opus would approve"))
         r = self.dry()
         self.assertEqual(r.returncode, 3, r.stderr)
+        self.assertEqual(len(self.sb.calls_of("codex")), 1)
         self.assertNotCalled("claude")
         self.assertEqual(self.sb.log_lines()[-1]["verdict"], "REJECT")
 
@@ -549,6 +573,7 @@ class MoreCharacterization(Base):
         r = self.dry()
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(self.only_log()["reviewer"], "codex")
+        self.assertEqual(len(self.sb.calls_of("codex")), 1)
         self.assertNotCalled("claude")
         sb2 = Sandbox()
         self.addCleanup(sb2.cleanup)
@@ -556,6 +581,7 @@ class MoreCharacterization(Base):
         r = sb2.boss_run("--why", WHY, "--dry-run", "--", CMD)
         self.assertEqual(r.returncode, 3, r.stderr)
         self.assertEqual(sb2.log_lines()[0]["reviewer"], "opus")
+        self.assertEqual(len(sb2.calls_of("claude")), 1)
 
     def test_codex_progress_on_stdout_is_never_read_as_the_answer(self):
         self.sb.stub("codex", out=approve("progress, not an answer"))   # no answer in the -o file
@@ -563,17 +589,21 @@ class MoreCharacterization(Base):
         r = self.dry()
         self.assertEqual(r.returncode, 3, r.stderr)
         self.assertEqual(self.only_log()["reviewer"], "opus")
+        self.assertEqual(len(self.sb.calls_of("codex")), 1)
+        self.assertEqual(len(self.sb.calls_of("claude")), 1)
         sb2 = Sandbox()
         self.addCleanup(sb2.cleanup)
         sb2.stub("codex", out=approve("progress, not an answer"))
         r = sb2.boss_run("--why", WHY, "--dry-run", "--", CMD)
         self.assertEqual(r.returncode, 4, r.stderr)
+        self.assertEqual(len(sb2.calls_of("codex")), 1)
 
     def test_the_nine_log_fields_and_their_values_for_opus_none_and_a_hard_rule(self):
         self.sb.stub("claude", answer=approve("opus agrees"))
         self.assertEqual(self.dry().returncode, 0)
         self.assertEntry(self.sb, self.sb.log_lines()[-1], reviewer="opus", verdict="APPROVE",
                          reason="opus agrees", exit=0)
+        self.assertEqual(len(self.sb.calls_of("claude")), 1)
 
         sb2 = Sandbox()
         self.addCleanup(sb2.cleanup)
@@ -651,6 +681,11 @@ class FailClosed(Base):
     def setUp(self):
         super().setUp()
         self.sb.stub("codex", answer=approve())
+
+    def tearDown(self):
+        # python3 is the stub here, so the chain never runs and codex is never reached
+        self.sb.expect_unused("codex")
+        super().tearDown()
 
     @staticmethod
     def whole_result(reviewer="codex", word="APPROVE", reason="chain reason"):
