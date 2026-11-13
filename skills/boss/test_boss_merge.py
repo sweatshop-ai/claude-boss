@@ -511,6 +511,9 @@ class DeployList(Base):
         self.assertEqual((got.state, got.non_deploying, got.test_paths), ("ok", frozenset({"main"}), ("tests/*",)))
         got = bm.parse_deploy(deploy_answer({"version": 1, "non_deploying": []}).encode())
         self.assertEqual((got.state, got.non_deploying, got.test_paths), ("ok", frozenset(), None))
+        self.assertIsNone(got.required_checks)
+        got = bm.parse_deploy(deploy_answer(dict(GOOD_DEPLOY, required_checks=["test", "lint"])).encode())
+        self.assertEqual(got.required_checks, ("test", "lint"))
 
     def test_every_failure_mode_makes_every_branch_deploy(self):
         conf = lambda **kw: deploy_answer(dict(GOOD_DEPLOY, **kw))       # noqa: E731
@@ -545,6 +548,9 @@ class DeployList(Base):
             ("bad-test-paths", dict(raw=conf(test_paths="tests/*"))),
             ("bad-test-paths", dict(raw=conf(test_paths=["tests/*", 1]))),
             ("bad-test-paths", dict(raw=conf(test_paths=None))),
+            ("bad-required-checks", dict(raw=conf(required_checks="ci0"))),
+            ("bad-required-checks", dict(raw=conf(required_checks=["ci0", 1]))),
+            ("bad-required-checks", dict(raw=conf(required_checks=None))),
         ]
         for state, kw in cases:
             with self.subTest(state=state, answer=str(kw)[:60]):
@@ -894,7 +900,8 @@ class Command(Base):
 # --------------------------------------------------------------- the test-only exception (11b) ----
 SINCE = "c" * 40            # the head of the last GO
 PRODUCTION = "skills/boss/boss_merge.py"
-DEPLOYING = {"version": 1, "non_deploying": ["staging"], "test_paths": ["tests/*"]}      # `main` deploys
+DEPLOYING = {"version": 1, "non_deploying": ["staging"], "test_paths": ["tests/*"],
+             "required_checks": ["ci0"]}      # `main` deploys
 
 
 def compare_answer(*files, status="ahead", **extra):
@@ -1251,6 +1258,22 @@ class DocsTestsOnly(Base):
     def test_checks_that_were_all_skipped_or_neutral_are_not_green(self):
         self.refused(["tests/a.py"], "no check run succeeded", checks=checks_answer("skipped", "neutral"))
 
+    def test_the_checks_the_deploy_list_requires_must_all_have_run_and_succeeded(self):
+        two = {"raw": deploy_answer(dict(DEPLOYING, required_checks=["ci0", "build"]))}
+        self.refused(["tests/a.py"], "required check 'build'", deploy=two, checks=checks_answer("success", "success"))
+        named = json.dumps({"total_count": 2, "check_runs": [
+            {"name": "ci0", "status": "completed", "conclusion": "success"},
+            {"name": "build", "status": "completed", "conclusion": "skipped"}]})
+        self.refused(["tests/a.py"], "required check 'build'", deploy=two, checks=named)
+        named = named.replace("skipped", "success")
+        self.assertEqual(self.go(["tests/a.py"], deploy=two, checks=named), 0, self.err)
+
+    def test_a_deploy_list_with_no_required_checks_keeps_the_refusal_and_reads_no_check_run(self):
+        for conf in (dict(DEPLOYING, required_checks=[]), {k: v for k, v in DEPLOYING.items() if k != "required_checks"}):
+            with self.subTest(conf=sorted(conf)):
+                self.refused(["tests/a.py"], "no required_checks", deploy={"raw": deploy_answer(conf)})
+                self.assertEqual([c for c in self.gh_calls("api") if "/check-runs" in c.argv[1]], [])
+
     def test_a_waived_go_never_qualifies(self):
         self.refused(["tests/a.py"], "deploy list ok", kind="waived")
         self.assertEqual(len(self.gh_calls("api")), 1, "the compare is not even read")
@@ -1276,7 +1299,7 @@ class DocsTestsOnly(Base):
         self.assertIn("compare-failed", self.err)
 
     def test_an_empty_or_truncated_pr_does_not_pass(self):
-        self.refused([], "(no file)")
+        self.refused([], "compare-no-files")
         self.put(1, kind="provisional")
         many = ["tests/f%d.py" % i for i in range(bm.COMPARE_FILES)]
         self.gh.configure(api=[self.deploy, {"raw": compare_answer(*many)}, {"raw": checks_answer("success")}])
@@ -1386,8 +1409,64 @@ class MergedBase(Base):
         self.refused("compare-not-ahead", merge_compare("x.py"), compare_answer("m.py", status="behind"),
                      compare_answer("m.py"))
 
+    def test_a_pr_that_owns_no_file_at_either_head_refuses_whatever_the_status(self):
+        for status in ("ahead", "diverged", "identical"):
+            for live, since in (([], ["m.py"]), (["m.py"], []), ([], [])):
+                with self.subTest(status=status, live=live, since=since):
+                    self.run_merged(merge_compare("x.py"), compare_answer(*live, status=status),
+                                    compare_answer(*since, status=status))
+                    self.assertEqual(self.merges(), [])
+                    self.assertEqual(self.last()["decision"], "refused")
+                    self.assertIn(self.last()["reason"], ("compare-no-files", "pr-owns-nothing"))
+
+    def test_a_base_with_a_slash_goes_into_the_compare_path_percent_encoded(self):
+        self.gh.set_pr(baseRefName="release/1.0")
+        self.put(1, head_sha=SINCE, base="release/1.0")
+        self.assertEqual(self.run_merged(merge_compare("x.py"), compare_answer("m.py"), compare_answer("m.py")), 0,
+                         self.err)
+        self.assertEqual(self.calls(), ["repos/%s/compare/%s...%s" % (REPO, SINCE, HEAD),
+                                        "repos/%s/compare/release%%2F1.0...%s" % (REPO, HEAD),
+                                        "repos/%s/compare/release%%2F1.0...%s" % (REPO, SINCE)])
+
+    # rule 2 and rule 4 together: a provisional GO the PR earned as docs/tests-only, then main merged into it
+    def combined(self, own_live, own_since, checks=None, deploy=None, **over):
+        self.put(1, **dict({"head_sha": SINCE, "kind": "provisional"}, **over))
+        self.gh.configure(api=[deploy or self.deploy, {"raw": merge_compare("x.py")}, {"raw": own_live},
+                               {"raw": own_since},
+                               {"raw": checks if checks is not None else checks_answer("success", "skipped")}])
+        return self.run_gate(merged_since=SINCE)
+
+    def test_a_docs_tests_only_pr_with_a_provisional_go_that_merged_main_merges_on_a_deploying_base(self):
+        both = compare_answer("tests/a.py", "docs/x.md", status="diverged")
+        self.assertEqual(self.combined(both, both), 0, self.err)
+        self.assertEqual(len(self.merges()), 1)
+        self.assertEqual(self.last()["reason"], "provisional-go-docs-tests-only-merged-base")
+        self.assertEqual([c.argv[1] for c in self.gh_calls("api")][-1],
+                         "repos/%s/commits/%s/check-runs?per_page=100" % (REPO, HEAD))
+
+    def test_the_combination_keeps_every_condition_of_both_rules(self):
+        both = compare_answer("tests/a.py", status="diverged")
+        code_pr = compare_answer("tests/a.py", PRODUCTION, status="diverged")
+        for label, args, code, why in (
+                ("a code file", (code_pr, code_pr), 4, PRODUCTION),
+                ("red checks", (both, both, checks_answer("failure")), 4, "check "),
+                ("no required check", (both, both, checks_answer("success"), {"raw": deploy_answer(
+                    dict(DEPLOYING, required_checks=["build"]))}), 4, "required check 'build'"),
+                ("a pr file touched since", (compare_answer("tests/a.py", "x.py", status="diverged"),) * 2, 3,
+                 "x.py")):
+            with self.subTest(label):
+                before = len(self.merges())
+                self.assertEqual(self.combined(*args), code, self.err)
+                self.assertEqual(len(self.merges()), before)
+                self.assertIn(why, self.err)
+
+    def test_a_waived_go_does_not_combine(self):
+        both = compare_answer("tests/a.py", status="diverged")
+        self.assertEqual(self.combined(both, both, kind="waived"), 4, self.err)
+        self.assertEqual(self.calls(), [])
+
     def test_the_go_must_be_one_decide_allows(self):
-        self.put(1, head_sha=SINCE, kind="provisional")           # a provisional GO on a deploying base
+        self.put(1, head_sha=SINCE, kind="waived")           # a waived GO on a deploying base
         self.refused("deploying-base", merge_compare("x.py"), compare_answer("m.py"), compare_answer("m.py"), code=4)
         self.assertEqual(self.calls(), [])
 

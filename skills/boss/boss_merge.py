@@ -213,6 +213,7 @@ class Deploy(NamedTuple):
     state: str                       # "ok", or why the file counts as invalid
     non_deploying: frozenset
     test_paths: tuple | None         # the patterns of `--test-only-since` (ticket 11b)
+    required_checks: tuple | None = None    # the check runs rule 2 waits for (ticket 51), None when the key is absent
 
 
 def _strings(value) -> bool:
@@ -243,8 +244,11 @@ def parse_deploy(answer: bytes) -> Deploy:
         return invalid("bad-non-deploying")
     if "test_paths" in conf and not _strings(conf["test_paths"]):
         return invalid("bad-test-paths")
+    if "required_checks" in conf and not _strings(conf["required_checks"]):
+        return invalid("bad-required-checks")
     return Deploy("ok", frozenset(conf["non_deploying"]),
-                  tuple(conf["test_paths"]) if "test_paths" in conf else None)
+                  tuple(conf["test_paths"]) if "test_paths" in conf else None,
+                  tuple(conf["required_checks"]) if "required_checks" in conf else None)
 
 
 def read_deploy(repo: str, base: str, io_timeout: float = policy.REVIEW_IO_TIMEOUT) -> Deploy:
@@ -324,8 +328,8 @@ def read_compare(repo: str, since: str, head: str, io_timeout: float,
         return Compare("compare-failed", note="gh api compare listed no files")
     if data.get("status") not in statuses:
         return Compare("compare-not-ahead", note="the compare says %r" % (data.get("status"),))
-    if not files and data["status"] == "ahead":       # commits ahead and no file listed: not trusted
-        return Compare("compare-no-files", note="the compare is ahead and lists no file")
+    if not files and data["status"] != "identical":     # commits on the head and no file listed: not trusted
+        return Compare("compare-no-files", note="the compare is %s and lists no file" % data["status"])
     if len(files) >= COMPARE_FILES:
         return Compare("compare-truncated", note="%d files is the API's limit, there may be more" % len(files))
     names = []
@@ -351,8 +355,10 @@ def _parents(data: dict) -> tuple | None:
     return tuple(counts)
 
 
-def read_checks(repo: str, head: str, io_timeout: float) -> tuple[bool, str]:
-    """(are the check runs of `head` all complete and green, why not). No check run is not green: it means nothing ran."""
+def read_checks(repo: str, head: str, io_timeout: float, required: tuple = ()) -> tuple[bool, str]:
+    """(are the check runs of `head` all complete and green, why not). No check run is not green: it means nothing ran.
+    Every name in `required` must be among the runs and have succeeded: a run not created yet is not seen in a list of
+    what exists now, so only the names the repo declares say that all of its CI has run."""
     run = boss_review._spawn(["gh", "api", "repos/%s/commits/%s/check-runs?per_page=100" % (repo, head)], io_timeout)
     if run.timed_out or run.code != 0:
         return False, "the check runs could not be read"
@@ -367,6 +373,10 @@ def read_checks(repo: str, head: str, io_timeout: float) -> tuple[bool, str]:
         return False, "no check ran on this head"
     if not any(isinstance(r, dict) and r.get("conclusion") == "success" for r in runs):
         return False, "no check run succeeded (all skipped or neutral means nothing ran)"
+    for name in required:
+        if not any(isinstance(r, dict) and r.get("name") == name and r.get("status") == "completed"
+                   and r.get("conclusion") == "success" for r in runs):
+            return False, "required check %r has not succeeded on this head" % name
     for r in runs:
         if not isinstance(r, dict) or r.get("status") != "completed" or r.get("conclusion") not in GREEN:
             return False, "check %r is %s/%s" % (r.get("name") if isinstance(r, dict) else None,
@@ -452,22 +462,34 @@ def touched_by_the_pr(own: tuple, since_changes: tuple) -> list[str]:
 OWN_STATUSES = ("ahead", "diverged", "identical")       # a PR's files against a base that may have moved on
 
 
+def docs_tests_problem(files: tuple, head: str, deploy: Deploy, repo: str, io_timeout: float) -> str | None:
+    """Why the PR is not a docs/tests-only PR with all its CI green on `head` (rule 2's conditions), None when it is.
+    `files` are the PR's own files against its base."""
+    if deploy.test_paths is None:
+        return "no test_paths in the deploy list"
+    if not deploy.required_checks:
+        return "no required_checks in the deploy list (the check runs that exist now do not say all of CI has run)"
+    stray = not_docs_or_tests(files, deploy.test_paths)
+    if stray:
+        return "not docs or tests: " + ", ".join(stray[:5])
+    green, why = read_checks(repo, head, io_timeout, deploy.required_checks)
+    return None if green else why
+
+
 def docs_tests_only(seen: Pr, got: Decision, deploy: Deploy, repo: str, io_timeout: float) -> tuple[Decision, str]:
     """Review-by-risk rule 2 for a provisional GO that `decide` refused as `deploying-base`: allowed when every file the
-    PR changes is docs or a test and the head's checks are green. Otherwise the refusal stands (4), with the reason."""
+    PR changes is docs or a test and every check the deploy list requires has succeeded on the head. Otherwise the
+    refusal stands (4), with the reason."""
     def stay(note: str) -> tuple[Decision, str]:
         return got, "deploy list %s; docs/tests-only rule: %s" % (deploy.state, note)
 
-    if deploy.test_paths is None:
-        return stay("no test_paths in the deploy list")
+    if deploy.test_paths is None or not deploy.required_checks:       # before any read: the rule cannot pass
+        return stay(docs_tests_problem((), seen.head, deploy, repo, io_timeout))
     own = read_compare(repo, seen.base, seen.head, io_timeout, OWN_STATUSES)
     if own.problem:
         return stay("%s: %s" % (own.problem, own.note))
-    stray = not_docs_or_tests(own.files, deploy.test_paths)
-    if stray:
-        return stay("not docs or tests: " + ", ".join(stray[:5]))
-    green, why = read_checks(repo, seen.head, io_timeout)
-    if not green:
+    why = docs_tests_problem(own.files, seen.head, deploy, repo, io_timeout)
+    if why:
         return stay(why)
     return Decision(EXIT_MERGED, "provisional-go-docs-tests-only", got.round, got.kind), ""
 
@@ -476,9 +498,11 @@ def merged_base(rounds: list[Round], since: str, seen: Pr, deploy: Deploy, owner
                 io_timeout: float) -> tuple[Decision, str]:
     """Review-by-risk rule 4 for a PR whose live head has no deciding round: allowed only if SHA is a GO `decide` allows
     as the head, nothing says no after it, and the live head is SHA plus a merge of the base that touches none of the
-    PR's own files."""
+    PR's own files. A provisional GO on a deploying base qualifies too, as rule 2 allows it (ticket 51): the PR's files are
+    then docs and tests only and the required checks have succeeded on the live head."""
     got = decide(rounds, since, seen.base, deploy.non_deploying, owner)
-    if got.exit != EXIT_MERGED:
+    docs_tests = got.exit == EXIT_DEPLOYING and got.kind == "provisional"
+    if got.exit != EXIT_MERGED and not docs_tests:
         return (got, "") if got.reason != "no-round" else (got, "%s is the head of no GO round" % since)
     no = no_go_above(rounds, got.round, owner)
     if no is not None:
@@ -499,6 +523,8 @@ def merged_base(rounds: list[Round], since: str, seen: Pr, deploy: Deploy, owner
         own = read_compare(repo, seen.base, end, io_timeout, OWN_STATUSES)
         if own.problem:
             return refuse(own.problem, own.note)
+        if not own.files:       # a PR that owns nothing has nothing the compare can prove unchanged, whatever its status
+            return refuse("pr-owns-nothing", "the PR lists no file against %s at %s" % (seen.base, end[:12]))
         own_at[end] = set(own.files)
     stray = touched_by_the_pr(tuple(own_at[seen.head] | own_at[since]), changed.files)
     if stray:
@@ -508,6 +534,11 @@ def merged_base(rounds: list[Round], since: str, seen: Pr, deploy: Deploy, owner
     moved = sorted(own_at[seen.head] ^ own_at[since])
     if moved:
         return refuse("pr-file-set-changed", "owned at one head only: " + ", ".join(moved[:5]))
+    if docs_tests:      # the PR's files are the same at both heads, so the GO'd head's own files are the live head's
+        why = docs_tests_problem(tuple(own_at[seen.head]), seen.head, deploy, repo, io_timeout)
+        if why:
+            return got, "deploy list %s; docs/tests-only rule: %s" % (deploy.state, why)
+        return Decision(EXIT_MERGED, "provisional-go-docs-tests-only-merged-base", got.round, got.kind), ""
     return Decision(EXIT_MERGED, got.reason + "-merged-base", got.round, got.kind), ""
 
 
