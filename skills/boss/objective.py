@@ -157,7 +157,12 @@ def _reglue(old_lines, body: str) -> str:
     for ln in old_lines:
         if not HEADING_LINE_RE.match(ln) or not COMMENT_OPEN_RE.search(ln):
             continue
-        blocks = comment_blocks(ln)
+        try:
+            blocks = comment_blocks(ln)
+        except ValueError:
+            raise ValueError("a sheaf comment glued to the heading %r runs over more than one "
+                             "line (sheaf writes it on one); put it on one line by hand before "
+                             "rewriting this goal" % ln.split("<!--", 1)[0].strip()) from None
         if not lost_comments(ln, body):
             continue
         text = ln.split("<!--", 1)[0].rstrip()
@@ -184,7 +189,7 @@ def with_body(text: str, body: str) -> str:
     head = [lines[i] for i in sorted(keep) if i >= 0]
     rest = [ln for i, ln in enumerate(lines) if i not in keep]
     body = _reglue(rest, body)
-    dropped = "\n".join(ln for ln in rest if not HEADING_LINE_RE.match(ln))
+    dropped = "\n".join(rest)
     lost = lost_comments(dropped, "\n".join(head + [body]))
     return "\n".join(head + [body.rstrip("\n")] + ([""] + lost if lost else [])) + "\n"
 

@@ -224,6 +224,27 @@ class SheafComments(unittest.TestCase):
         return (GOAL.replace("## Done when", "## Done when" + C2.replace("\n", " "))
                     .replace("## Next, in priority order", "## Next, in priority order " + C1.replace("\n", " ")))
 
+    SHEAF_ONE_LINE = ('<!-- sheaf-comment id=c4 by="Ada" at=2026-11-01T13:00 status=open quote="Done when" '
+                      'Why two?<br>Check -&#45; please.<br>@Claude 2026-11-01T13:05 answer: Fixed. -->')
+
+    def test_a_heading_comment_as_sheaf_writes_it_is_found_and_kept(self):
+        text = GOAL.replace("## Done when", "## Done when" + self.SHEAF_ONE_LINE)
+        self.assertEqual(len(objective.criteria(text)), 2)
+        body, _ = objective.strip_header(text)
+        self.assertEqual(objective.with_body(text, body), text)
+        self.assertIn("## Done when" + self.SHEAF_ONE_LINE + "\n",
+                      objective.with_body(text, "## Done when\n- [ ] x\n"))
+
+    def test_a_comment_line_that_looks_like_a_heading_is_carried_whole(self):
+        block = '<!-- sheaf-comment id=c5 by="Ada" at=2026-11-01T14:00 status=open quote="x"\n## quoted heading\n-->'
+        new = objective.with_body("# Objective — t\n_Status: OPEN_\n## Outcome\nx" + block + "\n", "## Outcome\ny\n")
+        self.assertEqual(objective.comment_blocks(new), [block])
+
+    def test_a_glued_comment_that_runs_over_lines_is_refused_not_lost(self):
+        text = GOAL.replace("## Done when", '## Done when<!-- sheaf-comment id=c6 by="Ada"\nmore\n-->')
+        with self.assertRaises(ValueError):
+            objective.with_body(text, "## Outcome\nz\n")
+
     def test_a_section_lookup_reads_a_heading_with_a_comment_glued_to_it(self):
         text = self.glued()
         self.assertEqual(len(objective.criteria(text)), 2)
