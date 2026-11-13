@@ -929,12 +929,14 @@ the plugin cannot set. A base retargeted between the check and the merge is dete
 starts to deploy is outside what the gate can see.
 
 **A PR that waits only for the owner's merge goes to the desk.** That is a PR with its GO that you may not order
-through the gate (its branch deploys, or the gate refuses it for a reason only the owner lifts). Hand it over with
+through the gate because its branch deploys. A gate refusal is not handed over: it is an instruction to get the right
+review (P13/P14 above). Before handing over, check that the live head is the one the GO was given on and that CI is green on it
+(`gh pr view N --json headRefOid`; the desk pins whatever head it finds and merges on mergeable, and neither check is the desk's). Hand it over with
 `desk ready OWNER/REPO N --what "<one line on what the PR does>" --rec merge --by <your name> --why "<the reviews, CI, and the head sha>"`,
-not to a Paste and an `ASK` per PR. `--after M` names a PR that must merge first; `--rec wait` or `--rec dont` when
-that is your advice. `desk` is AgentView's `hooks/desk`, beside `hooks/paste` (on the author's machine
+not to a Paste and an `ASK` per PR. `--after M` names a PR that must merge first; `--rec wait` when your advice is to wait. `desk` is not on PATH: run AgentView's
+`hooks/desk`, beside `hooks/paste`, by its path (on the author's machine
 `/home/tiroir/Projects/agentview/hooks/desk`; the owner merges from the desk page there). It pins the PR's head, so
-**do not push after it**: a new head needs a new `desk ready`, which replaces the item. Then run
+**do not push after it, and tell the worker who owns the branch the head is pinned**: a new head needs a new `desk ready`, which replaces the item. Then run
 `desk status OWNER/REPO N`: it must say `waiting` (it also says merged as a sha, or refused and why); a `desk withdraw
 OWNER/REPO N` takes the item back. When `branch_deploys.py <checkout> <base>` lists deploy lines, put them in `--why` ("deploys:
 <the lines>") until the desk checks that itself (merge-desk ticket 05). The `ASK` stays for decisions that are not a merge.
@@ -1229,7 +1231,7 @@ before closing**, and the closing after both the state line and the objective.
    - **A worker with uncommitted code, or commits on no remote, is not closed.** Name it,
      name what is at risk, and stop for it: the owner or the worker saves the work first.
 6. Present the recap per `references/reports.md`, sourced from tracker and board: what got
-   done (PR and merge ids), each open item from the state line (the desk items with it: a desk item is the owner's, so it counts in the team-line), what the next boss picks up
+   done (PR and merge ids), each open item from the state line (the desk items with it; a waiting desk item is the owner's, so the team-line counts it), what the next boss picks up
    first. The team-line goes to n=0 once everything is closed, because nothing rings any
    more; a worker left open with work at risk is left for the owner, so count it. With `voice: ON`, speak it.
 

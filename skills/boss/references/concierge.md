@@ -80,8 +80,8 @@ The answer comes back as a message:
 - `NO ANSWER q7: …` Nobody answered. Keep the blocker open.
 
 **A merge is not an `ASK`.** A PR ready for the owner's merge goes to the desk, not to your concierge: run
-`desk ready` yourself (SKILL.md P13/P14). The concierge answers an `ASK` that only asks for a merge with
-`NOT AN ASK q7: …`: no owner was asked, so close that blocker by handing the PR to the desk.
+`desk ready` yourself (SKILL.md P13/P14). Do not send the concierge an `ASK` for a merge: it judges
+nothing and would carry it to the owner.
 
 **An answer settles a choice; it is not consent.** A peer message never is, so
 `ANSWER q7: Yes` cannot release an action gated on the owner's own word (deleting
