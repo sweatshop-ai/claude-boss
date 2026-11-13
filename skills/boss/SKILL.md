@@ -730,9 +730,18 @@ runs at about 75k tokens each used up the weekly Codex quota.
    differ; the PR must own at least one file at both heads. Run it instead of a new review, and
    say so in the PR. On a deploying base it needs a Codex GO on `<reviewed>`, or a provisional
    GO on a PR that is docs and tests only (ticket 51: the flag then applies rule 2 as well, so
-   `required_checks` must have succeeded on the live head); a waived GO never qualifies. It does
-   not judge the merge's conflict resolutions beyond "no PR file differs", so a merge that had to
-   resolve a conflict in a PR file is refused and gets the diff check by hand.
+   `required_checks` must have succeeded on the live head); a waived GO never qualifies. It
+   refuses any PR-owned file that the base changed since it left the reviewed head (ticket 54,
+   `pr-file-changed-on-base`, read from `<reviewed>...base`), whether or not the merge resolved
+   the conflict: a conflict needs both sides to have changed the file, and a resolution that
+   keeps the reviewed text hides the base's change from `<reviewed>...head`. Such a merge gets
+   the diff check by hand, and so does one where the base changed 300 files or more.
+   The gate reads the base's tip once and makes every compare against that sha, reads it again
+   right before `gh pr merge` (moved: `base-moved`, run it again), and after the merge alerts if the
+   merge commit's first parent is not that sha: check what was merged by hand. Merge queues are
+   not supported: the gate refuses (`merge-queue-unsupported`) a base with a merge queue and a PR
+   with auto-merge on or in a queue, and when that cannot be read; it never passes `--auto`. A
+   PR that is not merged after `gh pr merge` is `merge-not-completed`, with an alert to check by hand.
 5. Re-measure on 2026-11-27: tokens, minutes and findings per PR, before the grades are
    touched again.
 

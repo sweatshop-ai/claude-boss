@@ -37,6 +37,9 @@ KEY = "owner/repo"
 OWNER = (KEY, PR)
 HEAD = "a" * 40
 OTHER = "b" * 40
+BASE_SHA = "d" * 40      # the base branch's tip when the gate reads it
+MOVED_SHA = "e" * 40     # the tip after the base moved
+MERGE_SHA = "f" * 40     # the merge commit
 GONE = object()         # a field removed from a record
 
 GH_HANDLER = r'''
@@ -102,6 +105,25 @@ if argv[:2] == ["pr", "comment"]:
     e = entry("comment")
     patched(e)
     finish(e)
+if argv[0] == "api" and "/rules/branches/" in argv[1]:       # the base's rules (ticket 54): none unless a test says
+    e = entry("rules")
+    sys.stdout.write(e.get("raw", "[]"))
+    finish(e)
+if argv[:2] == ["api", "graphql"]:        # the base's merge queue and the PR's auto-merge state: none unless a test says
+    e = entry("graphql")
+    sys.stdout.write(e.get("raw", json.dumps({"data": {"repository": {"mergeQueue": None, "pullRequest": {
+        "autoMergeRequest": None, "isInMergeQueue": False}}}})))
+    finish(e)
+if argv[0] == "api" and "/git/ref/heads/" in argv[1]:       # the base branch's tip (ticket 54)
+    e = entry("ref")
+    state = patched(e)
+    sys.stdout.write(e["raw"] if "raw" in e else json.dumps({"object": {"sha": state["baseSha"]}}))
+    finish(e)
+if argv[0] == "api" and "/commits/" in argv[1] and "/check-runs" not in argv[1]:     # the merge commit's parents
+    e = entry("commit")
+    state = patched(e)
+    sys.stdout.write(e["raw"] if "raw" in e else json.dumps({"parents": [{"sha": state["mergeParent"]}, {"sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]}))
+    finish(e)
 if argv[0] == "api":
     e = entry("api")
     sys.stdout.write(e.get("raw", ""))
@@ -129,7 +151,8 @@ class MergeGh:
         self.side = sb.side
         (self.side / "gh_handler.py").write_text(GH_HANDLER, encoding="utf-8")
         self.set_pr(number=PR, url="https://github.com/%s/pull/%d" % (REPO, PR), headRefOid=head,
-                    baseRefName="main", state="OPEN", title=TITLE, body=BODY, diff=DIFF)
+                    baseRefName="main", state="OPEN", title=TITLE, body=BODY, diff=DIFF, baseSha=BASE_SHA,
+                    mergeParent=BASE_SHA, mergeCommit={"oid": MERGE_SHA})
         self.configure()
         sb.stub_script("gh", 'exec python3 "$R/side/gh_handler.py" "$R/side" "$@"')
 
@@ -165,6 +188,8 @@ class Gate:
         self.assertEqual(self.sb.calls_of("codex"), [], "codex was called")
         for call in self.sb.calls_of("gh"):
             argv = call.argv
+            if argv[:2] == ["api", "graphql"]:
+                continue
             if argv[0] == "pr":
                 self.assertEqual(argv[argv.index("--repo") + 1].lower() if "--repo" in argv else None, KEY, argv)
             else:
@@ -195,8 +220,18 @@ class Gate:
         self.err = err.getvalue()
         return code
 
+    @staticmethod
+    def _base_call(call):
+        return call.argv[0] == "api" and (call.argv[1] == "graphql" or "/git/ref/heads/" in call.argv[1]
+                                          or "/rules/branches/" in call.argv[1]
+                                          or call.argv[1].endswith("/commits/" + MERGE_SHA))
+
     def gh_calls(self, *prefix):
-        return [c for c in self.sb.calls_of("gh") if c.argv[:len(prefix)] == list(prefix)]
+        """The calls that start with `prefix`; the reads of the base's tip and of the merge commit are `base_calls`."""
+        return [c for c in self.sb.calls_of("gh") if c.argv[:len(prefix)] == list(prefix) and not self._base_call(c)]
+
+    def base_calls(self):
+        return [c.argv[1] for c in self.sb.calls_of("gh") if self._base_call(c)]
 
     def merges(self):
         return self.gh_calls("pr", "merge")
@@ -622,14 +657,16 @@ class Command(Base):
         self.assertNotIn("--delete-branch", call.argv)
         self.assertEqual(self.alerts(), [])
         self.assertEqual([c.argv[:2] for c in self.sb.calls_of("gh")],
-                         [["pr", "view"], ["api", self.gh_calls("api")[0].argv[1]], ["pr", "merge"], ["pr", "view"]])
+                         [["pr", "view"], ["api", "repos/%s/git/ref/heads/main" % REPO],
+                          ["api", self.gh_calls("api")[0].argv[1]], ["api", "repos/%s/rules/branches/main" % REPO],
+                          ["api", "graphql"], ["api", "repos/%s/git/ref/heads/main" % REPO], ["pr", "merge"], ["pr", "view"], ["api", "repos/%s/commits/%s" % (REPO, MERGE_SHA)]])
 
-    def test_the_gh_pr_view_reads_the_five_fields_once_and_the_two_after_the_merge(self):
+    def test_the_gh_pr_view_reads_the_five_fields_once_and_the_three_after_the_merge(self):
         self.put(1)
         self.run_gate()
         first, second = self.gh_calls("pr", "view")
         self.assertEqual(first.argv[first.argv.index("--json") + 1], "number,url,headRefOid,baseRefName,state")
-        self.assertEqual(second.argv[second.argv.index("--json") + 1], "baseRefName,state")
+        self.assertEqual(second.argv[second.argv.index("--json") + 1], "baseRefName,state,mergeCommit")
 
     def test_dry_run_decides_and_logs_but_never_merges(self):
         self.put(1)
@@ -791,7 +828,7 @@ class Command(Base):
                 self.put(1)
                 before = len(self.alerts())
                 self.assertEqual(self.run_gate(), 5)
-                self.assertEqual(self.last()["reason"], "not-merged")
+                self.assertEqual(self.last()["reason"], "merge-not-completed")
                 self.assertEqual(len(self.alerts()), before + 1)
                 self.assertEqual(self.alerts()[-1].argv[0], "0")
 
@@ -814,7 +851,7 @@ class Command(Base):
         self.put(1)
         self.assertEqual(self.run_gate(), 5)
         self.assertIn("boss-alert 0 failed (1)", self.err)
-        self.assertEqual(self.last()["reason"], "not-merged")
+        self.assertEqual(self.last()["reason"], "merge-not-completed")
 
     def test_an_alert_that_cannot_be_started_is_said_and_the_exit_code_stands(self):
         with mock.patch.dict(os.environ, {"BOSS_ALERT": str(self.sb.root / "nope")}):
@@ -834,7 +871,7 @@ class Command(Base):
         self.assertEqual((intent["decision"], intent["exit"], intent["reason"]), ("merging", None, "codex-go"))
         for line in (first, intent, second):
             self.assertEqual(set(line), {"ts", "repo", "pr", "head", "base", "round", "kind", "decision", "exit",
-                                         "reason", "config", "dry_run"})
+                                         "reason", "config", "dry_run", "base_sha"})
         self.assertEqual((first["repo"], first["pr"], first["head"], first["base"], first["round"], first["kind"],
                           first["decision"], first["exit"], first["reason"], first["config"], first["dry_run"]),
                          (KEY, PR, HEAD, "main", 1, "codex", "allowed", 0, "codex-go", "ok", True))
@@ -1243,7 +1280,7 @@ class DocsTestsOnly(Base):
     def test_the_calls_are_the_files_of_the_pr_against_its_base_and_then_the_checks_of_the_head(self):
         self.go(["tests/a.py"])
         self.assertEqual([c.argv[1] for c in self.gh_calls("api")][1:],
-                         ["repos/%s/compare/main...%s" % (REPO, HEAD),
+                         ["repos/%s/compare/%s...%s" % (REPO, BASE_SHA, HEAD),
                           "repos/%s/commits/%s/check-runs?per_page=100" % (REPO, HEAD)])
 
     def test_one_code_file_among_the_tests_keeps_the_refusal(self):
@@ -1339,9 +1376,12 @@ class MergedBase(Base):
         self.deploy = {"raw": deploy_answer(DEPLOYING)}     # `main` deploys: only a Codex GO qualifies
         self.put(1, head_sha=SINCE)
 
-    def run_merged(self, changed, own_live, own_since, deploy=None, sha=SINCE, **kw):
-        """The entries after the deploy list, in call order: SINCE...head, base...head, base...SINCE."""
-        self.gh.configure(api=[deploy or self.deploy, {"raw": changed}, {"raw": own_live}, {"raw": own_since}])
+    def run_merged(self, changed, own_live, own_since, deploy=None, sha=SINCE, base_side=None, **kw):
+        """The entries after the deploy list, in call order: SINCE...head, base...head, base...SINCE, SINCE...base (what
+        the base changed since the GO'd head left it; by default, files the PR does not own)."""
+        base_side = base_side or compare_answer("src/other.py", status="diverged")
+        self.gh.configure(api=[deploy or self.deploy, {"raw": changed}, {"raw": own_live}, {"raw": own_since},
+                               {"raw": base_side}])
         return self.run_gate(merged_since=sha, **kw)
 
     def calls(self):
@@ -1363,11 +1403,12 @@ class MergedBase(Base):
                          ("codex-go-merged-base", SINCE, 1, HEAD))
         self.assertEqual(intent["decision"], "merging")
 
-    def test_the_three_compares_are_asked_in_order(self):
+    def test_the_four_compares_are_asked_in_order(self):
         self.run_merged(merge_compare("x.py"), compare_answer("m.py"), compare_answer("m.py"))
         self.assertEqual(self.calls(), ["repos/%s/compare/%s...%s" % (REPO, SINCE, HEAD),
-                                        "repos/%s/compare/main...%s" % (REPO, HEAD),
-                                        "repos/%s/compare/main...%s" % (REPO, SINCE)])
+                                        "repos/%s/compare/%s...%s" % (REPO, BASE_SHA, HEAD),
+                                        "repos/%s/compare/%s...%s" % (REPO, BASE_SHA, SINCE),
+                                        "repos/%s/compare/%s...%s" % (REPO, SINCE, BASE_SHA)])
 
     def test_dry_run_decides_but_never_merges(self):
         self.assertEqual(self.run_merged(merge_compare("x.py"), compare_answer("m.py"), compare_answer("m.py"),
@@ -1437,14 +1478,57 @@ class MergedBase(Base):
         self.assertEqual(self.run_merged(merge_compare("x.py"), compare_answer("m.py"), compare_answer("m.py")), 0,
                          self.err)
         self.assertEqual(self.calls(), ["repos/%s/compare/%s...%s" % (REPO, SINCE, HEAD),
-                                        "repos/%s/compare/release%%2F1.0...%s" % (REPO, HEAD),
-                                        "repos/%s/compare/release%%2F1.0...%s" % (REPO, SINCE)])
+                                        "repos/%s/compare/%s...%s" % (REPO, BASE_SHA, HEAD),
+                                        "repos/%s/compare/%s...%s" % (REPO, BASE_SHA, SINCE),
+                                        "repos/%s/compare/%s...%s" % (REPO, SINCE, BASE_SHA)])
+
+    # ticket 54: a conflict resolved by keeping the reviewed version hides the base's change from SHA...head
+    def test_a_pr_file_that_the_base_changed_since_the_go_refuses_even_when_the_merge_kept_the_reviewed_text(self):
+        # SHA...head lists nothing of src/mine.py (the merge kept SHA's text), base...head and base...SHA both list it
+        for base_side in (compare_answer("src/mine.py", "src/other.py", status="diverged"),
+                          compare_answer("src/mine.py", status="ahead")):
+            with self.subTest(base_side):
+                self.refused("pr-file-changed-on-base", merge_compare("x.py"), compare_answer("src/mine.py"),
+                             compare_answer("src/mine.py"), base_side=base_side)
+                self.assertIn("src/mine.py", self.err)
+
+    def test_a_pr_file_the_base_renamed_refuses_by_either_name(self):
+        self.refused("pr-file-changed-on-base", merge_compare("x.py"), compare_answer("src/mine.py"),
+                     compare_answer("src/mine.py"), base_side=compare_answer(("src/new.py", "src/mine.py"),
+                                                                              status="diverged"))
+
+    def test_a_base_that_has_not_moved_since_the_go_merges(self):
+        for status in ("behind", "identical"):
+            with self.subTest(status):
+                self.assertEqual(self.run_merged(merge_compare("x.py"), compare_answer("m.py"), compare_answer("m.py"),
+                                                 base_side=compare_answer(status=status), dry_run=True), 0, self.err)
+
+    def test_a_base_compare_that_cannot_be_trusted_refuses(self):
+        for label, base_side, reason in (
+                ("failed", "nope", "compare-failed"),
+                ("truncated", compare_answer(*["f%d.py" % i for i in range(bm.COMPARE_FILES)], status="diverged"),
+                 "compare-truncated"),
+                ("no files listed", compare_answer(status="diverged"), "compare-no-files"),
+                ("an unexpected status", compare_answer("src/other.py", status="surprise"), "compare-not-ahead")):
+            with self.subTest(label):
+                self.refused(reason, merge_compare("x.py"), compare_answer("m.py"), compare_answer("m.py"),
+                             base_side=base_side)
+
+    def test_the_combination_refuses_a_pr_file_the_base_changed_before_it_reads_the_checks(self):
+        both = compare_answer("tests/a.py", status="diverged")
+        self.put(1, head_sha=SINCE, kind="provisional")
+        self.gh.configure(api=[self.deploy, {"raw": merge_compare("x.py")}, {"raw": both}, {"raw": both},
+                               {"raw": compare_answer("tests/a.py", status="diverged")},
+                               {"raw": checks_answer("success")}])
+        self.assertEqual(self.run_gate(merged_since=SINCE), 3, self.err)
+        self.assertEqual(self.last()["reason"], "pr-file-changed-on-base")
+        self.assertNotIn("check-runs", " ".join(c.argv[1] for c in self.gh_calls("api")))
 
     # rule 2 and rule 4 together: a provisional GO the PR earned as docs/tests-only, then main merged into it
     def combined(self, own_live, own_since, checks=None, deploy=None, **over):
         self.put(1, **dict({"head_sha": SINCE, "kind": "provisional"}, **over))
         self.gh.configure(api=[deploy or self.deploy, {"raw": merge_compare("x.py")}, {"raw": own_live},
-                               {"raw": own_since},
+                               {"raw": own_since}, {"raw": compare_answer("src/other.py", status="diverged")},
                                {"raw": checks if checks is not None else checks_answer("success", "skipped")}])
         return self.run_gate(merged_since=SINCE)
 
@@ -1503,6 +1587,164 @@ class MergedBase(Base):
         with contextlib.redirect_stderr(err):
             self.assertEqual(bm.main(["--repo", REPO, "--pr", str(PR), "--merged-base-since", "main"]), 2)
         self.assertEqual(self.merges(), [])
+
+
+class BaseTip(Base):
+    """Ticket 54, the base moving under the gate: the compares are made on one tip, the merge is checked against it."""
+
+    def go(self, **cfg):
+        self.put(1)
+        self.gh.configure(**dict({"api": [{"raw": deploy_answer(GOOD_DEPLOY)}]}, **cfg))
+        return self.run_gate()
+
+    def test_the_compares_use_the_tip_read_at_the_start_not_the_branch_name(self):
+        self.put(1, kind="provisional")
+        self.gh.configure(api=[{"raw": deploy_answer(DEPLOYING)}, {"raw": compare_answer("tests/a.py")},
+                               {"raw": checks_answer("success")}], ref=[{"patch": {"baseSha": OTHER}}])
+        self.run_gate()
+        self.assertIn("repos/%s/compare/%s...%s" % (REPO, OTHER, HEAD), [c.argv[1] for c in self.gh_calls("api")])
+        self.assertEqual(self.last()["base_sha"], OTHER)
+
+    def test_a_base_that_moved_before_the_merge_refuses_as_base_moved_and_merges_nothing(self):
+        self.assertEqual(self.go(ref=[{}, {"patch": {"baseSha": MOVED_SHA}}]), 3, self.err)
+        self.assertEqual(self.merges(), [])
+        self.assertEqual((self.last()["decision"], self.last()["reason"]), ("refused", "base-moved"))
+        self.assertIn(BASE_SHA[:12], self.err)
+        self.assertIn(MOVED_SHA[:12], self.err)
+        self.assertEqual([m["decision"] for m in self.log()], ["refused"], "no intent line for a merge not made")
+
+    def test_the_tip_is_read_again_right_before_the_merge(self):
+        self.assertEqual(self.go(), 0, self.err)
+        argv = [c.argv[:2] for c in self.sb.calls_of("gh")]
+        ref = ["api", "repos/%s/git/ref/heads/main" % REPO]
+        self.assertEqual(argv[argv.index(["pr", "merge"]) - 1], ref)
+        self.assertEqual(argv.count(ref), 2)
+
+    def test_a_dry_run_reads_the_tip_once_only(self):
+        self.put(1)
+        self.assertEqual(self.run_gate(dry_run=True), 0, self.err)
+        self.assertEqual(len([c for c in self.base_calls() if "/git/ref/" in c]), 1)
+
+    def test_a_tip_that_cannot_be_read_refuses_at_both_reads(self):
+        for label, ref in (("first", [{"rc": 1, "err": "boom"}]), ("second", [{}, {"rc": 1, "err": "boom"}]),
+                           ("no commit", [{"raw": json.dumps({"object": {}})}]), ("not json", [{"raw": "no"}])):
+            with self.subTest(label):
+                self.gh.set_pr(state="OPEN")
+                self.assertEqual(self.go(ref=ref), bm.EXIT_GH_READ, self.err)
+                self.assertEqual(self.merges(), [])
+                self.assertEqual(self.last()["reason"], "gh-read-failed")
+
+    def test_a_merge_made_on_the_recorded_tip_is_quiet(self):
+        self.assertEqual(self.go(), 0, self.err)
+        self.assertEqual(self.alerts(), [])
+        self.assertEqual(self.base_calls()[-1], "repos/%s/commits/%s" % (REPO, MERGE_SHA))
+
+    def test_a_merge_whose_first_parent_is_not_the_recorded_tip_is_alerted_loudly(self):
+        self.gh.set_pr(mergeParent=MOVED_SHA)
+        self.assertEqual(self.go(), 5, self.err)
+        self.assertEqual((self.last()["decision"], self.last()["reason"]), ("failed", "base-moved-during-merge"))
+        (alert,) = self.alerts()
+        self.assertEqual(alert.argv[0], "0")
+        for text in ("owner/repo#5", BASE_SHA, MOVED_SHA, HEAD, "by hand"):
+            self.assertIn(text, alert.argv[1])
+
+    def test_a_merge_commit_that_cannot_be_read_is_alerted_as_unverified(self):
+        for label, cfg, pr in (("no oid", {}, {"mergeCommit": None}),
+                               ("commit read fails", {"commit": [{"rc": 1, "err": "boom"}]}, {}),
+                               ("no parents", {"commit": [{"raw": json.dumps({"parents": []})}]}, {})):
+            with self.subTest(label):
+                self.gh.set_pr(**dict({"state": "OPEN", "mergeParent": BASE_SHA, "mergeCommit": {"oid": MERGE_SHA}}, **pr))
+                before = len(self.alerts())
+                self.assertEqual(self.go(**cfg), 5, self.err)
+                self.assertEqual(self.last()["reason"], "unverified")
+                self.assertEqual(len(self.alerts()), before + 1)
+                self.assertIn("by hand", self.alerts()[-1].argv[1])
+
+
+class MergeQueue(Base):
+    """Ticket 54: a base with a merge queue, or a PR already queued or on auto-merge, is refused before `gh pr merge`;
+    the gate never passes `--auto`, so a merge that was made is a merge that completed, or it failed."""
+
+    def go(self, dry_run=False, **cfg):
+        self.gh.configure(**dict({"api": [{"raw": deploy_answer(GOOD_DEPLOY)}]}, **cfg))
+        self.put(1)
+        return self.run_gate(dry_run=dry_run)
+
+    @staticmethod
+    def graphql(queue=None, auto=None, in_queue=False):
+        return {"raw": json.dumps({"data": {"repository": {"mergeQueue": queue, "pullRequest": {
+            "autoMergeRequest": auto, "isInMergeQueue": in_queue}}}})}
+
+    def refused(self, code, reason, **cfg):
+        self.assertEqual(self.go(**cfg), code, self.err)
+        self.assertEqual(self.merges(), [], "gh pr merge was called")
+        self.assertEqual((self.last()["decision"], self.last()["reason"]), ("refused", reason))
+        self.assertEqual(self.alerts(), [])
+
+    def test_a_ruleset_of_type_merge_queue_refuses(self):
+        self.refused(3, "merge-queue-unsupported", rules=[{"raw": json.dumps([{"type": "deletion"}, {"type": "merge_queue"}])}])
+        self.assertIn("merge-queue rule", self.err)
+
+    def test_a_merge_queue_that_github_reports_for_the_branch_refuses(self):
+        self.refused(3, "merge-queue-unsupported", graphql=[self.graphql(queue={"id": "MQ_1"})])
+
+    def test_a_pr_with_auto_merge_on_or_already_in_the_queue_refuses(self):
+        self.refused(3, "merge-queue-unsupported", graphql=[self.graphql(auto={"enabledAt": "t"})])
+        self.gh.set_pr(state="OPEN")
+        self.refused(3, "merge-queue-unsupported", graphql=[self.graphql(in_queue=True)])
+
+    def test_whatever_cannot_be_read_refuses_closed(self):
+        bad = (("rules fail", {"rules": [{"rc": 1, "err": "boom"}]}),
+               ("rules not json", {"rules": [{"raw": "no"}]}),
+               ("rules not a list", {"rules": [{"raw": "{}"}]}),
+               ("rule without a type", {"rules": [{"raw": "[{}]"}]}),
+               ("graphql fails", {"graphql": [{"rc": 1, "err": "boom"}]}),
+               ("graphql not json", {"graphql": [{"raw": "no"}]}),
+               ("no repository", {"graphql": [{"raw": json.dumps({"data": {"repository": None}})}]}),
+               ("no mergeQueue field", {"graphql": [{"raw": json.dumps({"data": {"repository": {"pullRequest": {
+                   "autoMergeRequest": None, "isInMergeQueue": False}}}})}]}),
+               ("queue flag not a bool", {"graphql": [self.graphql(in_queue="no")]}))
+        for label, cfg in bad:
+            with self.subTest(label):
+                self.gh.set_pr(state="OPEN")
+                self.refused(bm.EXIT_GH_READ, "gh-read-failed", **cfg)
+
+    def test_a_refusal_writes_no_merging_line_and_a_dry_run_asks_the_same(self):
+        self.assertEqual(self.go(dry_run=True, graphql=[self.graphql(queue={"id": "MQ_1"})]), 3, self.err)
+        self.assertEqual([m["decision"] for m in self.log()], ["refused"])
+
+    def test_the_rules_url_carries_a_slash_named_base_as_one_path_segment(self):
+        self.gh.set_pr(baseRefName="release/1.0")
+        self.put(1, base="release/1.0")
+        self.gh.configure(api=[{"raw": deploy_answer(GOOD_DEPLOY)}])
+        self.assertEqual(self.run_gate(), 0, self.err)
+        rules = [c.argv[1] for c in self.sb.calls_of("gh") if c.argv[0] == "api" and "/rules/branches/" in c.argv[1]]
+        self.assertEqual(rules, ["repos/%s/rules/branches/release%%2F1.0" % REPO])
+
+    def test_a_base_without_a_queue_merges_and_the_reads_come_before_the_merge(self):
+        self.assertEqual(self.go(), 0, self.err)
+        argv = [c.argv[:2] for c in self.sb.calls_of("gh")]
+        self.assertLess(argv.index(["api", "graphql"]), argv.index(["pr", "merge"]))
+        self.assertEqual(self.alerts(), [])
+
+    def test_the_gate_never_passes_auto_or_tries_to_undo(self):
+        for cfg in ({}, {"merge": [{"patch": {"state": "OPEN"}}]}, {"merge": [{"rc": 1, "err": "no"}]}):
+            self.gh.set_pr(state="OPEN")
+            self.go(**cfg)
+        merges = [c.argv for c in self.sb.calls_of("gh") if c.argv[:2] == ["pr", "merge"]]
+        self.assertEqual(len(merges), 3)
+        for argv in merges:
+            self.assertEqual(argv, ["pr", "merge", str(PR), "--repo", REPO, "--merge", "--match-head-commit", HEAD])
+        source = Path(bm.__file__).read_text(encoding="utf-8")
+        self.assertNotIn('"--auto"', source, "the gate must not pass --auto")
+        self.assertNotIn("--disable-auto", source.replace("`--disable-auto`", ""))
+
+    def test_a_merge_that_leaves_the_pr_unmerged_is_refused_and_alerted_with_no_undo(self):
+        self.assertEqual(self.go(merge=[{"patch": {"state": "OPEN"}}]), 5, self.err)
+        self.assertEqual(self.last()["reason"], "merge-not-completed")
+        (alert,) = self.alerts()
+        self.assertIn("by hand", alert.argv[1])
+        self.assertEqual(len(self.merges()), 1)
 
 
 # ----------------------------------------------------- end to end, from the real writers ----
