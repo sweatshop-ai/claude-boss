@@ -1,0 +1,25 @@
+# 53: `boss-run`'s merge rule reads what the shell will run, not the raw text
+
+**What to build:** the hard rule `PR merge outside boss_merge` in `skills/boss/bin/boss-run` also matches the command after the shell has tokenised it, and refuses what it cannot see through (Codex NO-GO on PR 121, recheck round 5; class a).
+
+**Status:** done
+
+## The finding, checked on origin/main (7bffd52)
+
+`"gh" pr merge 5`, `gh pr "merge" 5` and `gh api -X "PUT" repos/o/r/pulls/5/merge` all run the forbidden operation after quote removal and matched none of the raw-text regex (tickets 41 and later only widened the regex). It held: all three went on to the reviewer.
+
+## Decisions
+
+- **A second check beside the regex, in `skills/boss/merge_shape.py`.** `boss-run` pipes `$CMD` (the bytes `bash -lc` will run) to it. Exit 0: clean; exit 1: `name<TAB>detail`; anything else (a crash, a signal, no python3) is no answer and refuses, so the rule cannot fail open. The raw regex stays (it also covers `curl -X PUT .../merge`, and the owner's own `boss-hard-rules.tsv` lines are raw regexes). Python, not bash, because the tokeniser is a real lexer; `boss-run` already needs python3 for the reviewer chain.
+- **Not `shlex`.** `shlex` has no `$(...)`, backtick, `${...}`, `$'..'`, heredoc or operator model, and cannot say whether a word held an expansion. The module has its own small lexer for what the shell does to a word, and says "cannot see through" at anything it cannot lex (an unclosed quote or `$(`, a heredoc that never closes, nesting deeper than 8).
+- **Seen through, not refused:** quotes, backslashes and `$'..'` in any token (so `"gh" pr "merge"`, `g\h`); `;` `&&` `||` `|` `&` `(` `)` newline, braces, `if/then/do`; assignments and redirections in front; `$(...)`, backticks, `${...}`, `<(...)` and heredoc bodies are scanned as commands of their own; `sh|bash|... -c 'literal'` and `eval literal` are scanned as the script they carry; `env`, `command`, `exec`, `nohup`, `nice`, `time`, `timeout`, `sudo`, `doas`, `stdbuf`, `setsid`, `ionice`, `watch`, `flock`, `script` and `find -exec` are followed to the command they run; a literal `gh` in any later word of a command is read as gh (as `echo gh pr merge` always was refused). Why: each of these keeps the command's text intact once quotes are gone, so refusing them would only cost legitimate commands.
+- **`gh` is read as gh reads it:** the first two non-option words are the subcommand (`-R`/`--repo` take the next word, whatever it is, so `gh -R merge pr view` is a view). `pr merge` is refused; `gh api` is refused for a non-GET method (or fields, which make it a POST) to `pulls/<n>/merge`, for `-X PUT` to an endpoint built at run time, and for `graphql` with a merge mutation, or with a query read from a file (`@file`, `--input`) or built at run time. Methods are read in all shapes (`-X PUT`, `-XPUT`, `--method=put`, quoted).
+- **Refused because it cannot be seen through** (reason `merge rule cannot see through`, same exit 5, nothing run, the owner takes it): a command name built at run time (`$GH`, `gh${IFS}pr`, `` `echo gh` ``, a glob or brace in the name); a `gh` subcommand built at run time (`gh pr $S`, `gh pr m*`); `eval` or `sh -c` of text built at run time; a shell that reads a file or stdin (`bash x.sh`, `echo ... | sh`; a heredoc or here-string with a literal body is read); `source`/`.`; `xargs`/`parallel` feeding gh or a shell (the arguments come from stdin); a wrapper whose command is built at run time; `gh alias set|import`, and any `gh <word>` that is not one of gh's own commands (a user alias or extension may be `pr merge`; gh refuses aliases that shadow built-ins, so the built-in list is the whole safe set). Each is a trust-boundary question the text cannot answer; a boss that needs one asks the owner.
+- **Cost accepted:** `gh pr view $N` (variable in an argument) and `echo $(date)` still pass to the reviewer; `$GH pr view`, `gh pr $S` and `timeout $T gh ...` are refused. A boss that hand-types literal numbers loses nothing.
+- **Out of scope, said plainly:** other languages (`python3 -c`, `perl -e`, `ssh host '...'`) can still spell a merge; they stay with the reviewer and the owner's own rules. Shell functions and aliases defined earlier in the same command are not tracked (`bash -lc` has no aliases).
+
+## Done when
+
+- [x] Tests first: `test_merge_shape.py` (54 hidden merges, 51 opaque forms, 54 clean commands, the CLI contract, nesting limit); `test_boss_run.py` HardRules: the hidden merges refused with `seen:` in the message, the log and the exit, the same as an argument list, the opaque ones named, harmless look-alikes still reach the reviewer, a shape check that does not answer refuses
+- [x] The existing 59 `test_boss_run.py` tests stay green
+- [x] CHANGELOG (Unreleased)

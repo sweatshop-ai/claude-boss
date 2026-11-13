@@ -385,6 +385,72 @@ class HardRules(Base):
         # not refused means the reviewer was asked: once for each command
         self.assertEqual(len(self.sb.calls_of("codex")), len(commands))
 
+    def test_a_merge_hidden_by_shell_syntax_is_refused_after_the_shell_removes_it(self):
+        """Ticket 53: the raw-text pattern misses `"gh" pr merge 5`; the rule also reads the shell's tokens."""
+        cases = ['"gh" pr merge 5', 'gh pr "merge" 5', 'gh api -X "PUT" repos/o/r/pulls/5/merge',
+                 r"g\h pr merge 5", "gh pr $'merge' 5", "env gh pr 'merge' 5", "echo $(gh pr 'merge' 5)",
+                 "bash -c 'gh pr \"merge\" 5'", "eval gh pr '\"merge\"' 5", "true && 'gh' pr merge 5"]
+        self.sb.stub("gh")
+        for command in cases:
+            with self.subTest(command):
+                r = self.dry(command)
+                self.assertEqual(r.returncode, 5, r.stdout + r.stderr)
+                self.assertTrue(r.stderr.startswith(
+                    "boss-run: REFUSED by hard rule — PR merge outside boss_merge\n"), r.stderr)
+                self.assertRegex(r.stderr, r"\n  seen: [^\n]*merge")
+                self.assertIn("  command: " + command + "\n", r.stderr)
+                entry = self.sb.log_lines()[-1]
+                self.assertEqual((entry["reviewer"], entry["verdict"], entry["exit"]), ("hard-rule", "REFUSED", 5))
+                self.assertTrue(entry["reason"].startswith("hard rule: PR merge outside boss_merge (seen: "))
+        self.assertNotCalled("codex", "claude", "gh")
+
+    def test_the_same_hidden_merges_are_refused_as_an_argument_list(self):
+        """Several arguments are one word each, so `a b` is not a subcommand and a merge stays a merge."""
+        self.sb.stub("gh")
+        for args in (("gh", "pr", "merge", "5"), ("gh", "api", "-X", "PUT", "repos/o/r/pulls/5/merge"),
+                     ("env", "gh", "pr", "merge", "5"), ("bash", "-c", 'gh pr "merge" 5')):
+            with self.subTest(args):
+                self.assertEqual(self.dry(*args).returncode, 5)
+        self.assertNotCalled("gh")
+
+    def test_what_the_rule_cannot_see_through_is_refused_and_named(self):
+        cases = ["$GH pr view 5", "gh pr $SUB 5", "eval \"$X\"", "bash script.sh", "echo gh | sh",
+                 "xargs gh pr view", "gh m 5", "gh alias set m 'pr merge'", "gh api graphql -f query=@q.graphql",
+                 "echo $(", "source ./x.sh"]
+        for command in cases:
+            with self.subTest(command):
+                r = self.dry(command)
+                self.assertEqual(r.returncode, 5, r.stdout + r.stderr)
+                self.assertTrue(r.stderr.startswith(
+                    "boss-run: REFUSED by hard rule — merge rule cannot see through\n"), r.stderr)
+                self.assertIn("  seen: ", r.stderr)
+                self.assertIn("No reviewer can override this", r.stderr)
+        self.assertNotCalled("codex", "claude")
+
+    def test_a_command_that_only_looks_like_it_builds_a_command_still_goes_to_the_reviewer(self):
+        self.sb.stub("codex", answer=approve())
+        commands = ("gh pr view $N", "gh pr comment 5 --body \"$(date)\"", "echo $(date)", "bash -c 'echo hi'",
+                    "gh -R merge pr view 5", "gh api -X PUT repos/o/r/issues/5/labels",
+                    "gh api graphql -f query='{ viewer { login } }'")
+        for command in commands:
+            with self.subTest(command):
+                r = self.dry(command)
+                self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(len(self.sb.calls_of("codex")), len(commands))
+
+    def test_a_shape_check_that_does_not_answer_refuses_instead_of_letting_the_command_through(self):
+        """A crash, a signal or a missing python3 says nothing about the command, so nothing runs."""
+        self.sb.stub("codex", answer=approve())
+        broken = self.sb.stubs / "python3"
+        broken.write_text("#!%s\nexit 3\n" % shutil.which("bash"), encoding="utf-8")
+        broken.chmod(0o755)
+        r = self.dry("gh pr view 5")
+        self.assertEqual(r.returncode, 5, r.stdout + r.stderr)
+        self.assertTrue(r.stderr.startswith(
+            "boss-run: REFUSED by hard rule — merge rule cannot see through\n"), r.stderr)
+        self.assertIn("  seen: the shell-token check did not answer", r.stderr)
+        self.assertNotCalled("codex", "claude")
+
     def test_the_owners_own_rules_in_the_config_dir_are_checked_too(self):
         (self.sb.cfg / "boss-hard-rules.tsv").write_text("our host\tsecret-host\n")
         r = self.dry("scp file secret-host:/srv")
@@ -715,6 +781,8 @@ class FailClosed(Base):
 
     def raw_stub(self, name, body):
         path = self.sb.stubs / name
+        if name == "python3":    # the shell-token check is not the chain (see hermetic._prologue)
+            body = 'case "${1:-}" in */merge_shape.py) exec %s "$@" ;; esac\n%s' % (self.sb.tools / "python3", body)
         path.write_text("#!%s\n%s\n" % (shutil.which("bash"), body), encoding="utf-8")
         path.chmod(0o755)
 

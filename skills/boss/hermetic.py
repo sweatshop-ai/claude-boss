@@ -219,8 +219,16 @@ class Sandbox:
         return self._write_stub(name, [*self._prologue(name), body])
 
     def _prologue(self, name):
+        # A python3 stub plays the reviewer chain. boss-run also calls python3 for the shell-token
+        # check of its merge rule (merge_shape.py), which is not the chain: that call goes to the
+        # real python3 before anything is logged, so the stub still sees exactly its own calls.
+        passthrough = []
+        if name == "python3":
+            passthrough = ['case "${1:-}" in */merge_shape.py) exec %s "$@" ;; esac'
+                           % shlex.quote(str(self.tools / "python3"))]
         return [
             "#!" + self._bash,
+            *passthrough,
             "R=" + shlex.quote(str(self.root)),
             'ID="$(date +%%s%%N)-%s"' % name,
             'if [ "$#" -gt 0 ]; then printf \'%s\\0\' "$@" > "$R/calls/$ID.argv"; '

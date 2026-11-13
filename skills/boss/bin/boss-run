@@ -99,6 +99,35 @@ PR merge outside boss_merge	(^|[^[:alnum:]_.-])gh[[:space:]]([^&|;]*[[:space:]])
 RULES
 }
 
+# Says why a hard rule refused. $1 the rule's name, $2 what matched: a pattern, or with $3 = seen
+# what the shell would run.
+refuse_hard() {
+  REVIEWER="hard-rule" ; VERDICT="REFUSED"
+  if [[ ${3:-} == seen ]]; then REASON="hard rule: ${1} (seen: ${2})"; else REASON="hard rule: ${1} (matched /${2}/)"; fi
+  printf 'boss-run: REFUSED by hard rule — %s\n' "$1" >&2
+  printf '  %s: %s\n' "${3:-pattern}" "$2" >&2
+  printf '  command: %s\n' "$CMD" >&2
+  printf '  No reviewer can override this. Take it to the owner.\n' >&2
+}
+
+# The merge rule a second time, on what the shell will run. The pattern above reads the characters
+# the boss typed; `"gh" pr merge 5` runs the same merge and matches none of them (ticket 53).
+# merge_shape.py lexes $CMD the way bash does and answers `name<TAB>detail` with exit 1, or exit 0
+# for a command it found nothing in. Anything else (a crash, a signal, no python3) is no answer,
+# and a rule that cannot look refuses.
+check_shell_tokens() {
+  local out rc name detail
+  out=$(printf '%s' "$CMD" | python3 "${HERE}/../merge_shape.py" 2>/dev/null); rc=$?
+  [[ $rc -eq 0 ]] && return 0
+  if [[ $rc -eq 1 && "$out" == *$'\t'* ]]; then
+    name=${out%%$'\t'*} ; detail=${out#*$'\t'}
+  else
+    name="merge rule cannot see through" ; detail="the shell-token check did not answer"
+  fi
+  refuse_hard "$name" "$detail" seen
+  return 1
+}
+
 check_hard_rules() {
   local name re
   shopt -s nocasematch
@@ -106,17 +135,12 @@ check_hard_rules() {
     [[ -n "$name" ]] || continue
     if [[ "$FLAT" =~ $re ]]; then
       shopt -u nocasematch
-      REVIEWER="hard-rule" ; VERDICT="REFUSED"
-      REASON="hard rule: ${name} (matched /${re}/)"
-      printf 'boss-run: REFUSED by hard rule — %s\n' "$name" >&2
-      printf '  pattern: %s\n' "$re" >&2
-      printf '  command: %s\n' "$CMD" >&2
-      printf '  No reviewer can override this. Take it to the owner.\n' >&2
+      refuse_hard "$name" "$re"
       return 1
     fi
   done < <(hard_rules)
   shopt -u nocasematch
-  return 0
+  check_shell_tokens
 }
 
 # ---------------------------------------------------------------- reviewer ----
