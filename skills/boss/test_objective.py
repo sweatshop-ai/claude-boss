@@ -169,6 +169,142 @@ class Sections(unittest.TestCase):
                          "# O\n_Status: OPEN_\n\n## Next, in priority order\n1. a\n")
 
 
+C1 = '<!-- sheaf-comment id=c1 by="Ada" at=2026-11-01T10:00 status=open quote="first"\nIs this still true?\n@Claude 2026-11-01T10:05 answer: Checked.\n-->'
+C2 = '<!-- sheaf-comment id=c2 by="Ada" at=2026-11-01T11:00 status=open quote="Ship it."\nWhy now?\n-->'
+C3 = '<!-- rd-comment id=c3 by="Ada" at=2026-11-01T12:00 status=resolved quote="x"\nOld marker.\n-->'
+
+
+class SheafComments(unittest.TestCase):
+    """A thread the owner wrote on the goal page survives every rewrite."""
+
+    def goal(self):
+        return (GOAL.replace("Ship it.", "Ship it." + C2 + " today.")
+                    .replace("1. first", "1. first" + C1 + "\n   wrapped")
+                + C3 + "\n")
+
+    def test_blocks_are_matched_as_opaque_spans(self):
+        self.assertEqual(objective.comment_blocks("a" + C1 + "b\n" + C3), [C1, C3])
+        self.assertEqual(objective.comment_blocks("<!-- plain note -->"), [])
+
+    def test_set_body_by_hand_keeps_every_block(self):
+        new = objective.with_body(self.goal(), "## Outcome\nRewritten.\n")
+        self.assertEqual(objective.comment_blocks(new), [C2, C1, C3])
+        self.assertTrue(new.startswith("# Objective — t\n_Status: OPEN_\n## Outcome\nRewritten.\n"))
+
+    def test_set_body_fed_with_show_does_not_double_a_block(self):
+        text = self.goal()
+        body, _ = objective.strip_header(text)
+        new = objective.with_body(text, body)
+        self.assertEqual(new, text)
+
+    def test_set_next_keeps_a_block_inside_the_section(self):
+        new = objective.set_next(self.goal(), "1. new\n2. newer\n")
+        self.assertEqual(sorted(objective.comment_blocks(new)), sorted([C2, C1, C3]))
+        self.assertEqual(objective.next_count(new), 2 + 0)
+        self.assertIn(C1, objective.section(new, objective.NEXT))
+
+    def test_set_next_carries_the_block_to_the_end_of_its_section(self):
+        new = objective.set_next(self.goal(), "1. new\n")
+        self.assertIn("1. new\n\n" + C1 + "\n\n## Notes", new)
+
+    def test_set_next_with_the_same_body_keeps_one_copy(self):
+        text = self.goal()
+        self.assertEqual(objective.comment_blocks(objective.set_next(text, objective.section(text, objective.NEXT))),
+                         objective.comment_blocks(text))
+
+    def test_status_and_tick_keep_the_blocks(self):
+        text = self.goal()
+        self.assertEqual(objective.comment_blocks(objective.set_status(text, "PAUSED — away")),
+                         objective.comment_blocks(text))
+        ticked, n = objective.tick(text, ["`gh pr view 3` says MERGED"])
+        self.assertEqual(n, 1)
+        self.assertEqual(objective.comment_blocks(ticked), objective.comment_blocks(text))
+
+    def glued(self):
+        return (GOAL.replace("## Done when", "## Done when" + C2.replace("\n", " "))
+                    .replace("## Next, in priority order", "## Next, in priority order " + C1.replace("\n", " ")))
+
+    SHEAF_ONE_LINE = ('<!-- sheaf-comment id=c4 by="Ada" at=2026-11-01T13:00 status=open quote="Done when" '
+                      'Why two?<br>Check -&#45; please.<br>@Claude 2026-11-01T13:05 answer: Fixed. -->')
+
+    def test_a_heading_comment_as_sheaf_writes_it_is_found_and_kept(self):
+        text = GOAL.replace("## Done when", "## Done when" + self.SHEAF_ONE_LINE)
+        self.assertEqual(len(objective.criteria(text)), 2)
+        body, _ = objective.strip_header(text)
+        self.assertEqual(objective.with_body(text, body), text)
+        self.assertIn("## Done when" + self.SHEAF_ONE_LINE + "\n",
+                      objective.with_body(text, "## Done when\n- [ ] x\n"))
+
+    def test_a_comment_line_that_looks_like_a_heading_is_carried_whole(self):
+        block = '<!-- sheaf-comment id=c5 by="Ada" at=2026-11-01T14:00 status=open quote="x"\n## quoted heading\n-->'
+        new = objective.with_body("# Objective — t\n_Status: OPEN_\n## Outcome\nx" + block + "\n", "## Outcome\ny\n")
+        self.assertEqual(objective.comment_blocks(new), [block])
+
+    def test_a_glued_comment_that_runs_over_lines_is_refused_not_lost(self):
+        text = GOAL.replace("## Done when", '## Done when<!-- sheaf-comment id=c6 by="Ada"\nmore\n-->')
+        with self.assertRaises(ValueError):
+            objective.with_body(text, "## Outcome\nz\n")
+
+    def test_a_section_lookup_reads_a_heading_with_a_comment_glued_to_it(self):
+        text = self.glued()
+        self.assertEqual(len(objective.criteria(text)), 2)
+        self.assertEqual(objective.next_count(text), 2)
+        self.assertEqual(objective.section(text, "Done when"), objective.section(GOAL, "Done when"))
+        ticked, n = objective.tick(text, ["`gh pr view 3` says MERGED"])
+        self.assertEqual(n, 1)
+        self.assertEqual(len(objective.unmet(ticked)), 0)
+
+    def test_set_next_leaves_a_glued_heading_byte_for_byte(self):
+        text = self.glued()
+        new = objective.set_next(text, "1. new\n")
+        self.assertIn("## Next, in priority order " + C1.replace("\n", " ") + "\n1. new\n", new)
+        self.assertEqual(new.count("sheaf-comment"), 2)
+        self.assertEqual(objective.next_items(new), ["1. new"])
+
+    def test_set_body_from_show_keeps_a_glued_comment_on_its_heading(self):
+        text = self.glued()
+        body, _ = objective.strip_header(text)
+        self.assertEqual(objective.with_body(text, body), text)
+
+    def test_set_body_by_hand_reglues_to_the_same_heading_only(self):
+        text = self.glued()
+        new = objective.with_body(text, "## Done when\n- [ ] x\n## Next, in priority order\n1. y\n")
+        self.assertIn("## Done when" + C2.replace("\n", " ") + "\n", new)
+        self.assertIn("## Next, in priority order " + C1.replace("\n", " ") + "\n", new)
+
+    def test_set_body_refuses_when_the_glued_heading_is_gone(self):
+        with self.assertRaises(ValueError):
+            objective.with_body(self.glued(), "## Outcome\nOnly this.\n")
+
+    def test_an_unclosed_block_is_refused(self):
+        bad = "# Objective — t\n_Status: OPEN_\n## Outcome\n<!-- sheaf-comment id=c9\nnever ends\n"
+        with self.assertRaises(ValueError):
+            objective.with_body(bad, "x")
+        with self.assertRaises(ValueError):
+            objective.set_next(bad.replace("Outcome", objective.NEXT), "x")
+
+    def test_the_command_line_keeps_them_and_refuses_the_unclosed(self):
+        d = Path(tempfile.mkdtemp(prefix="objective-sc-"))
+        try:
+            f = d / "t.goal.md"
+            f.write_text(self.goal())
+            r = subprocess.run([sys.executable, str(HERE / "objective.py"), "set-body", str(f)],
+                               input="## Outcome\nNew.\n", capture_output=True, text=True, timeout=30)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertEqual(objective.comment_blocks(f.read_text()), [C2, C1, C3])
+            f.write_text("# Objective — t\n_Status: OPEN_\n<!-- sheaf-comment id=c9\n")
+            before = f.read_text()
+            r = subprocess.run([sys.executable, str(HERE / "objective.py"), "set-body", str(f)],
+                               input="## Outcome\nNew.\n", capture_output=True, text=True, timeout=30)
+            self.assertEqual(r.returncode, 1)
+            self.assertIn("never closes", r.stderr)
+            self.assertEqual(f.read_text(), before)
+        finally:
+            for p in d.iterdir():
+                p.unlink()
+            d.rmdir()
+
+
 class CommandLine(unittest.TestCase):
     """What bin/boss-goal calls instead of its own sed and awk."""
 
