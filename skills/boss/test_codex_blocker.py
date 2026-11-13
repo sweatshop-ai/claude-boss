@@ -803,6 +803,35 @@ class Choice(Base):
 class Edges(Base):
     """Ticket 20: the edge cases found in the review of 05c."""
 
+    def unreadable_log(self):
+        self.log.unlink()
+        self.log.mkdir()                      # a directory at the path: OSError (EISDIR), the same for any user
+
+    def test_an_unreadable_attempts_log_is_one_line_on_stderr_and_exit_2_not_a_traceback(self):
+        """Ticket 44 (class b, found by the Codex re-review of PR 109): the OSError came out of the tracker
+        callback, main() caught only ValueError, and the command died with a traceback and exit 1."""
+        self.unreadable_log()
+        before = self.text()
+        posted = len(self.alerts())
+        run = subprocess.run([sys.executable, str(HERE / "codex_blocker.py"), "t"], env=dict(os.environ),
+                             capture_output=True, text=True, timeout=60)
+        self.assertEqual(run.returncode, 2, run.stderr)
+        self.assertNotIn("Traceback", run.stderr)
+        self.assertEqual(len(run.stderr.strip().split("\n")), 1, run.stderr)
+        self.assertIn("codex_blocker: cannot read", run.stderr)
+        self.assertIn(str(self.log), run.stderr)
+        self.assertEqual((self.text(), len(self.alerts())), (before, posted))
+
+    def test_main_catches_the_oserror_from_sync_with_a_path_less_error(self):
+        """An OSError with no filename still gives one line and exit 2."""
+        err = io.StringIO()
+        with mock.patch.object(codex_blocker, "sync", side_effect=OSError("boom")), \
+                mock.patch.object(sys, "argv", ["codex_blocker.py", "t"]), contextlib.redirect_stderr(err):
+            rc = codex_blocker.main()
+        self.assertEqual(rc, 2)
+        self.assertEqual(err.getvalue().count("\n"), 1, err.getvalue())
+        self.assertIn("codex_blocker: cannot read", err.getvalue())
+
     def test_a_hand_written_empty_cleared_is_open_and_the_next_up_sync_clears_it(self):
         """Passes on main before ticket 20 too (ticket 16, c53fcef): it pins behaviour that already existed."""
         for empty in ("cleared=", 'cleared=""'):

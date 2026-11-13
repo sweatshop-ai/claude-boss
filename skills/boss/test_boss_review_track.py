@@ -113,6 +113,18 @@ class TrackArgument(Base):
 
 
 class WhenTheSyncRuns(Base):
+    def test_an_unreadable_attempts_log_does_not_crash_the_review_it_is_said_once(self):
+        """Ticket 44: sync raises OSError for an unreadable log; the review's `_sync_health` says it and goes on."""
+        log = codex_health.default_path()
+        log.parent.mkdir(parents=True, exist_ok=True)
+        log.mkdir()
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            br._sync_health("t", self.tracker)          # must not raise
+        self.assertIn("the Codex health sync failed: ", err.getvalue())
+        self.assertEqual(err.getvalue().count("\n"), 1, err.getvalue())
+        self.assertEqual(self.tracker.read_text(encoding="utf-8"), TRACKER)
+
     def test_after_a_posted_verdict_once_with_the_attempts_already_logged(self):
         self.codex(answer="VERDICT: GO")
         result, seen = self.synced()
