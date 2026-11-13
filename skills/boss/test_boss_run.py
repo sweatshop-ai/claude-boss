@@ -391,7 +391,8 @@ class HardRules(Base):
                  r"g\h pr merge 5", "gh pr $'merge' 5", "env gh pr 'merge' 5", "echo $(gh pr 'merge' 5)",
                  "bash -c 'gh pr \"merge\" 5'", "eval gh pr '\"merge\"' 5", "true && 'gh' pr merge 5",
                  "env -S '\"gh\" pr merge 5'", "time -p sh -c '\"gh\" pr merge 5'",
-                 "coproc JOB sh -c '\"gh\" pr merge 5'", "flock -c '\"gh\" pr merge 5' f"]
+                 "coproc JOB sh -c '\"gh\" pr merge 5'", "flock -c '\"gh\" pr merge 5' f",
+                 '"curl" -X "PUT" https://api.github.com/repos/o/r/pulls/5/merge']
         self.sb.stub("gh")
         for command in cases:
             with self.subTest(command):
@@ -445,7 +446,7 @@ class HardRules(Base):
         self.sb.stub("codex", answer=approve())
         commands = ("gh pr view $N", "gh pr comment 5 --body \"$(date)\"", "echo $(date)", "bash -c 'echo hi'",
                     "gh -R merge pr view 5", "gh api -X PUT repos/o/r/issues/5/labels",
-                    "gh api graphql -f query='{ viewer { login } }'")
+                    "gh api graphql -f query='{ viewer { login } }'", "[ -f file ] && echo yes", "[[ 1 == 1 ]]")
         for command in commands:
             with self.subTest(command):
                 r = self.dry(command)

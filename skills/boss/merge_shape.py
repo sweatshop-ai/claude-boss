@@ -312,12 +312,12 @@ class Lexer:
                     j += 1
                 out.append(src[self.i:j]); unq.append("\0"); self.i = j
             else:
-                if c in "*?[":
+                if c in "*?":
                     w.glob = True
                 out.append(c); unq.append(c); self.i += 1
         w.val = "".join(out)
-        if BRACE.search("".join(unq)):
-            w.glob = True
+        if BRACE.search("".join(unq)) or re.search(r"\[.+\]", "".join(unq)):
+            w.glob = True       # a brace list or a bracket expression; a lone `[` or `[[` is a command
         return w
 
 
@@ -381,6 +381,7 @@ def check_cmd(cmd, stdin, depth):
             raise opaque("%s changes what runs or where gh looks: %s" % (w.val.partition("=")[0], _shown(cmd.words)))
         if GH_FILES.search(w.val):
             raise opaque("a command that touches gh's own config or extensions: %s" % _shown(cmd.words))
+    check_put_merge(cmd.words)
     # A word of several tokens may be a command line handed to a program that runs it (`env -S '...'`,
     # `flock -c '...'`, `script -c '...'`, `ssh host '...'`): read it as one, and keep only a merge.
     for w in cmd.words:
@@ -406,6 +407,24 @@ def check_cmd(cmd, stdin, depth):
             except Finding as f:
                 if f.name == MERGE:
                     raise
+
+
+PUT_WORD = re.compile(r"^(-X=?|--request=?|--method=?|-m=?)?put$", re.I)
+
+
+def check_put_merge(words):
+    """curl, wget, httpie, anything: a PUT and a pulls/<n>/merge path in one command is the merge
+    API, whoever sends it. (gh api is read by check_api; this is for the rest.)"""
+    vals = [w.val for w in words]
+    if any(GRAPHQL_MERGE.search(v) for v in vals):
+        raise Finding(MERGE, "a merge mutation, as the shell reads it: %s" % _shown(words))
+    if not any(PUT_WORD.match(v) for v in vals):
+        return
+    if any(MERGE_PATH.search(v) for v in vals):
+        raise Finding(MERGE, "a PUT to a pull request's merge endpoint, as the shell reads it: %s" % _shown(words))
+    for w in words:
+        if w.exp and ("://" in w.val or w.val.startswith("$")) and not MERGE_PATH.search(w.val):
+            raise opaque("a PUT to an address built at run time: %s" % _shown(words))
 
 
 def dispatch(words, stdin, depth):
@@ -478,6 +497,8 @@ def check_wrapper(words, stdin, depth):
         if not armed:
             continue
         if w.exp or w.glob:
+            if w.val.startswith(("-S", "--split-string", "-c", "--command")):
+                raise opaque("%s runs a command line built at run time: %s" % (wrapper, _shown(words)))
             if w.val.startswith("-") or ASSIGN.match(w.val):
                 continue
             raise opaque("%s runs a command built at run time: %s" % (wrapper, _shown(words)))
@@ -527,17 +548,26 @@ def _gh_alias(name):
     except OSError:
         raise opaque("gh's config cannot be read, so an alias for %s cannot be ruled out" % name)
     in_aliases = False
-    for line in lines:
+    for n, line in enumerate(lines):
         if re.match(r"^aliases:\s*$", line):
             in_aliases = True
             continue
         if in_aliases and line and not line[0].isspace():
             break
-        m = in_aliases and re.match(r"^\s+(\S+?):\s*(.*)$", line)
-        if m and m.group(1).strip("'\"") == name:
-            val = m.group(2).strip()
-            if not val or val[0] in "|>&*[{":
+        m = in_aliases and re.match(r"^(\s+)(\S+?):\s*(.*)$", line)
+        if not m:
+            continue
+        if "\\" in m.group(2):
+            raise opaque("a gh alias name with an escape in it, so %s cannot be ruled out" % name)
+        if m.group(2).strip("'\"") == name:
+            val = m.group(3).strip()
+            if not val or val[0] in "|>&*[{" or "\\" in val:
                 raise opaque("gh alias %s is written in a form the rule cannot read" % name)
+            for nxt in lines[n + 1:]:      # a plain scalar goes on over the next, deeper lines
+                if nxt.strip():
+                    if len(nxt) - len(nxt.lstrip()) > len(m.group(1)):
+                        raise opaque("gh alias %s runs over more than one line" % name)
+                    break
             if val[0] in "'\"" and val[-1] == val[0] and len(val) > 1:
                 val = val[1:-1].replace("''", "'") if val[0] == "'" else val[1:-1]
             return val

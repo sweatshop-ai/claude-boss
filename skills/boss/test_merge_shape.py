@@ -90,6 +90,14 @@ MERGES = [
     "time -p gh pr 'merge' 5",
     "coproc JOB sh -c '\"gh\" pr merge 5'",
     "coproc gh pr 'merge' 5",
+    # round 2: a merge by another program
+    '"curl" -X "PUT" https://api.github.com/repos/o/r/pulls/5/merge',
+    "curl -XPUT https://api.github.com/repos/o/r/pulls/5/merge",
+    "curl --request PUT -H 'Authorization: x' https://api.github.com/repos/o/r/pulls/5/merge",
+    "curl --request=put https://api.github.com/repos/o/r/pulls/$N/merge",
+    "wget --method=PUT https://api.github.com/repos/o/r/pulls/5/merge",
+    "http PUT api.github.com/repos/o/r/pulls/5/merge",
+    "curl -d '{\"query\":\"mutation { merge\"\"PullRequest { x } }\"}' https://api.github.com/graphql",
 ]
 
 # What the shell cannot be seen through: refused, and the reason says so.
@@ -149,6 +157,11 @@ OPAQUE_CMDS = [
     "env BASH_ENV=/tmp/unseen bash -c true",
     "ENV=/tmp/unseen sh -c true",
     "bash --rcfile /tmp/unseen -ic true",
+    "env --split-string=\"$X\" true",
+    "env -S$X true",
+    "flock -c\"$X\" f",
+    "curl -X PUT \"$URL\"",
+    "curl -X PUT $URL",
     "bash --init-file=/tmp/unseen -c true",
     "GH_CONFIG_DIR=/tmp/x gh pr view 5",
     "XDG_CONFIG_HOME=/tmp/x gh pr view 5",
@@ -223,6 +236,16 @@ CLEAN = [
     "env -S 'ls -l'",
     "flock -c 'ls -l' lockfile",
     "git commit -m 'a b c'",
+    "[[ 1 == 1 ]]",
+    "[ -f file ] && echo yes",
+    "[[ $x == y ]]",
+    "[ \"$x\" = y ]",
+    "test -f x",
+    "if [ -f x ]; then echo y; fi",
+    "curl -X PUT https://api.github.com/repos/o/r/issues/5/labels",
+    "curl -X PUT https://example.com/pulls",
+    "curl https://api.github.com/repos/o/r/pulls/5/merge",
+    "curl -X GET https://api.github.com/repos/o/r/pulls/5/merge",
     "gh pr view 5 && gh pr checks 5",
     "FOO=\"a b\" gh pr view 5",
     "echo 'it'\"'\"'s'",
@@ -302,6 +325,15 @@ class GhConfig(unittest.TestCase):
         self.assertEqual(merge_shape.scan("gh long 5")[0], OPAQUE)
         self.config("    loop: loop\n")
         self.assertEqual(merge_shape.scan("gh loop 5")[0], OPAQUE)
+
+    def test_an_alias_with_a_yaml_escape_or_a_continuation_line_is_refused(self):
+        self.config('    esc: "pr \\u006derge"\n')
+        self.assertEqual(merge_shape.scan("gh esc 5")[0], OPAQUE)
+        self.config("    multi: pr\n      merge\n    other: pr view\n")
+        self.assertEqual(merge_shape.scan("gh multi 5")[0], OPAQUE)
+        self.assertIsNone(merge_shape.scan("gh other 5"))
+        self.config('    "\\x6d": pr merge\n')
+        self.assertEqual(merge_shape.scan("gh anything 5")[0], OPAQUE)
 
     def test_an_unreadable_config_refuses_a_gh_word_it_cannot_place(self):
         (self.conf / "config.yml").mkdir()

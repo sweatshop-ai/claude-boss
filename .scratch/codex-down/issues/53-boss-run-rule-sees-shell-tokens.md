@@ -25,6 +25,13 @@
 - **Startup files and other config**: `BASH_ENV=`, `ENV=`, `GH_CONFIG_DIR=`, `XDG_CONFIG_HOME=`, `XDG_DATA_HOME=` and `HOME=` set anywhere (a prefix, `export`, `env`, a redirection target), `--rcfile`/`--init-file`, and any text naming gh's own config or extension files are refused: each changes what runs or where gh looks, from a place the text does not show.
 - **No list of gh's built-in commands.** A list is right for one gh version only. For a first word that is not `pr`, `api`, `alias` or `extension`, the scanner now looks where gh keeps what could be a merge: an alias in gh's `config.yml` (`GH_CONFIG_DIR`, else `XDG_CONFIG_HOME/gh`, else `~/.config/gh`) is expanded and scanned (a `!` alias as shell); an extension directory `gh-<name>` under `XDG_DATA_HOME/gh/extensions` is refused by name; a config that cannot be read, or an alias in a form the small reader is not sure of (block scalar, anchor, loop), is refused. A word that is neither (`gh copilot`, a typo) is gh's own to answer. `gh extension` other than `list`, `search` and `browse` is refused (it installs or runs code the text does not show), so an alias or extension cannot appear inside the same command that creates it.
 
+## Round 2 (Codex NO-GO on fc03162, four findings) and what changed
+
+- **A merge by another program.** The token rule only knew `gh`. `check_put_merge` now reads every command: a merge mutation name in any word, or a PUT marker (`PUT`, `-X PUT`, `-XPUT`, `--request=put`, `--method PUT`) together with a `pulls/<n>/merge` word, is the merge API whoever sends it (`"curl" -X "PUT" ...`); a PUT to an address built at run time (`curl -X PUT "$URL"`) cannot be seen through.
+- **`env --split-string="$X"`.** An option that runs a command line (`-S`, `--split-string`, `-c`, `--command`, glued or not) with a value built at run time is refused, not skipped as an option.
+- **YAML in gh's config.** The small alias reader now refuses what it cannot decode: a backslash in a name or value (YAML escapes), an alias that continues on the next, deeper line (a plain scalar folds to one line).
+- **`[` is a glob only when it forms a bracket expression** (`g[h]`). `[ -f file ]` and `[[ 1 == 1 ]]` are commands again and reach the reviewer.
+
 ## Done when
 
 - [x] Tests first: `test_merge_shape.py` (54 hidden merges, 51 opaque forms, 54 clean commands, the CLI contract, nesting limit); `test_boss_run.py` HardRules: the hidden merges refused with `seen:` in the message, the log and the exit, the same as an argument list, the opaque ones named, harmless look-alikes still reach the reviewer, a shape check that does not answer refuses
