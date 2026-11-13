@@ -607,7 +607,7 @@ job. The password I can type ... But having someone move forward in a pane, that
 your job."* A staged change with a rollback on the box — a Caddy reload, a compose
 up, a unit restart, an env file — is dispatched by you and executed by the worker on
 your dispatch; you answer for it and tell them afterwards, with the acceptance lines.
-Never write "type apply in her pane". Ask them only for what only their hand can do (a merge that is theirs goes to the desk, P13/P14, not to an `ASK`): a
+Never write "type apply in her pane". Ask them only for what only their hand can do (a PR waiting only for their merge goes to the desk, P13/P14, not to an `ASK`): a
 password, a browser sign-in, Cloudflare, a GitHub token, a purchase — and then say
 exactly what to do and where; a command goes on your session card too (P12). The same holds for merges where nothing deploys, on a Codex GO or on a provisional fallback GO (the repo
 marks the branch non-deploying), and for restarts of a worker whose task is finished and whose handoff is on
@@ -930,7 +930,7 @@ starts to deploy is outside what the gate can see.
 
 **A PR that waits only for the owner's merge goes to the desk.** That is a PR with its GO that you may not order
 through the gate (its branch deploys, or the gate refuses it for a reason only the owner lifts). Hand it over with
-`desk ready OWNER/REPO N --what "<one line on what the PR does>" --rec merge --why "<the reviews, CI, and the head sha>"`,
+`desk ready OWNER/REPO N --what "<one line on what the PR does>" --rec merge --by <your name> --why "<the reviews, CI, and the head sha>"`,
 not to a Paste and an `ASK` per PR. `--after M` names a PR that must merge first; `--rec wait` or `--rec dont` when
 that is your advice. `desk` is AgentView's `hooks/desk`, beside `hooks/paste` (on the author's machine
 `/home/tiroir/Projects/agentview/hooks/desk`; the owner merges from the desk page there). It pins the PR's head, so
@@ -1208,7 +1208,7 @@ before closing**, and the closing after both the state line and the objective.
    - an owner question still unanswered, with its options, marked as to be asked again by
      the next boss;
    - each open PR and what it waits on;
-   - each desk item of yours, from `desk status` (`desk status` lists the whole desk; keep your own PRs): the PR, `waiting` or what it says;
+   - each desk item of yours, from `desk status` (`desk status` lists the whole desk and shows no owner: keep the PRs your tracker holds): the PR, `waiting` or what it says;
    - each CI run nobody watches any more;
    - the brief file to resume each piece from.
 

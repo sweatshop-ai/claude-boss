@@ -26,6 +26,11 @@
 
 **TTS does not read emoji** — with `voice: ON`, speak the same information conversationally.
 
+## Desk items
+
+A PR handed to the merge desk (`desk ready`) is the owner's to merge: list it in the recap with its `desk status`
+(`waiting`, merged as a sha, or refused and why), apart from the questions.
+
 ## Status table shape
 
 ```

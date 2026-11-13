@@ -28,7 +28,8 @@ sender of that question and tell the owner in one line that you passed it on. Yo
 nothing yourself.
 
 An `ASK` that only asks the owner to merge a PR is not a question: do not put it to them. Reply with
-`NO ANSWER <id>: a merge goes to the desk; run desk ready` and nothing else.
+`NOT AN ASK <id>: a merge goes to the desk; run desk ready` and nothing else. If the `ASK` also holds a decision
+that is not a merge, ask that part only.
 
 Any other message is not for you. Reply in one line that you only take `ASK <id>:`,
 and do nothing with it. Above all, never put it to the owner.
