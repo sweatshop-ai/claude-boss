@@ -113,11 +113,11 @@ COMMENT_OPEN_RE = re.compile(r"<!--\s*(?:sheaf|rd)-comment\b")
 HEAD_TAIL = r"(?:<!--\s*(?:sheaf|rd)-comment\b[^\n]*?-->)*"
 
 
-def comment_blocks(text: str) -> list:
-    """Every sheaf comment in `text`, byte for byte: from `<!-- sheaf-comment` (or
+def _block_spans(text: str, strict: bool = True) -> list:
+    """(start, end) of every sheaf comment in `text`: from `<!-- sheaf-comment` (or
     the older `rd-comment`) to the first `-->`. sheaf writes a `--` inside a
-    comment as `-&#45;`, so that is its end. The contents are not read. A block
-    that never closes is a ValueError: where it ends is a guess."""
+    comment as `-&#45;`, so that is its end. A block that never closes is a
+    ValueError when `strict`, else the scan stops there."""
     out, at = [], 0
     while True:
         m = COMMENT_OPEN_RE.search(text, at)
@@ -125,10 +125,36 @@ def comment_blocks(text: str) -> list:
             return out
         end = text.find("-->", m.end())
         if end < 0:
+            if not strict:
+                return out
             raise ValueError("a sheaf comment opens and never closes (`<!-- sheaf-comment` "
                              "without `-->`); close it by hand before rewriting this goal")
-        out.append(text[m.start():end + 3])
+        out.append((m.start(), end + 3))
         at = end + 3
+
+
+def comment_blocks(text: str) -> list:
+    """Every sheaf comment in `text`, byte for byte. The contents are not read."""
+    return [text[a:b] for a, b in _block_spans(text)]
+
+
+def _masked(text: str, fill: str = " ") -> str:
+    """`text` with every sheaf comment blanked to `fill`, newlines kept: the same
+    lines at the same indices, so a reader never sees inside a block (a `- x`,
+    `- [ ] x` or `## X` line in a thread) and a writer indexes the original by it."""
+    out, at = [], 0
+    for a, b in _block_spans(text, strict=False):
+        out.append(text[at:a])
+        out.append(re.sub(r"[^\n]", fill, text[a:b]))
+        at = b
+    out.append(text[at:])
+    return "".join(out)
+
+
+def _read(ln: str, gone: str) -> str:
+    """The line `ln` as a reader sees it, `gone` being its form with the block
+    characters as NUL: the block cut out, the rest as written, trailing blanks off."""
+    return ln if gone == ln else gone.replace("\0", "").rstrip()
 
 
 def lost_comments(dropped: str, kept: str) -> list:
@@ -199,17 +225,18 @@ def with_body(text: str, body: str) -> str:
 def section(text: str, title: str) -> str:
     """The body of `## <title>`, up to the next `## `, stripped."""
     m = re.search(r"^##\s+%s\s*%s\s*$(.*?)(?=^##\s|\Z)" % (re.escape(title), HEAD_TAIL),
-                  text, re.M | re.S)
+                  _masked(text), re.M | re.S)
     return m.group(1).strip() if m else ""
 
 
 def _section_span(lines, title):
     """(first, end) line indices of `## <title>`'s body, or None."""
     head = re.compile(r"^##\s+%s\s*%s\s*$" % (re.escape(title), HEAD_TAIL))
-    at = next((i for i, ln in enumerate(lines) if head.match(ln)), None)
+    seen = _masked("\n".join(lines)).split("\n")
+    at = next((i for i, ln in enumerate(seen) if head.match(ln)), None)
     if at is None:
         return None
-    end = next((i for i in range(at + 1, len(lines)) if re.match(r"^##\s", lines[i])), len(lines))
+    end = next((i for i in range(at + 1, len(seen)) if re.match(r"^##\s", seen[i])), len(seen))
     return at + 1, end
 
 
@@ -227,7 +254,11 @@ def next_items(text: str) -> list:
     pulse hands an idle worker when there is no ticket graph."""
     lines = text.splitlines()
     span = _section_span(lines, NEXT)
-    return [ln for ln in lines[slice(*span)] if ln.strip()] if span else []
+    if not span:
+        return []
+    gone = _masked("\n".join(lines), "\0").split("\n")
+    return [r for r in (_read(ln, g) for ln, g in zip(lines[slice(*span)], gone[slice(*span)]))
+            if r.strip()]
 
 
 ITEM_RE = re.compile(r"^(\d+[.)]|[-*+])\s")
@@ -249,6 +280,13 @@ def set_next(text: str, body: str) -> str:
     if span is None:
         return text.rstrip("\n") + "\n\n## %s\n%s\n" % (NEXT, "\n".join(new))
     first, end = span
+    heading = lines[first - 1]
+    try:
+        comment_blocks(heading)
+    except ValueError:
+        raise ValueError("a sheaf comment glued to the heading %r runs over more than one "
+                         "line (sheaf writes it on one); put it on one line by hand before "
+                         "rewriting this goal" % heading.split("<!--", 1)[0].strip()) from None
     tail = lines[end:]
     lost = lost_comments("\n".join(lines[first:end]), body)
     return "\n".join(lines[:first] + new + ([""] + lost if lost else [])
@@ -262,8 +300,9 @@ def criteria(text: str) -> list:
     """(ticked, text) for each `- [ ]` / `- [x]` line under `## Done when`."""
     lines = text.splitlines()
     span = _section_span(lines, "Done when")
-    return [(m.group(1) == "x", m.group(2))
-            for m in map(BOX_RE.match, lines[slice(*span)] if span else []) if m]
+    seen = _masked("\n".join(lines)).split("\n")
+    return [(m.group(1) == "x", m.group(2).rstrip())
+            for m in map(BOX_RE.match, seen[slice(*span)] if span else []) if m]
 
 
 def unmet(text: str) -> list:
@@ -276,11 +315,12 @@ def tick(text: str, done) -> tuple:
     the whole criterion, inside `## Done when` only."""
     lines = text.split("\n")
     span = _section_span(lines, "Done when")
+    seen = _masked(text).split("\n")
     n = 0
     for c in done:
         for i in range(*span) if span else ():
-            if lines[i] == "- [ ] " + c:
-                lines[i] = "- [x] " + c
+            if seen[i].rstrip() == "- [ ] " + c:
+                lines[i] = "- [x] " + lines[i][6:]
                 n += 1
                 break
     return "\n".join(lines), n
