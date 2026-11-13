@@ -1153,6 +1153,250 @@ class TestOnlySince(Base):
         self.assertEqual(self.merges(), [])
 
 
+# ------------------------------------------------------------- review by risk (ticket 50) ----
+def merge_compare(*files, parents=(1, 2), **extra):
+    """A compare answer that lists its commits (one entry per parent count) as well as its files."""
+    commits = [{"sha": "%040x" % i, "parents": [{}] * n} for i, n in enumerate(parents)]
+    return compare_answer(*files, **dict({"commits": commits, "total_commits": len(commits)}, **extra))
+
+
+def checks_answer(*conclusions, total=None, status="completed"):
+    runs = [{"name": "ci%d" % i, "status": status, "conclusion": c} for i, c in enumerate(conclusions)]
+    return json.dumps({"total_count": len(runs) if total is None else total, "check_runs": runs})
+
+
+class DocsAndTests(unittest.TestCase):
+    """The pure part of rule 2: which files are docs, and which names are neither docs nor tests."""
+
+    def test_the_narrow_docs_set(self):
+        for name in ("README.md", "CHANGELOG.md", "docs/a.md", "docs/deep/b.md"):
+            self.assertTrue(bm.is_doc(name), name)
+
+    def test_what_an_agent_acts_on_is_never_docs(self):
+        for name in ("skills/boss/SKILL.md", "SKILL.md", "docs/SKILL.md", "docs/skill.md", "AGENTS.md", "CLAUDE.md",
+                     "docs/CLAUDE.md", "docs/skills/x.md", "docs/hooks/x.md", "docs/.claude/x.md", "docs/agents/x.md",
+                     "docs/commands/x.md", "docs/.github/x.md", "notes.md", "docs/a.txt", "src/README.md",
+                     "xdocs/a.md", "README.md.py"):
+            self.assertFalse(bm.is_doc(name), name)
+
+    def test_stray_names_are_those_that_are_neither(self):
+        self.assertEqual(bm.not_docs_or_tests(("tests/a.py", "README.md", "docs/x.md"), ("tests/*",)), [])
+        self.assertEqual(bm.not_docs_or_tests(("tests/a.py", "src/b.py", "SKILL.md"), ("tests/*",)),
+                         ["src/b.py", "SKILL.md"])
+
+    def test_no_file_is_not_a_docs_or_tests_pr(self):
+        self.assertEqual(bm.not_docs_or_tests((), ("tests/*",)), ["(no file)"])
+
+    def test_the_pr_files_that_differ_since_the_go(self):
+        self.assertEqual(bm.touched_by_the_pr(("a", "b"), ("x", "b", "y")), ["b"])
+        self.assertEqual(bm.touched_by_the_pr(("a",), ("x", "y")), [])
+
+
+class DocsTestsOnly(Base):
+    """Rule 2: a provisional GO on a deploying base merges when the PR is docs and tests only, with green CI."""
+
+    def setUp(self):
+        super().setUp()
+        self.deploy = {"raw": deploy_answer(DEPLOYING)}     # `main` deploys
+
+    def go(self, own, checks=None, deploy=None, **over):
+        self.put(1, **dict({"kind": "provisional", "reviewer": "opus"}, **over))
+        self.gh.configure(api=[deploy or self.deploy, {"raw": compare_answer(*own, status="diverged")},
+                               {"raw": checks if checks is not None else checks_answer("success", "skipped")}])
+        return self.run_gate()
+
+    def refused(self, own, reason_in_err, code=4, **kw):
+        self.assertEqual(self.go(own, **kw), code, self.err)
+        self.assertEqual(self.merges(), [])
+        self.assertIn(reason_in_err, self.err)
+        self.assertEqual(self.last()["decision"], "refused")
+
+    def test_docs_and_tests_with_green_checks_merge_on_a_deploying_base(self):
+        self.assertEqual(self.go(["tests/a.py", "docs/x.md", "CHANGELOG.md"]), 0, self.err)
+        self.assertEqual(len(self.merges()), 1)
+        self.assertEqual((self.last()["reason"], self.last()["kind"], self.last()["round"]),
+                         ("provisional-go-docs-tests-only", "provisional", 1))
+
+    def test_the_calls_are_the_files_of_the_pr_against_its_base_and_then_the_checks_of_the_head(self):
+        self.go(["tests/a.py"])
+        self.assertEqual([c.argv[1] for c in self.gh_calls("api")][1:],
+                         ["repos/%s/compare/main...%s" % (REPO, HEAD),
+                          "repos/%s/commits/%s/check-runs?per_page=100" % (REPO, HEAD)])
+
+    def test_one_code_file_among_the_tests_keeps_the_refusal(self):
+        self.refused(["tests/a.py", PRODUCTION], PRODUCTION)
+
+    def test_skill_md_is_code_and_keeps_the_refusal(self):
+        self.refused(["skills/boss/SKILL.md"], "SKILL.md")
+
+    def test_a_rename_out_of_docs_and_tests_refuses_by_either_name(self):
+        self.put(1, kind="provisional")
+        self.gh.configure(api=[self.deploy, {"raw": compare_answer(("docs/new.md", "src/old.py"), status="ahead")},
+                               {"raw": checks_answer("success")}])
+        self.assertEqual(self.run_gate(), 4, self.err)
+
+    def test_red_pending_or_no_checks_keep_the_refusal(self):
+        for label, answer in (("failure", checks_answer("success", "failure")),
+                              ("pending", checks_answer("success", status="in_progress")),
+                              ("cancelled", checks_answer("cancelled")), ("none", checks_answer()),
+                              ("more than listed", checks_answer("success", total=2)),
+                              ("not json", "nope"), ("no list", "{}")):
+            with self.subTest(label):
+                self.refused(["tests/a.py"], "docs/tests-only rule", checks=answer)
+
+    def test_a_waived_go_never_qualifies(self):
+        self.refused(["tests/a.py"], "deploy list ok", kind="waived")
+        self.assertEqual(len(self.gh_calls("api")), 1, "the compare is not even read")
+
+    def test_without_a_go_nothing_merges_whatever_the_files_are(self):
+        self.gh.configure(api=[self.deploy, {"raw": compare_answer("tests/a.py")}, {"raw": checks_answer("success")}])
+        self.assertEqual(self.run_gate(), 3, self.err)
+        self.assertEqual(self.last()["reason"], "no-round")
+
+    def test_a_provisional_go_a_later_round_supersedes_still_refuses(self):
+        self.put(1, kind="provisional")
+        self.put(2, status="head-moved", verdict=None)
+        self.gh.configure(api=[self.deploy, {"raw": compare_answer("tests/a.py")}, {"raw": checks_answer("success")}])
+        self.assertEqual(self.run_gate(), 3, self.err)
+        self.assertEqual(self.last()["reason"], "superseded-go")
+
+    def test_a_deploy_json_without_test_paths_or_a_failing_compare_keeps_the_refusal(self):
+        self.refused(["tests/a.py"], "no test_paths", deploy={"raw": deploy_answer({"version": 1,
+                                                                                  "non_deploying": ["staging"]})})
+        self.put(1, kind="provisional")
+        self.gh.configure(api=[self.deploy, {"rc": 1, "err": "boom"}])
+        self.assertEqual(self.run_gate(), 4, self.err)
+        self.assertIn("compare-failed", self.err)
+
+    def test_an_empty_or_truncated_pr_does_not_pass(self):
+        self.refused([], "(no file)")
+        self.put(1, kind="provisional")
+        many = ["tests/f%d.py" % i for i in range(bm.COMPARE_FILES)]
+        self.gh.configure(api=[self.deploy, {"raw": compare_answer(*many)}, {"raw": checks_answer("success")}])
+        self.assertEqual(self.run_gate(), 4, self.err)
+        self.assertIn("compare-truncated", self.err)
+
+    def test_a_codex_go_does_not_read_the_files_at_all(self):
+        self.put(1)
+        self.gh.configure(api=[self.deploy])
+        self.assertEqual(self.run_gate(), 0, self.err)
+        self.assertEqual(len(self.gh_calls("api")), 1)
+
+    def test_a_non_deploying_base_does_not_need_the_rule(self):
+        self.put(1, kind="provisional")
+        self.gh.configure(api=[{"raw": deploy_answer(GOOD_DEPLOY)}])
+        self.assertEqual(self.run_gate(), 0, self.err)
+        self.assertEqual(self.last()["reason"], "provisional-go-non-deploying")
+
+
+class MergedBase(Base):
+    """Rule 4: the live head is the GO'd head plus a merge of the base, and the PR's own files are the same."""
+
+    def setUp(self):
+        super().setUp()
+        self.deploy = {"raw": deploy_answer(DEPLOYING)}     # `main` deploys: only a Codex GO qualifies
+        self.put(1, head_sha=SINCE)
+
+    def run_merged(self, changed, own_live, own_since, deploy=None, sha=SINCE, **kw):
+        """The entries after the deploy list, in call order: SINCE...head, base...head, base...SINCE."""
+        self.gh.configure(api=[deploy or self.deploy, {"raw": changed}, {"raw": own_live}, {"raw": own_since}])
+        return self.run_gate(merged_since=sha, **kw)
+
+    def calls(self):
+        return [c.argv[1] for c in self.gh_calls("api") if "/compare/" in c.argv[1]]
+
+    def refused(self, reason, *args, code=3, **kw):
+        self.assertEqual(self.run_merged(*args, **kw), code, self.err)
+        self.assertEqual(self.merges(), [])
+        self.assertEqual((self.last()["decision"], self.last()["exit"], self.last()["reason"]),
+                         ("refused", code, reason))
+
+    def test_a_merge_of_main_that_leaves_the_pr_files_alone_merges_and_the_line_says_which_rule(self):
+        code = self.run_merged(merge_compare("src/other.py", "docs/b.md"), compare_answer("src/mine.py", status="ahead"),
+                               compare_answer("src/mine.py", status="diverged"))
+        self.assertEqual(code, 0, self.err)
+        self.assertEqual(len(self.merges()), 1)
+        intent, done = self.log()
+        self.assertEqual((done["reason"], done["since"], done["round"], done["head"]),
+                         ("codex-go-merged-base", SINCE, 1, HEAD))
+        self.assertEqual(intent["decision"], "merging")
+
+    def test_the_three_compares_are_asked_in_order(self):
+        self.run_merged(merge_compare("x.py"), compare_answer("m.py"), compare_answer("m.py"))
+        self.assertEqual(self.calls(), ["repos/%s/compare/%s...%s" % (REPO, SINCE, HEAD),
+                                        "repos/%s/compare/main...%s" % (REPO, HEAD),
+                                        "repos/%s/compare/main...%s" % (REPO, SINCE)])
+
+    def test_dry_run_decides_but_never_merges(self):
+        self.assertEqual(self.run_merged(merge_compare("x.py"), compare_answer("m.py"), compare_answer("m.py"),
+                                         dry_run=True), 0, self.err)
+        self.assertEqual((self.merges(), self.last()["decision"]), ([], "allowed"))
+
+    def test_a_pr_file_that_differs_since_the_go_refuses(self):
+        self.refused("pr-files-changed", merge_compare("x.py", "src/mine.py"), compare_answer("src/mine.py"),
+                     compare_answer("src/mine.py"))
+        self.assertIn("src/mine.py", self.err)
+
+    def test_a_file_the_pr_had_at_the_go_and_dropped_since_refuses(self):
+        self.refused("pr-files-changed", merge_compare("src/gone.py"), compare_answer("src/mine.py"),
+                     compare_answer("src/mine.py", "src/gone.py"))
+
+    def test_a_file_the_pr_added_since_the_go_refuses(self):
+        self.refused("pr-files-changed", merge_compare("src/new.py"), compare_answer("src/mine.py", "src/new.py"),
+                     compare_answer("src/mine.py"))
+
+    def test_a_rename_is_matched_by_either_name(self):
+        self.refused("pr-files-changed", merge_compare("src/old.py"), compare_answer(("src/new.py", "src/old.py")),
+                     compare_answer("src/mine.py"))
+
+    def test_plain_commits_with_no_merge_commit_refuse(self):
+        self.refused("no-merge-commit", merge_compare("x.py", parents=(1, 1)), compare_answer("m.py"),
+                     compare_answer("m.py"))
+
+    def test_commits_that_are_not_all_listed_or_not_listed_at_all_refuse(self):
+        self.refused("compare-commits", compare_answer("x.py"), compare_answer("m.py"), compare_answer("m.py"))
+        self.refused("compare-commits", merge_compare("x.py", total_commits=300), compare_answer("m.py"),
+                     compare_answer("m.py"))
+
+    def test_a_compare_since_that_is_not_ahead_refuses(self):
+        self.refused("compare-not-ahead", merge_compare("x.py", status="diverged"), compare_answer("m.py"),
+                     compare_answer("m.py"))
+
+    def test_a_failed_or_truncated_own_compare_refuses(self):
+        self.refused("compare-failed", merge_compare("x.py"), "nope", compare_answer("m.py"))
+        self.refused("compare-truncated", merge_compare("x.py"),
+                     compare_answer(*["f%d.py" % i for i in range(bm.COMPARE_FILES)]), compare_answer("m.py"))
+        self.refused("compare-not-ahead", merge_compare("x.py"), compare_answer("m.py", status="behind"),
+                     compare_answer("m.py"))
+
+    def test_the_go_must_be_one_decide_allows(self):
+        self.put(1, head_sha=SINCE, kind="provisional")           # a provisional GO on a deploying base
+        self.refused("deploying-base", merge_compare("x.py"), compare_answer("m.py"), compare_answer("m.py"), code=4)
+        self.assertEqual(self.calls(), [])
+
+    def test_a_no_go_above_the_go_refuses(self):
+        self.put(2, head_sha=OTHER, verdict="NO-GO")
+        self.refused("no-go-after-since", merge_compare("x.py"), compare_answer("m.py"), compare_answer("m.py"))
+        self.assertEqual(self.calls(), [])
+
+    def test_a_sha_that_is_no_go_round_refuses(self):
+        self.refused("no-round", merge_compare("x.py"), compare_answer("m.py"), compare_answer("m.py"), sha=OTHER)
+
+    def test_a_deciding_round_on_the_live_head_stands(self):
+        self.put(2, verdict="NO-GO")
+        self.refused("no-go", merge_compare("x.py"), compare_answer("m.py"), compare_answer("m.py"))
+        self.assertEqual(self.calls(), [])
+
+    def test_the_two_flags_together_and_a_bad_sha_are_usage_errors(self):
+        for kw in ({"since": SINCE, "merged_since": SINCE}, {"merged_since": "main"}):
+            with self.subTest(kw), self.assertRaises(ValueError):
+                self.run_gate(**kw)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            self.assertEqual(bm.main(["--repo", REPO, "--pr", str(PR), "--merged-base-since", "main"]), 2)
+        self.assertEqual(self.merges(), [])
+
+
 # ----------------------------------------------------- end to end, from the real writers ----
 class FromTheWriters:
     """Records made by 08's and 09c's own code, then the gate on them. The `gh` stub is the merge gate's."""
