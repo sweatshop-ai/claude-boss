@@ -1184,6 +1184,10 @@ class DocsAndTests(unittest.TestCase):
         self.assertEqual(bm.not_docs_or_tests(("tests/a.py", "src/b.py", "SKILL.md"), ("tests/*",)),
                          ["src/b.py", "SKILL.md"])
 
+    def test_an_instruction_file_is_refused_even_where_test_paths_match_it(self):
+        self.assertEqual(bm.not_docs_or_tests(("tests/SKILL.md", "hooks/x.py", "tests/a.py"), ("tests/*", "hooks/*")),
+                         ["tests/SKILL.md", "hooks/x.py"])
+
     def test_no_file_is_not_a_docs_or_tests_pr(self):
         self.assertEqual(bm.not_docs_or_tests((), ("tests/*",)), ["(no file)"])
 
@@ -1243,6 +1247,9 @@ class DocsTestsOnly(Base):
                               ("not json", "nope"), ("no list", "{}")):
             with self.subTest(label):
                 self.refused(["tests/a.py"], "docs/tests-only rule", checks=answer)
+
+    def test_checks_that_were_all_skipped_or_neutral_are_not_green(self):
+        self.refused(["tests/a.py"], "no check run succeeded", checks=checks_answer("skipped", "neutral"))
 
     def test_a_waived_go_never_qualifies(self):
         self.refused(["tests/a.py"], "deploy list ok", kind="waived")

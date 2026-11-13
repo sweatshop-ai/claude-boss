@@ -14,7 +14,9 @@
 - **Rule 2 is automatic, no flag, and only for a provisional GO.** It fires where `decide` said `deploying-base` for kind `provisional`; there the refusal was exit 4 and stays 4 with the reason when the rule fails. A waived GO is the owner's tests-only call and never qualifies; "no round" and "superseded" are untouched, so zero reviews is still refused.
 - **The files are the PR's, base...head** (rename by both names), all matching `test_paths` (from the base's deploy list, as `--test-only-since`) or the docs set. No file, or a truncated list, refuses.
 - **Docs are narrow: `README.md`, `CHANGELOG.md`, `docs/*.md`, hard-coded.** SKILL.md is the instructions agents act on, so it is code: `SKILL.md`, `AGENTS.md`, `CLAUDE.md` (any case, any directory) and anything under `skills`, `commands`, `agents`, `hooks`, `.claude`, `.github` are never docs, even under `docs/`. A repo that wants wider docs gets a `docs_paths` key later, from the base's deploy list; not built now.
-- **Green CI** is read from `commits/<head>/check-runs`: every run `completed` and `success`, `neutral` or `skipped`, all listed (total equals what came back), and at least one (no check is not green). Legacy commit statuses are not read.
+- **Green CI** is read from `commits/<head>/check-runs`: every run `completed` and `success`, `neutral` or `skipped`, all listed (total equals what came back), and at least one `success` (no check, or only skipped/neutral ones, is not green: nothing ran). Legacy commit statuses are not read.
+
+- **Round 1 (provisional Opus GO, two class b findings, both fixed in round 2):** an instruction file is refused even where a broad `test_paths` pattern matches it; all-skipped checks are not green.
 
 ## Done when
 

@@ -364,6 +364,8 @@ def read_checks(repo: str, head: str, io_timeout: float) -> tuple[bool, str]:
         return False, "the check runs are not all listed"
     if not runs:
         return False, "no check ran on this head"
+    if not any(isinstance(r, dict) and r.get("conclusion") == "success" for r in runs):
+        return False, "no check run succeeded (all skipped or neutral means nothing ran)"
     for r in runs:
         if not isinstance(r, dict) or r.get("status") != "completed" or r.get("conclusion") not in GREEN:
             return False, "check %r is %s/%s" % (r.get("name") if isinstance(r, dict) else None,
@@ -420,10 +422,15 @@ def test_only(rounds: list[Round], since: str, seen: Pr, deploy: Deploy, owner: 
     return Decision(EXIT_MERGED, got.reason + "-test-only", got.round, got.kind), ""
 
 
-def is_doc(name: str) -> bool:
-    """A file that is documentation and not something an agent acts on (ticket 50: SKILL.md and its kin are code)."""
+def is_instruction(name: str) -> bool:
+    """A file an agent acts on (ticket 50: SKILL.md and its kin are code), whatever pattern would otherwise match it."""
     parts = name.split("/")
-    if parts[-1].casefold() in INSTRUCTION_NAMES or any(p.casefold() in INSTRUCTION_DIRS for p in parts[:-1]):
+    return parts[-1].casefold() in INSTRUCTION_NAMES or any(p.casefold() in INSTRUCTION_DIRS for p in parts[:-1])
+
+
+def is_doc(name: str) -> bool:
+    """A file that is documentation: the narrow docs set, never an instruction file."""
+    if is_instruction(name):
         return False
     return any(fnmatch.fnmatchcase(name, pat) for pat in DOCS_PATHS)
 
@@ -432,7 +439,8 @@ def not_docs_or_tests(names: tuple, test_paths: tuple) -> list[str]:
     """The names that are neither docs nor a match of `test_paths`; none at all is a PR with nothing to judge, refused."""
     if not names:
         return ["(no file)"]
-    return [n for n in names if not is_doc(n) and not any(fnmatch.fnmatchcase(n, pat) for pat in test_paths)]
+    return [n for n in names if is_instruction(n) or not (
+        is_doc(n) or any(fnmatch.fnmatchcase(n, pat) for pat in test_paths))]
 
 
 def touched_by_the_pr(own: tuple, since_changes: tuple) -> list[str]:
