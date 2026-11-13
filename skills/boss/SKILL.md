@@ -642,7 +642,8 @@ delete it. An `ANSWER q<n>` is recorded with `python3 skills/boss/codex_blocker.
 `--choose T accept-fallback`, which writes `- [codex-choice <blocker id>] <choice> - <ts>` under
 `## Decisions in force` (never under Open blockers) and sets the marker's `ask=` to what was chosen. A later
 `--choose` replaces the choice, and going back to `wait` needs no new consent. A `NO ANSWER` writes nothing and
-the blocker stays open. The question is the owner's whatever they once said about asking less: it is never
+the blocker stays open. A recorded choice does not clear the blocker: it stays open until
+`codex_health.py` says up, and only the sync clears it, so a later failure under the same id is not asked again. The question is the owner's whatever they once said about asking less: it is never
 recorded as a `boss-unask` kind.
 
 **A fallback GO is a loan: have Codex review again once it answers, and stop a release until it has** (ticket 10b).
