@@ -796,6 +796,28 @@ class PresetLaunch(Base):
         seen = self.child_path(custom, os.pathsep.join([str(venv), os.environ["PATH"]]))
         self.assertNotIn(str(venv), seen)
 
+    def test_a_preset_rebuilt_with_tools_and_a_directory_keeps_the_preset_path(self):
+        # boss-goal runs `--fallback opus --cwd DIR --fallback-tools Read,Grep,Glob`: not equal to rc.OPUS, still the preset (ticket 45)
+        venv = self.checkout / ".venv" / "bin"
+        venv.mkdir(parents=True)
+        for preset in rc.PRESETS.values():
+            with self.subTest(preset=preset.name):
+                rebuilt = rc.Fallback(preset.name, preset.model, 240, ("Read", "Grep", "Glob"))
+                self.assertNotEqual(rebuilt, preset)
+                seen = self.child_path(rebuilt, os.pathsep.join([str(venv), os.environ["PATH"]]))
+                self.assertIn(str(venv), seen)
+
+    def test_the_gate_spec_with_the_presets_name_and_model_but_its_own_confinement_gets_the_filtered_path(self):
+        # boss_review.fallback_spec is named "opus" on the preset's model: only its env_unset and extra_args make it custom
+        venv = self.checkout / ".venv" / "bin"
+        venv.mkdir(parents=True)
+        for name, extra in (("extra_args", {"extra_args": ("--tools", "Read")}),
+                            ("env_unset", {"env_unset": ("BASH_ENV",)})):
+            with self.subTest(confinement=name):
+                custom = rc.Fallback("opus", rc.OPUS.model, allowed_tools=("Read",), **extra)
+                seen = self.child_path(custom, os.pathsep.join([str(venv), os.environ["PATH"]]))
+                self.assertNotIn(str(venv), seen)
+
     def test_without_a_cwd_a_preset_starts_a_claude_that_links_into_the_current_directory(self):
         # the tradeoff of ticket 15, now pinned: with no checkout to name, nothing under the current directory is kept out
         self.planted(self.sb.root / "here")
