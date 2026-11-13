@@ -315,6 +315,13 @@ class HardRules(Base):
             ("gh pr --repo o/r merge 5",),
             ("gh pr -R o/r merge 5",),
             ("gh pr --repo=o/r merge 5",),
+            ("gh pr -Ro/r merge 5",),
+            ("gh pr -R=o/r merge 5",),
+            ("gh pr --repo= merge 5",),
+            ("gh pr -Ro/r -R o/r merge 5",),
+            ("gh pr --repo o/r -Ro/r --repo=o/r merge 5",),
+            ("gh -Ro/r pr merge 5",),
+            ("gh --repo=o/r pr -Ro/r merge 5",),
             ("/usr/bin/gh pr merge 5",),
             ("gh api -X PUT repos/o/r/pulls/5/merge",),
             ("gh api repos/o/r/pulls/5/merge --method PUT",),
@@ -347,6 +354,8 @@ class HardRules(Base):
     def test_the_merge_rule_works_on_an_argument_list_as_on_a_string(self):
         self.sb.stub("gh")
         for args in (("gh", "pr", "merge", "5"), ("gh", "pr", "--repo", "o/r", "merge", "5"),
+                     ("gh", "pr", "--repo", "", "merge", "5"), ("gh", "pr", "-R", "", "merge", "5"),
+                     ("gh", "pr", "-R", "", "--repo", "", "-Ro/r", "merge", "5"),
                      ("gh", "api", "-X", "PUT", "repos/o/r/pulls/5/merge")):
             with self.subTest(args):
                 self.assertEqual(self.dry(*args).returncode, 5)
@@ -360,6 +369,10 @@ class HardRules(Base):
                     "gh pr view 5",
                     "gh pr comment 5 --body 'merge when green'",
                     "gh pr checks 5 --repo o/r",
+                    "gh pr -Ro/r view 5",
+                    "gh pr -R=o/r checks 5",
+                    "gh pr --repo= view 5",
+                    "gh pr -R o/r -Ro/r comment 5 --body 'merge'",
                     "github pr merge-notes",
                     "my-gh pr merge-notes",
                     "gh api repos/o/r/pulls/5/merge",
