@@ -201,7 +201,8 @@ class SheafComments(unittest.TestCase):
         new = objective.set_next(self.goal(), "1. new\n2. newer\n")
         self.assertEqual(sorted(objective.comment_blocks(new)), sorted([C2, C1, C3]))
         self.assertEqual(objective.next_count(new), 2 + 0)
-        self.assertIn(C1, objective.section(new, objective.NEXT))
+        self.assertLess(new.index(C1), new.index("## Notes"))
+        self.assertGreater(new.index(C1), new.index("## Next"))
 
     def test_set_next_carries_the_block_to_the_end_of_its_section(self):
         new = objective.set_next(self.goal(), "1. new\n")
@@ -303,6 +304,50 @@ class SheafComments(unittest.TestCase):
             for p in d.iterdir():
                 p.unlink()
             d.rmdir()
+
+
+# Made-up threads whose lines look like the goal file's own syntax.
+LISTY = ('<!-- sheaf-comment id=c4 by="Ada" at=2026-11-02T09:00 status=open quote="x"\n'
+         '- looks like an item\n1. and a numbered one\n- [ ] looks like a box\n'
+         '-->')
+HEADY = ('<!-- sheaf-comment id=c5 by="Ada" at=2026-11-02T09:30 status=open quote="x"\n'
+         'Quoting the file:\n## Notes\nand on.\n'
+         '-->')
+
+
+class ReadersSkipBlocks(unittest.TestCase):
+    """What is inside a sheaf comment is the owner's talk, never goal content."""
+
+    def test_a_block_in_next_adds_no_items(self):
+        text = GOAL.replace("- a bullet counts too\n", "- a bullet counts too\n" + LISTY + "\n")
+        self.assertEqual(objective.next_items(text), ["1. first", "- a bullet counts too"])
+        self.assertEqual(objective.next_count(text), 2)
+
+    def test_a_block_after_an_item_on_its_line_leaves_the_item(self):
+        text = GOAL.replace("1. first", "1. first" + LISTY)
+        self.assertEqual(objective.next_items(text), ["1. first", "- a bullet counts too"])
+
+    def test_a_box_in_a_block_is_no_criterion_and_is_not_ticked(self):
+        text = GOAL.replace("## Tickets", LISTY + "\n\n## Tickets")
+        self.assertEqual(objective.criteria(text), objective.criteria(GOAL))
+        new, n = objective.tick(text, ["looks like a box", "`gh pr view 3` says MERGED"])
+        self.assertEqual(n, 1)
+        self.assertIn("- [ ] looks like a box", new)
+        self.assertIn("- [x] `gh pr view 3` says MERGED", new)
+
+    def test_a_heading_line_in_a_block_neither_ends_the_section_nor_is_split(self):
+        text = GOAL.replace("1. first", HEADY + "\n1. first")
+        self.assertEqual(objective.next_items(text), ["1. first", "- a bullet counts too"])
+        done = GOAL.replace("- [x] built", HEADY + "\n- [x] built")
+        self.assertEqual(objective.criteria(done), objective.criteria(GOAL))
+        new = objective.set_next(text, "1. new\n")
+        self.assertEqual(objective.comment_blocks(new), [HEADY])
+        self.assertIn("1. new\n\n" + HEADY + "\n\n## Notes", new)
+
+    def test_the_section_reader_hides_a_block(self):
+        text = GOAL.replace("Ship it.", "Ship it.\n" + HEADY)
+        self.assertEqual(objective.section(text, "Outcome"), "Ship it.")
+        self.assertEqual(objective.section(text, "Done when"), objective.section(GOAL, "Done when"))
 
 
 class CommandLine(unittest.TestCase):
