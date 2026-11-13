@@ -620,6 +620,30 @@ class TheCommand(Base):
         self.sb.expect_unused("codex")
 
 
+class TheUpperCaseEntry(Base):
+    """A hand-written `Owner/Repo` entry (ticket 43) is the entry of `owner/repo` on every path."""
+
+    def tearDown(self):
+        self.sb.expect_unused("claude")
+        super().tearDown()
+
+    def test_a_pass_rechecks_and_removes_it(self):
+        head = self.pr(5, "upper", answer=GO)
+        self.put(self.prov(5, head, repo="Owner/Repo"))
+        self.rounds(5, (1, head, None, {"kind": "provisional"}))
+        self.run_pass()
+        self.assertEqual(self.codex_heads(), [head])
+        self.assertEqual(self.entries(), [])
+
+    def test_the_prune_removes_one_codex_has_cleared(self):
+        head = self.pr(5, "cleared")
+        self.rounds(5, (1, head, None, {"kind": "provisional"}), (2, head, "GO"))
+        self.put(self.prov(5, head, repo="Owner/Repo"))
+        self.assertEqual(br.prune_provisional("t", REPO), ["[prov owner/repo#5]"])
+        self.assertEqual(self.entries(), [])
+        self.sb.expect_unused("codex")
+
+
 class TheList(Base):
     """`--list` (ticket 10b): the entries that count, exit 1 when there is one. It reads each entry's state with
     `_live_state` (the prune reads it too, as the pass does) and makes no `review(...)` call: `codex` is never started."""
@@ -764,6 +788,28 @@ class TheList(Base):
                 contextlib.redirect_stderr(io.StringIO()):
             lines = rk.list_entries("t")
         self.assertEqual(len(lines), 1)
+
+    def test_a_cleared_value_tracker_cannot_read_is_not_cleared(self):
+        for value in ("bogus", "2026-11-12T11:00", "2026-13-45T99:00+00:00"):      # not ISO, no offset, no such date
+            with self.subTest(value=value):
+                self.put(blockers=self.BLOCKER % (" cleared=" + value))
+                run = self.run_list()
+                self.assertEqual((run.returncode, run.stdout), (1, "BLOCKER owner/repo#5 round 02\n"), run.stderr)
+
+    def test_a_valid_cleared_on_a_marker_tracker_rejects_is_not_cleared(self):
+        for what, line in (("bad t0", self.BLOCKER.replace("t0=2026-11-12T10:00+00:00", "t0=bad")),
+                           ("no ask", self.BLOCKER.replace('ask=\"x\"', "")),
+                           ("unknown field", self.BLOCKER.replace("last=0", "last=0 extra=1")),
+                           ("bad id", self.BLOCKER.replace("id=fx0a1b2c3d", "id=fx"))):
+            with self.subTest(what=what):
+                self.put(blockers=line % " cleared=2026-11-12T11:00+00:00")
+                run = self.run_list()
+                self.assertEqual((run.returncode, run.stdout), (1, "BLOCKER owner/repo#5 round 02\n"), run.stderr)
+
+    def test_a_cleared_value_with_a_z_offset_clears(self):
+        self.put(blockers=self.BLOCKER % " cleared=2026-11-12T11:00Z")
+        run = self.run_list()
+        self.assertEqual((run.returncode, run.stdout), (0, ""), run.stderr)
 
     def test_an_empty_cleared_value_is_not_cleared(self):
         self.put(blockers=self.BLOCKER % " cleared=")

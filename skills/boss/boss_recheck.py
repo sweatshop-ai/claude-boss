@@ -312,6 +312,17 @@ def recheck(track: str, repo: str, checkout: str, author: str = DEFAULT_AUTHOR, 
         return lines
 
 
+def _cleared(line: str) -> bool:
+    """Is the marker on `line` one `tracker.validate` accepts, with a `cleared=` in it? A marker tracker cannot
+    validate (a bad t0 or id, a missing or unknown field), an empty value or `cleared=bogus` is not cleared:
+    the release stays stopped."""
+    try:
+        found = tracker.scan_marker(line)
+        return found is not None and bool(tracker.validate(found[1])["cleared"])
+    except tracker.MarkerError:
+        return False
+
+
 def list_entries(track: str, repo: str | None = None, *, io_timeout: int = policy.REVIEW_IO_TIMEOUT) -> list[str]:
     """The lines of the entries of `track` (of `repo`, when given) that count for the release stop: every entry
     but one whose PR reads as CLOSED without a merge. The same errors as `recheck` (`Unusable`, ValueError, OSError)."""
@@ -333,7 +344,7 @@ def list_entries(track: str, repo: str | None = None, *, io_timeout: int = polic
                      % (entry.repo, entry.pr, entry.round, live[0] if live else "unreadable", live[1] if live else entry.head))
     for line in tracker.blocker_lines(text):        # a Codex NO-GO on a merged PR removed its entry: its blocker holds
         m = OPEN_NO_GO.match(line)                  # the stop until the fix has merged on a Codex GO and it is cleared
-        if m and not re.search(r"cleared=[^\s\]]", line) and (key is None or m["repo"].lower() == key):
+        if m and not _cleared(line) and (key is None or m["repo"].lower() == key):
             lines.append("BLOCKER %s#%s round %s" % (m["repo"], m["pr"], m["round"]))
     return lines
 
