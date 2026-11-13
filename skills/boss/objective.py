@@ -138,26 +138,23 @@ def comment_blocks(text: str) -> list:
     return [text[a:b] for a, b in _block_spans(text)]
 
 
-def _read(ln: str, m: str) -> str:
-    """The line `ln` as a reader sees it, `m` being its masked form: `ln` itself
-    when no block touched it, else `m` without the blanks the block left, at the
-    end and, where it began the line, at the start."""
-    if m == ln:
-        return ln
-    return m.rstrip() if len(m) - len(m.lstrip()) <= len(ln) - len(ln.lstrip()) else m.strip()
-
-
-def _masked(text: str) -> str:
-    """`text` with every sheaf comment blanked to spaces, newlines kept: the same
+def _masked(text: str, fill: str = " ") -> str:
+    """`text` with every sheaf comment blanked to `fill`, newlines kept: the same
     lines at the same indices, so a reader never sees inside a block (a `- x`,
     `- [ ] x` or `## X` line in a thread) and a writer indexes the original by it."""
     out, at = [], 0
     for a, b in _block_spans(text, strict=False):
         out.append(text[at:a])
-        out.append(re.sub(r"[^\n]", " ", text[a:b]))
+        out.append(re.sub(r"[^\n]", fill, text[a:b]))
         at = b
     out.append(text[at:])
     return "".join(out)
+
+
+def _read(ln: str, gone: str) -> str:
+    """The line `ln` as a reader sees it, `gone` being its form with the block
+    characters as NUL: the block cut out, the rest as written, trailing blanks off."""
+    return ln if gone == ln else gone.replace("\0", "").rstrip()
 
 
 def lost_comments(dropped: str, kept: str) -> list:
@@ -259,8 +256,9 @@ def next_items(text: str) -> list:
     span = _section_span(lines, NEXT)
     if not span:
         return []
-    seen = _masked("\n".join(lines)).split("\n")
-    return [_read(ln, m) for ln, m in zip(lines[slice(*span)], seen[slice(*span)]) if m.strip()]
+    gone = _masked("\n".join(lines), "\0").split("\n")
+    return [r for r in (_read(ln, g) for ln, g in zip(lines[slice(*span)], gone[slice(*span)]))
+            if r.strip()]
 
 
 ITEM_RE = re.compile(r"^(\d+[.)]|[-*+])\s")
@@ -282,6 +280,13 @@ def set_next(text: str, body: str) -> str:
     if span is None:
         return text.rstrip("\n") + "\n\n## %s\n%s\n" % (NEXT, "\n".join(new))
     first, end = span
+    heading = lines[first - 1]
+    try:
+        comment_blocks(heading)
+    except ValueError:
+        raise ValueError("a sheaf comment glued to the heading %r runs over more than one "
+                         "line (sheaf writes it on one); put it on one line by hand before "
+                         "rewriting this goal" % heading.split("<!--", 1)[0].strip()) from None
     tail = lines[end:]
     lost = lost_comments("\n".join(lines[first:end]), body)
     return "\n".join(lines[:first] + new + ([""] + lost if lost else [])

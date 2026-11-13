@@ -356,6 +356,15 @@ class ReadersSkipBlocks(unittest.TestCase):
         self.assertEqual(objective.next_items(text), ["1. first", "- a bullet counts too"])
         self.assertEqual(objective.next_count(text), 2)
 
+    def test_a_nested_item_after_a_block_keeps_its_indent(self):
+        text = GOAL.replace("- a bullet counts too", LISTY + "  - nested")
+        self.assertEqual(objective.next_items(text), ["1. first", "  - nested"])
+
+    def test_set_next_refuses_a_multi_line_comment_glued_to_its_heading(self):
+        text = GOAL.replace("## Next, in priority order", "## Next, in priority order" + HEADY)
+        with self.assertRaises(ValueError):
+            objective.set_next(text, "1. new\n")
+
     def test_the_section_reader_hides_a_block(self):
         text = GOAL.replace("Ship it.", "Ship it.\n" + HEADY)
         self.assertEqual(objective.section(text, "Outcome"), "Ship it.")
