@@ -186,6 +186,11 @@ class Base(unittest.TestCase):
     def assertAttemptsLogged(self, *rounds):
         self.assertEqual([line["round"] for line in self.attempts_log()], list(rounds))
 
+    def assertAsked(self, times=1):
+        """Codex was asked this many times so far: once per review that got as far as the reviewer."""
+        self.assertEqual(len(self.sb.calls_of("codex")), times,
+                         "the reviewer was asked %d time(s), not %d" % (len(self.sb.calls_of("codex")), times))
+
     def comments(self):
         return [c for c in self.sb.calls_of("gh") if c.argv[:2] == ["pr", "comment"]]
 
@@ -223,6 +228,7 @@ class GoPosted(Base):
         self.codex(answer="FINDING: none\nVERDICT: GO\nREASON: fine")
         result = self.review()
         self.assertEqual(result, br.ReviewResult(0, 1, "posted", "GO", self.round_file(1)))
+        self.assertAsked(1)
         (comment,) = self.comments()
         self.assertEqual(comment.argv, ["pr", "comment", str(PR), "--repo", REPO,
                                         "--body", self.body(1, "GO") + "\n\n    FINDING: none"])
@@ -266,6 +272,7 @@ class NoGoAndNoVerdict(Base):
         self.codex(answer="FINDING: boss_review.py:10 loses a round\nVERDICT: NO-GO")
         result = self.review()
         self.assertEqual(result, br.ReviewResult(3, 1, "posted", "NO-GO", self.round_file(1)))
+        self.assertAsked(1)
         (comment,) = self.comments()
         expected = self.body(1, "NO-GO") + "\n\n    FINDING: boss_review.py:10 loses a round"
         self.assertEqual(comment.argv[-1], expected)
@@ -285,6 +292,7 @@ class NoGoAndNoVerdict(Base):
                     self.codex(**stub)
                 result = self.review(**kw)
                 self.assertEqual(result, br.ReviewResult(4, 1, "no-verdict", None, self.round_file(1)))
+                self.assertAsked(0 if stub is None else 1)       # an absent Codex is not asked
                 self.assertEqual(self.comments(), [])
                 record = self.record(1)
                 self.assertEqual((record["reviewer"], record["verdict"], record["status"], record["kind"]),
@@ -305,6 +313,7 @@ class NoGoAndNoVerdict(Base):
                 self.setUp_clean()
                 self.codex(answer=answer)
                 self.assertEqual(self.review().exit_code, 4)
+                self.assertAsked(1)
                 self.assertEqual(self.comments(), [])
 
 
@@ -384,6 +393,7 @@ class Refused(Base):
         self.gh.set_pr(url="https://github.com/OWNER/rEpO/pull/5")
         self.codex(answer="VERDICT: GO")
         self.assertEqual(self.review().exit_code, 0)
+        self.assertAsked(1)
 
     def test_a_checkout_whose_head_is_not_the_pr_head_is_exit_two_with_nothing_claimed(self):
         self.gh.set_pr(headRefOid=OTHER_SHA)
@@ -460,6 +470,7 @@ class Moved(Base):
         expected = ["gh pr view", "gh pr diff", "gh pr view", "codex", "gh pr view",
                     "gh pr comment"]
         self.assertEqual(self.sequence(), expected)
+        self.assertAsked(1)
 
     def test_a_head_that_moved_during_the_review_posts_nothing_and_is_exit_six(self):
         for verdict, answer in (("GO", "VERDICT: GO"), ("NO-GO", "VERDICT: NO-GO"), (None, RAMBLE)):
@@ -469,6 +480,7 @@ class Moved(Base):
                 self.gh.configure(view=[{}, {}, {"patch": {"headRefOid": OTHER_SHA}}])
                 result = self.review()
                 self.assertEqual(result, br.ReviewResult(6, 1, "head-moved", verdict, self.round_file(1)))
+                self.assertAsked(1)
                 self.assertEqual(self.comments(), [])
                 record = self.record(1)
                 self.assertEqual((record["head_sha"], record["base"], record["status"], record["verdict"]),
@@ -482,6 +494,7 @@ class Moved(Base):
         self.gh.configure(view=[{}, {}, {"patch": {"baseRefName": "release"}}])
         result = self.review()
         self.assertEqual(result, br.ReviewResult(6, 1, "head-moved", "GO", self.round_file(1)))
+        self.assertAsked(1)
         self.assertEqual(self.comments(), [])
         self.assertEqual((self.record(1)["base"], self.record(1)["head_sha"]), ("main", self.head))
         self.assertAttemptsLogged(1)
@@ -498,6 +511,7 @@ printf 'VERDICT: GO\\n' > "$dest"''')
         result = self.review()
         self.assertEqual(result, br.ReviewResult(6, 1, "head-moved", "GO", self.round_file(1)))
         self.assertNotEqual(git(self.sb, self.checkout, "rev-parse", "HEAD"), self.head)
+        self.assertAsked(1)
         self.assertEqual(self.comments(), [])
         self.assertEqual(self.record(1)["head_sha"], self.head)
 
@@ -506,6 +520,7 @@ printf 'VERDICT: GO\\n' > "$dest"''')
         self.gh.configure(comment=[{"patch": {"headRefOid": OTHER_SHA}}])
         result = self.review()
         self.assertEqual(result, br.ReviewResult(0, 1, "posted", "GO", self.round_file(1)))
+        self.assertAsked(1)
         (comment,) = self.comments()
         self.assertEqual(comment.argv[-1], self.body(1, "GO", sha=self.head))
         self.assertNotIn(OTHER_SHA, comment.argv[-1])
@@ -523,6 +538,7 @@ class PostFailures(Base):
                 self.gh.configure(comment=[{"rc": 1, "err": "HTTP 502"}])
                 result = self.review()
                 self.assertEqual(result, br.ReviewResult(7, 1, "post-failed", verdict, self.round_file(1)))
+                self.assertAsked(1)
                 self.assertEqual(len(self.comments()), 1)
                 record = self.record(1)
                 self.assertEqual((record["status"], record["verdict"], record["reviewer"]),
@@ -536,6 +552,7 @@ class PostFailures(Base):
         result = self.review(io_timeout=1)
         self.assertLess(time.monotonic() - started, 15)
         self.assertEqual(result, br.ReviewResult(7, 1, "post-failed", "GO", self.round_file(1)))
+        self.assertAsked(1)
         self.assertEqual(len(self.comments()), 1, "the stub logged the call before it hung")
         self.assertEqual(self.record(1)["status"], "post-failed")
         self.assertAttemptsLogged(1)
@@ -546,6 +563,7 @@ class PostFailures(Base):
         first, second = self.review(), self.review()
         self.assertEqual((first.round, first.status, second.round, second.status),
                          (1, "post-failed", 2, "posted"))
+        self.assertAsked(2)                
         self.assertAttemptsLogged(1, 2)
         self.assertEqual(self.record(1)["status"], "post-failed", "no round file is edited after its write")
 
@@ -555,8 +573,10 @@ class WriteFailures(Base):
 
     def assertLockIsFree(self):
         """The failed run let go of the PR's lock: the next review is not held up by it."""
+        before = len(self.sb.calls_of("codex"))
         self.codex(answer="VERDICT: GO")
         self.assertEqual(self.review(io_timeout=2).exit_code, 0)
+        self.assertEqual(len(self.sb.calls_of("codex")) - before, 1, "the next review asked the reviewer once")
 
     def test_a_lock_or_directory_that_cannot_be_opened_claims_nothing_and_posts_nothing(self):
         self.codex(answer="VERDICT: GO")
@@ -576,6 +596,7 @@ class WriteFailures(Base):
         self.assertEqual(self.comments(), [])
         self.assertEqual(self.attempts_log(), [])
         self.assertEqual(self.round_names(), [])
+        self.assertAsked(1)
         self.assertLockIsFree()
         self.assertEqual(self.record(1)["round"], 1, "the failed run took no number")
 
@@ -586,6 +607,7 @@ class WriteFailures(Base):
         self.assertEqual(self.comments(), [])
         self.assertEqual(self.round_names(), [])
         self.assertAttemptsLogged()
+        self.assertAsked(1)
         self.gh.configure()
         self.assertLockIsFree()
 
@@ -601,6 +623,7 @@ class WriteFailures(Base):
                 self.assertEqual(self.comments(), [])
                 self.assertFalse(self.round_file(1, "out").exists())
                 self.assertAttemptsLogged()
+                self.assertAsked(1)
                 self.assertLockIsFree()
 
     def test_an_out_file_that_cannot_be_written_leaves_the_claimed_file_empty_and_posts_nothing(self):
@@ -611,6 +634,7 @@ class WriteFailures(Base):
         self.assertEqual(self.round_file(1).read_bytes(), b"")
         self.assertEqual(self.comments(), [])
         self.assertAttemptsLogged(1)
+        self.assertAsked(1)
         self.assertLockIsFree()
 
     def test_a_final_write_that_fails_after_the_post_leaves_the_comment_and_an_empty_claimed_file(self):
@@ -621,6 +645,7 @@ class WriteFailures(Base):
         self.assertEqual(len(self.comments()), 1)
         self.assertEqual(self.round_file(1).read_bytes(), b"")
         self.assertAttemptsLogged(1)
+        self.assertAsked(1)
         self.assertLockIsFree()
 
     def test_a_real_write_error_while_replacing_the_record_leaves_no_temporary_file(self):
@@ -628,6 +653,7 @@ class WriteFailures(Base):
         with mock.patch.object(os, "replace", side_effect=OSError("io error")):
             result = self.review()
         self.assertEqual((result.exit_code, result.status), (7, None))
+        self.assertAsked(1)
         self.assertEqual(sorted(p.name for p in self.pr_dir.iterdir() if p.name.startswith(".round")), [])
 
     def test_a_lock_held_by_another_process_past_the_wait_is_exit_seven_and_claims_nothing(self):
@@ -648,6 +674,7 @@ class WriteFailures(Base):
         self.assertEqual(self.comments(), [])
         self.assertEqual(self.round_names(), [])
         self.assertEqual(len(self.views()), 2, "the live read waits for the lock")
+        self.assertAsked(1)
 
 
 class Numbering(Base):
@@ -657,6 +684,7 @@ class Numbering(Base):
         self.codex(answer="VERDICT: GO")
         result = self.review()
         self.assertEqual((result.round, result.status), (2, "posted"))
+        self.assertAsked(1)
         self.assertEqual(self.round_file(1).read_bytes(), b"", "the leftover is not edited or deleted")
         self.assertEqual(self.comments()[0].argv[-1], self.body(2, "GO"))
 
@@ -666,6 +694,7 @@ class Numbering(Base):
         self.round_file(5, "out").touch()
         self.codex(answer="VERDICT: GO")
         self.assertEqual(self.review().round, 6)
+        self.assertAsked(1)
         self.assertEqual(self.round_file(6).name, "round06.json")
 
     def test_a_third_digit_is_a_longer_name_and_still_sorts_after_the_two_digit_ones(self):
@@ -675,6 +704,7 @@ class Numbering(Base):
         result = self.review()
         self.assertEqual((result.round, result.record.name), (100, "round100.json"))
         self.assertEqual(self.review().round, 101)
+        self.assertAsked(2)
 
 
 def mode(path):
@@ -701,6 +731,7 @@ class Privacy(Base):
 
     def test_directories_are_0700_and_files_0600_whatever_the_umask(self):
         self.assertEqual(self.review().exit_code, 0)
+        self.assertAsked(1)
         self.assertPrivate()
 
     def test_a_pm_directory_the_command_had_to_make_is_0700_and_one_that_exists_is_left_alone(self):
@@ -710,6 +741,7 @@ class Privacy(Base):
         os.chmod(self.sb.cfg / "pm", 0o755)
         self.review()
         self.assertEqual(oct(mode(self.sb.cfg / "pm")), oct(0o755), "pm is not the command's to tighten")
+        self.assertAsked(2)
 
     def test_wider_modes_that_already_exist_are_tightened_when_the_command_uses_them(self):
         self.pr_dir.mkdir(parents=True)
@@ -719,6 +751,7 @@ class Privacy(Base):
             f.touch()
             os.chmod(f, 0o644)
         self.assertEqual(self.review().exit_code, 0)
+        self.assertAsked(1)
         self.assertPrivate()
 
     def test_a_second_round_is_private_too_and_the_first_is_left_as_it_was(self):
@@ -727,6 +760,7 @@ class Privacy(Base):
         self.assertEqual(self.review().round, 2)
         self.assertEqual(oct(mode(self.round_file(2))), oct(0o600))
         self.assertEqual(oct(mode(self.round_file(1))), oct(0o644), "an old round is not touched")
+        self.assertAsked(2)
 
     def test_a_directory_that_is_a_symlink_is_refused_not_followed(self):
         outside = self.sb.root / "outside"
@@ -735,6 +769,7 @@ class Privacy(Base):
         self.reviews.mkdir(parents=True)
         (self.reviews / "owner").symlink_to(outside)
         self.assertEqual(self.review(), INFRA)
+        self.assertAsked(1)
         self.assertEqual(self.comments(), [])
         self.assertEqual(list(outside.iterdir()), [], "nothing was written through the link")
         self.assertEqual(oct(mode(outside)), oct(0o755), "its mode was not changed")
@@ -785,6 +820,7 @@ class Concurrency(Base):
                                     lambda: self.review(repo="owner/repo", author="Boris"))
         self.assertEqual(sorted(r.round for r in results), [1, 2])
         self.assertEqual({r.status for r in results}, {"posted"})
+        self.assertAsked(2)
         self.assertEqual(sorted(p.name for p in self.reviews.iterdir()), ["attempts.jsonl", "owner"])
         self.assertEqual(sorted(p.name for p in (self.reviews / "owner").iterdir()), ["repo"])
         self.assertEqual(sorted(p.name for p in self.pr_dir.glob("round*.json")),
@@ -809,6 +845,7 @@ class Concurrency(Base):
             t.join()
         slow, quick = results
         self.assertEqual((quick.round, slow.round), (1, 2))
+        self.assertAsked(2)
         self.assertEqual([c.argv[-1] for c in self.comments()],
                          [self.body(1, "GO", author="Quick"), self.body(2, "GO", author="Slow")])
         self.assertEqual((self.record(1)["author"], self.record(2)["author"]), ("Quick", "Slow"))
@@ -830,6 +867,7 @@ class Concurrency(Base):
             self.addCleanup(patcher.stop)
         results = self.run_together(lambda: self.review(author="Anna"), lambda: self.review(author="Boris"))
         self.assertEqual(sorted(r.round for r in results), [1, 2])
+        self.assertAsked(2)
         self.assertLess(self.record(1)["ts"], self.record(2)["ts"])
         self.assertEqual([line["ts"] for line in self.attempts_log()],
                          [self.record(1)["ts"], self.record(2)["ts"]])
@@ -867,6 +905,7 @@ class Contract(Base):
         self.codex(answer="VERDICT: GO", rc=3, err="warning: something")
         result = self.review()
         self.assertEqual((result.exit_code, result.status), (0, "posted"))
+        self.assertAsked(1)
         (attempt,) = self.record(1)["attempts"]
         self.assertEqual((attempt["reason"], attempt["exit_code"], attempt["stderr_tail"]),
                          ("answered", 3, "warning: something\n"))
@@ -879,6 +918,7 @@ class Contract(Base):
         self.assertEqual(sorted(str(p) for p in self.checkout.rglob("*") if ".git/" not in str(p)), before)
         self.assertEqual(git(self.sb, self.checkout, "status", "--porcelain"), "")
         self.assertEqual(list(self.sb.tmp.iterdir()), [])
+        self.assertAsked(1)
 
 
 class ChainChild(Base):
@@ -1110,6 +1150,7 @@ class OddWorktreeNames(Base):
                 odd = self.odd_checkout(name)
                 self.codex(answer="VERDICT: GO")
                 self.assertEqual(self.review(checkout=odd).exit_code, 0)
+                self.assertAsked(1)
                 self.assertEqual(len(self.comments()), 1)
 
 
@@ -1259,6 +1300,7 @@ class CommandLine(Base):
                 self.codex(answer=answer)
                 r = self.run_cli(*self.full())
                 self.assertEqual(r.returncode, exit_code, r.stderr)
+                self.assertAsked(1)
                 self.assertIn(str(self.round_file(1)), r.stdout)
                 self.assertEqual(r.stdout.count("\n"), 1)
 
