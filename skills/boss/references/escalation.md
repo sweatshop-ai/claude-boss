@@ -53,6 +53,8 @@ reply supersedes the timer.
   owner ran them, then looked for them on the card and found nothing.
   With a concierge, put the command in the message after `$ `: it carries it on
   its own card, where the owner is answering.
+- **A PR for the owner's merge is not an ask.** It goes to the desk with `desk ready` (SKILL.md P13/P14), not to a
+  Paste and an `ASK` per PR; the owner merges from the desk page.
 - **Say who is asking.** Open the message with your name and your track, and send one
   question per `ASK` (`references/concierge.md`): the owner reads the concierge's pane,
   where nothing else says who is asking.

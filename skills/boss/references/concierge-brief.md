@@ -27,6 +27,9 @@ reach them, in any words or language, send `REPORT <id>: <their words, verbatim>
 sender of that question and tell the owner in one line that you passed it on. You record
 nothing yourself.
 
+An `ASK` that only asks the owner to merge a PR is not a question: do not put it to them. Reply with
+`NO ANSWER <id>: a merge goes to the desk; run desk ready` and nothing else.
+
 Any other message is not for you. Reply in one line that you only take `ASK <id>:`,
 and do nothing with it. Above all, never put it to the owner.
 

@@ -969,6 +969,26 @@ class ConciergeTexts(unittest.TestCase):
         self.assertIn("one question per `ASK`", self.text("references", "escalation.md"))
 
 
+    def test_a_merge_for_the_owner_goes_to_the_desk_not_to_an_ask(self):
+        skill = self.text("SKILL.md")
+        p14 = skill[skill.index("### P13/P14."):skill.index("### P15.")]
+        self.assertIn("desk ready OWNER/REPO N --what", p14)
+        self.assertIn("--rec merge", p14)
+        self.assertIn("desk status OWNER/REPO N", p14)
+        self.assertIn("hooks/desk", p14)
+        self.assertIn("branch_deploys.py", p14)             # a deploying branch says so in --why until the desk checks it
+        self.assertIn("not to a Paste and an `ASK` per PR", p14)
+        self.assertIn("goes to the desk", self.text("references", "escalation.md"))
+        self.assertIn("desk ready", self.text("references", "concierge.md"))
+        self.assertIn("desk ready", self.text("references", "concierge-brief.md"))
+
+    def test_wrap_up_lists_the_desk_items_in_the_state_line(self):
+        skill = self.text("SKILL.md")
+        phase = skill[skill.index("## Phase E: Wrap-up"):skill.index("## Safety rules")]
+        state = phase[phase.index("Write the state line"):phase.index("Close the panes")]
+        self.assertIn("desk status", state)
+        self.assertIn("desk item", state)
+
     def test_wrap_up_saves_the_state_before_it_closes_a_pane(self):
         skill = self.text("SKILL.md")
         phase = skill[skill.index("## Phase E: Wrap-up"):skill.index("## Safety rules")]
