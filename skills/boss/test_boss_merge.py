@@ -1713,6 +1713,14 @@ class MergeQueue(Base):
         self.assertEqual(self.go(dry_run=True, graphql=[self.graphql(queue={"id": "MQ_1"})]), 3, self.err)
         self.assertEqual([m["decision"] for m in self.log()], ["refused"])
 
+    def test_the_rules_url_carries_a_slash_named_base_as_one_path_segment(self):
+        self.gh.set_pr(baseRefName="release/1.0")
+        self.put(1, base="release/1.0")
+        self.gh.configure(api=[{"raw": deploy_answer(GOOD_DEPLOY)}])
+        self.assertEqual(self.run_gate(), 0, self.err)
+        rules = [c.argv[1] for c in self.sb.calls_of("gh") if c.argv[0] == "api" and "/rules/branches/" in c.argv[1]]
+        self.assertEqual(rules, ["repos/%s/rules/branches/release%%2F1.0" % REPO])
+
     def test_a_base_without_a_queue_merges_and_the_reads_come_before_the_merge(self):
         self.assertEqual(self.go(), 0, self.err)
         argv = [c.argv[:2] for c in self.sb.calls_of("gh")]

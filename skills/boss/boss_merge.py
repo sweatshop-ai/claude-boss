@@ -338,7 +338,7 @@ def queue_problem(repo: str, pr: int, base: str, io_timeout: float) -> tuple[str
     or an auto-merge request or queue entry the PR already has. None when all of that was read and is absent. Fails
     closed: whatever cannot be read refuses (ticket 54: the gate never passes `--auto`, so on a base with no queue
     `gh pr merge` merges or fails and schedules nothing)."""
-    run = boss_review._spawn(["gh", "api", "repos/%s/rules/branches/%s" % (repo, urllib.parse.quote(base, safe="/"))],
+    run = boss_review._spawn(["gh", "api", "repos/%s/rules/branches/%s" % (repo, urllib.parse.quote(base, safe=""))],
                              io_timeout)
     try:
         if run.timed_out or run.code != 0:
