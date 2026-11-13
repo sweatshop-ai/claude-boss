@@ -1339,9 +1339,12 @@ class MergedBase(Base):
         self.deploy = {"raw": deploy_answer(DEPLOYING)}     # `main` deploys: only a Codex GO qualifies
         self.put(1, head_sha=SINCE)
 
-    def run_merged(self, changed, own_live, own_since, deploy=None, sha=SINCE, **kw):
-        """The entries after the deploy list, in call order: SINCE...head, base...head, base...SINCE."""
-        self.gh.configure(api=[deploy or self.deploy, {"raw": changed}, {"raw": own_live}, {"raw": own_since}])
+    def run_merged(self, changed, own_live, own_since, deploy=None, sha=SINCE, base_side=None, **kw):
+        """The entries after the deploy list, in call order: SINCE...head, base...head, base...SINCE, SINCE...base (what
+        the base changed since the GO'd head left it; by default, files the PR does not own)."""
+        base_side = base_side or compare_answer("src/other.py", status="diverged")
+        self.gh.configure(api=[deploy or self.deploy, {"raw": changed}, {"raw": own_live}, {"raw": own_since},
+                               {"raw": base_side}])
         return self.run_gate(merged_since=sha, **kw)
 
     def calls(self):
@@ -1363,11 +1366,12 @@ class MergedBase(Base):
                          ("codex-go-merged-base", SINCE, 1, HEAD))
         self.assertEqual(intent["decision"], "merging")
 
-    def test_the_three_compares_are_asked_in_order(self):
+    def test_the_four_compares_are_asked_in_order(self):
         self.run_merged(merge_compare("x.py"), compare_answer("m.py"), compare_answer("m.py"))
         self.assertEqual(self.calls(), ["repos/%s/compare/%s...%s" % (REPO, SINCE, HEAD),
                                         "repos/%s/compare/main...%s" % (REPO, HEAD),
-                                        "repos/%s/compare/main...%s" % (REPO, SINCE)])
+                                        "repos/%s/compare/main...%s" % (REPO, SINCE),
+                                        "repos/%s/compare/%s...main" % (REPO, SINCE)])
 
     def test_dry_run_decides_but_never_merges(self):
         self.assertEqual(self.run_merged(merge_compare("x.py"), compare_answer("m.py"), compare_answer("m.py"),
@@ -1438,13 +1442,56 @@ class MergedBase(Base):
                          self.err)
         self.assertEqual(self.calls(), ["repos/%s/compare/%s...%s" % (REPO, SINCE, HEAD),
                                         "repos/%s/compare/release%%2F1.0...%s" % (REPO, HEAD),
-                                        "repos/%s/compare/release%%2F1.0...%s" % (REPO, SINCE)])
+                                        "repos/%s/compare/release%%2F1.0...%s" % (REPO, SINCE),
+                                        "repos/%s/compare/%s...release%%2F1.0" % (REPO, SINCE)])
+
+    # ticket 54: a conflict resolved by keeping the reviewed version hides the base's change from SHA...head
+    def test_a_pr_file_that_the_base_changed_since_the_go_refuses_even_when_the_merge_kept_the_reviewed_text(self):
+        # SHA...head lists nothing of src/mine.py (the merge kept SHA's text), base...head and base...SHA both list it
+        for base_side in (compare_answer("src/mine.py", "src/other.py", status="diverged"),
+                          compare_answer("src/mine.py", status="ahead")):
+            with self.subTest(base_side):
+                self.refused("pr-file-changed-on-base", merge_compare("x.py"), compare_answer("src/mine.py"),
+                             compare_answer("src/mine.py"), base_side=base_side)
+                self.assertIn("src/mine.py", self.err)
+
+    def test_a_pr_file_the_base_renamed_refuses_by_either_name(self):
+        self.refused("pr-file-changed-on-base", merge_compare("x.py"), compare_answer("src/mine.py"),
+                     compare_answer("src/mine.py"), base_side=compare_answer(("src/new.py", "src/mine.py"),
+                                                                              status="diverged"))
+
+    def test_a_base_that_has_not_moved_since_the_go_merges(self):
+        for status in ("behind", "identical"):
+            with self.subTest(status):
+                self.assertEqual(self.run_merged(merge_compare("x.py"), compare_answer("m.py"), compare_answer("m.py"),
+                                                 base_side=compare_answer(status=status), dry_run=True), 0, self.err)
+
+    def test_a_base_compare_that_cannot_be_trusted_refuses(self):
+        for label, base_side, reason in (
+                ("failed", "nope", "compare-failed"),
+                ("truncated", compare_answer(*["f%d.py" % i for i in range(bm.COMPARE_FILES)], status="diverged"),
+                 "compare-truncated"),
+                ("no files listed", compare_answer(status="diverged"), "compare-no-files"),
+                ("an unexpected status", compare_answer("src/other.py", status="surprise"), "compare-not-ahead")):
+            with self.subTest(label):
+                self.refused(reason, merge_compare("x.py"), compare_answer("m.py"), compare_answer("m.py"),
+                             base_side=base_side)
+
+    def test_the_combination_refuses_a_pr_file_the_base_changed_before_it_reads_the_checks(self):
+        both = compare_answer("tests/a.py", status="diverged")
+        self.put(1, head_sha=SINCE, kind="provisional")
+        self.gh.configure(api=[self.deploy, {"raw": merge_compare("x.py")}, {"raw": both}, {"raw": both},
+                               {"raw": compare_answer("tests/a.py", status="diverged")},
+                               {"raw": checks_answer("success")}])
+        self.assertEqual(self.run_gate(merged_since=SINCE), 3, self.err)
+        self.assertEqual(self.last()["reason"], "pr-file-changed-on-base")
+        self.assertNotIn("check-runs", " ".join(c.argv[1] for c in self.gh_calls("api")))
 
     # rule 2 and rule 4 together: a provisional GO the PR earned as docs/tests-only, then main merged into it
     def combined(self, own_live, own_since, checks=None, deploy=None, **over):
         self.put(1, **dict({"head_sha": SINCE, "kind": "provisional"}, **over))
         self.gh.configure(api=[deploy or self.deploy, {"raw": merge_compare("x.py")}, {"raw": own_live},
-                               {"raw": own_since},
+                               {"raw": own_since}, {"raw": compare_answer("src/other.py", status="diverged")},
                                {"raw": checks if checks is not None else checks_answer("success", "skipped")}])
         return self.run_gate(merged_since=SINCE)
 

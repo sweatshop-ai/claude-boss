@@ -43,7 +43,10 @@ one, and its commits), base...head and base...SHA (the PR's own files, each at i
 compare is `ahead`, lists all its commits and holds a merge commit, and none of the PR's own files at either head is
 among the files that differ and the PR owns the same set of files at both heads (a merge that kept an old version of a file
 main changed would add one to the live head's set). The base-side files of a merge are not the PR's, so they do not count; anything the PR
-itself changed since the GO makes the PR's own files differ and refuses. The reason of a merge ends `-merged-base`.
+itself changed since the GO makes the PR's own files differ and refuses. A fourth compare, SHA...base, lists what the
+base changed since it left the GO'd head; a PR-owned file among them refuses (`pr-file-changed-on-base`, ticket 54): a
+conflict needs both sides to have changed the file, and keeping the reviewed text leaves it out of SHA...head. The reason
+of a merge ends `-merged-base`.
 
 Rule 2 (also ticket 50): a provisional GO on a base that deploys (exit 4 above) is let through when every file the PR
 changes (base...head, a rename by both names) matches `test_paths` or `DOCS_PATHS`, and the head's check runs are all
@@ -328,7 +331,7 @@ def read_compare(repo: str, since: str, head: str, io_timeout: float,
         return Compare("compare-failed", note="gh api compare listed no files")
     if data.get("status") not in statuses:
         return Compare("compare-not-ahead", note="the compare says %r" % (data.get("status"),))
-    if not files and data["status"] != "identical":     # commits on the head and no file listed: not trusted
+    if not files and data["status"] not in ("identical", "behind"):     # commits on the head and no file listed: not trusted
         return Compare("compare-no-files", note="the compare is %s and lists no file" % data["status"])
     if len(files) >= COMPARE_FILES:
         return Compare("compare-truncated", note="%d files is the API's limit, there may be more" % len(files))
@@ -459,6 +462,9 @@ def touched_by_the_pr(own: tuple, since_changes: tuple) -> list[str]:
     return [n for n in since_changes if n in own]
 
 
+BASE_SIDE_STATUSES = ("ahead", "diverged", "behind", "identical")   # SHA...base: `behind` is a base that has not moved on
+
+
 OWN_STATUSES = ("ahead", "diverged", "identical")       # a PR's files against a base that may have moved on
 
 
@@ -543,6 +549,15 @@ def merged_base(rounds: list[Round], since: str, seen: Pr, deploy: Deploy, owner
     moved = sorted(own_at[seen.head] ^ own_at[since])
     if moved:
         return refuse("pr-file-set-changed", "owned at one head only: " + ", ".join(moved[:5]))
+    # a merge that resolved a conflict in a PR file by keeping the reviewed text drops that file out of SHA...head and
+    # leaves it in both own sets, so none of the checks above sees it. A conflict needs both sides to have changed the
+    # file: refuse whenever the base changed a PR-owned file since it left the GO'd head, resolved or not (ticket 54)
+    on_base = read_compare(repo, since, seen.base, io_timeout, BASE_SIDE_STATUSES)
+    if on_base.problem:
+        return refuse(on_base.problem, on_base.note)
+    clash = touched_by_the_pr(tuple(own_at[seen.head] | own_at[since]), on_base.files)
+    if clash:
+        return refuse("pr-file-changed-on-base", "the base changed it since %s: %s" % (since[:12], ", ".join(sorted(set(clash))[:5])))
     if docs_tests:      # the PR's files are the same at both heads, so the GO'd head's own files are the live head's
         why = docs_tests_problem(tuple(own_at[seen.head]), seen.head, deploy, repo, io_timeout)
         if why:
