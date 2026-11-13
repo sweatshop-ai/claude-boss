@@ -685,6 +685,7 @@ class FailClosed(Base):
     def tearDown(self):
         # python3 is the stub here, so the chain never runs and codex is never reached
         self.sb.expect_unused("codex")
+        super().tearDown()
 
     @staticmethod
     def whole_result(reviewer="codex", word="APPROVE", reason="chain reason"):

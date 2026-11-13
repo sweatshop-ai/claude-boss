@@ -4,7 +4,7 @@
 
 `boss-run` is the gate's own reviewer path, so the reads say what the test is about, not only that a log was touched. How each test now reads its stubs, with no existing assertion weakened or removed:
 - Every test that runs a review through Codex asserts `len(sandbox.calls_of("codex"))`: 1 for a single run, and for a test that loops, one call per command (`HardRules`: the nine commands that are not a merge), per answer (`VerdictParsing`: eleven cases; the tab and no-space test: two) or per round (the approve-noise test: one, then two).
-- Where Opus answers, `calls_of("claude")` is 1; where Codex answered or a hard rule stopped the run, `claude` stays `assertNotCalled`, as it already did in most.
+- Where Opus answers, `calls_of("claude")` is 1; where Codex answered, `claude` stays `assertNotCalled`, as it already did in most.
 - The tests with a second sandbox read it too: the non-zero-exit test (`claude` once in the second) and the Codex-progress test (`codex` once in the second, which ends in exit 4).
 - The `FailClosed` tests make `python3` a stub, so the chain never runs and the approving `codex` that `setUp` installs is never reached: a `tearDown` says `expect_unused("codex")`.
 
