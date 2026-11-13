@@ -24,6 +24,17 @@ Fixed by ticket 51 (merged, PR 146), each pinned by a test in `skills/boss/test_
 2. Rules 2 and 4 combining on a deploying base: `MergedBase.test_a_docs_tests_only_pr_with_a_provisional_go_that_merged_main_merges_on_a_deploying_base` and `test_the_combination_keeps_every_condition_of_both_rules`.
 3. Empty owned-file sets: `MergedBase.test_a_pr_that_owns_no_file_at_either_head_refuses_whatever_the_status` (`pr-owns-nothing`, `compare-no-files`).
 
+## Round 2: the base can move between the check and the merge (Chiara, 2026-11-13)
+
+Codex round 1 (NO-GO, 82,323 tokens): the compares used the branch name `main` and `gh pr merge` pins only the head, so a base that advances after the check and touches a PR file merges unchecked. Judged class c: GitHub merges the head into the base as a 3-way merge, so a later base change either merges cleanly and is kept, or conflicts and leaves the PR unmergeable; nothing is silently dropped (the drop in the defect above needs the conflict resolved inside the head, which is pinned). The blockers on PR 145 and 146 only clear on a Codex GO, so the window is narrowed anyway (the owner's decision, which does not change the rule that a second round follows a class a or b finding):
+
+1. `merge` reads the base branch's tip once (`gh api repos/R/git/ref/heads/<base>`), records it in the `merges.jsonl` line (`base_sha`) and makes every compare against that sha (`base...head`, `base...SHA`, `SHA...base`), not the name. The deploy list is still read by branch name.
+2. Right before `gh pr merge` (and before the "merging" intent line) it reads the tip again; a different sha refuses with `base-moved` (exit 3, nothing merged), and the next run re-checks.
+3. After the merge, the post-merge check reads the merge commit's first parent; if it is not the recorded sha, or cannot be read, `boss-alert` says which PR, both shas and that the owner must check by hand (`base-moved-during-merge`, `unverified`, exit 5). A merge cannot be undone, but it is not silent.
+4. Tests: class `BaseTip` in `test_boss_merge.py` pins each step.
+
+**Accepted window:** between the second read and the merge there are milliseconds. A base that moves in it is merged by GitHub as a 3-way merge, which keeps the base's change or refuses on a conflict, never drops it, and step 3 reports it afterwards. Closing it entirely needs a merge call that pins the base, which `gh pr merge` does not offer.
+
 ## Done when
 
 - [x] Tests first, red, then green (`MergedBase`: the base changes a PR file, a rename, a base that has not moved, an untrusted base compare, the combination)

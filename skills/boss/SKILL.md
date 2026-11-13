@@ -736,6 +736,9 @@ runs at about 75k tokens each used up the weekly Codex quota.
    the conflict: a conflict needs both sides to have changed the file, and a resolution that
    keeps the reviewed text hides the base's change from `<reviewed>...head`. Such a merge gets
    the diff check by hand, and so does one where the base changed 300 files or more.
+   The gate reads the base's tip once and makes every compare against that sha, reads it again
+   right before `gh pr merge` (moved: `base-moved`, run it again), and after the merge alerts if the
+   merge commit's first parent is not that sha: check what was merged by hand.
 5. Re-measure on 2026-11-27: tokens, minutes and findings per PR, before the grades are
    touched again.
 
