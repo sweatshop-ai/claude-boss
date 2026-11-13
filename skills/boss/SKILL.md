@@ -80,6 +80,32 @@ with the reason. The non-delegable list is refused before any reviewer sees it.
 boss-run --why "<what this is for>" [--cwd DIR] [--dry-run] -- <command ...>
 ```
 
+**`boss-run` runs an argument list, never a shell string, and only a short list of programs.**
+It executes your command directly, with no `bash -c`, and the reviewer reads exactly that
+list. Give it several arguments (`boss-run … -- gh pr comment 5 --body-file /x.md`), or one
+argument that is plain words and quotes. It refuses (exit 5, the rule named, nothing run, no
+reviewer asked):
+
+- a command that holds `$` (no variables, `$(…)` or `${…}`), a backtick, `\`, `;` `&` `|` `<`
+  `>`, `( ) { }`, an unquoted `* ? [ ~ !`, a comment, a heredoc or a newline outside quotes;
+- every program but these: `gh`, `git`, `cp`, `mv`, `mkdir`, `touch`, `rm`, `ls`, `cat`, `head`,
+  `tail`, `jq`, `grep`, `rg`, `date`, and `systemctl status|show`. **`bash`, `sh` and `python3`
+  are refused on purpose** (so are `env`, `find`, `sed`, `curl`, `tar`, `ssh`, `docker` and every
+  other program): a boss that needs a script dispatches it to a worker, as the Cardinal Rule
+  says. A program is named bare (`gh`, never `/usr/bin/gh`) and boss-run finds it itself, in
+  fixed directories, not on PATH;
+- `gh` outside `pr` (view, list, create, comment, checks, diff, close, reopen, edit, ready,
+  review, status, checkout), `issue`, `run`, `workflow`, `label`, `repo view|list` and `api`;
+  `gh pr merge` always (use `boss_merge.py`); a `gh` alias;
+- `git` outside worktree, push, merge, commit, branch, pull, add, restore, fetch, status, log,
+  diff, show and rev-parse; `git -c`, `--config-env` and any option before the subcommand but
+  `-C <dir>`; options that run a program (`--upload-pack`, `--exec`, `-s`);
+- `systemctl restart|stop|start`: a restart goes to the owner;
+- `cp`, `mv`, `mkdir`, `touch` and `rm` on `.git`, hooks, shell startup files, ssh keys, gh/git/
+  systemd config and boss-run's own rule files.
+
+A pipe or a redirection stays outside, in your own shell: `boss-run … -- gh pr view 5 | tail`.
+
 A `PreToolUse` hook warns and logs when you stray (`~/.claude/pm/boss-guard.log`).
 It does not block you — if a call really is coordination, say why and carry on.
 
@@ -913,7 +939,7 @@ exists only in a message**, whoever produced it.
 merging, `--merged-base-since SHA` (the head of the last GO) allows a head that is that head plus a merge of the base when none of the PR's own files differ (not together with the next flag), and `--test-only-since SHA`, the head of the last GO, allows fixes after it that touch only the repo's test paths (`test_paths` in `.boss/deploy.json`; `*` crosses `/`, so anchor a pattern to a directory: `tests/*`, not `*test_*.py`). Its exit
 codes: 0 merged, 3 and 4 refused, 5 failed or unverified (the merge or the check after it), 7 a read failed. A
 refusal (3 or 4) is an instruction to get the right review, not to work around it. `boss-run` refuses a merge typed
-by hand under the hard rule `PR merge outside boss_merge`. The gate has three limits. A `gh pr merge` typed by hand
+by hand under the hard rule `PR merge outside boss_merge`, which reads the literal argument list it will run. The gate has three limits. A `gh pr merge` typed by hand
 in a worker's or the owner's own shell is outside the gate, and only branch protection on the repo closes that, which
 the plugin cannot set. A base retargeted between the check and the merge is detected after the fact (exit 5,
 `base-changed`) and not prevented. The gate trusts the repo's `.boss/deploy.json`, so a listed branch that later

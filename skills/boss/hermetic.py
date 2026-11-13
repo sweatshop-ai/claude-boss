@@ -36,7 +36,7 @@ BOSS_RUN = HERE / "bin" / "boss-run"
 
 # The real binaries a boss-run needs, and nothing else.
 TOOLS = ("bash sh env jq date mkdir mktemp cat grep sed tr head tail rm timeout "
-         "dirname readlink sleep touch wc python3 sort cut setsid").split()
+         "dirname readlink sleep touch wc python3 sort cut setsid cp mv ls git").split()
 # Names that must never resolve to a real binary inside the sandbox.
 FORBIDDEN = ("codex", "claude", "gh", "tmux")
 
@@ -119,11 +119,14 @@ class Sandbox:
                   self.work, self.tmp, self.side):
             d.mkdir()
         try:
-            for name in (*TOOLS, *extra_tools):
+            for name in dict.fromkeys((*TOOLS, *extra_tools)):
                 real = shutil.which(name)
                 if real is None:
                     raise RuntimeError("sandbox needs the real %r on PATH" % name)
                 (self.tools / name).symlink_to(os.path.abspath(real))
+            # boss-run resolves argv[0] from fixed directories, never from PATH; the owner's file names
+            # more, and here that is the sandbox: its stubs, then its tools.
+            (self.cfg / "boss-run-trusted-path").write_text("%s\n%s\n" % (self.stubs, self.tools))
             self._bash = os.path.abspath(shutil.which("bash"))
             self.env = {
                 "PATH": "%s:%s" % (self.stubs, self.tools),
@@ -218,9 +221,16 @@ class Sandbox:
         """
         return self._write_stub(name, [*self._prologue(name), body])
 
+    def gate_passthrough(self):
+        """A bash line for a `python3` stub: boss-run's argument gate (argv_gate.py) runs on the
+        real python3 and is not logged. The stub stands in for the reviewer chain only."""
+        return ('case "$*" in *argv_gate.py*) exec %s "$@" ;; esac'
+                % shlex.quote(os.path.realpath(self.tools / "python3")))
+
     def _prologue(self, name):
         return [
             "#!" + self._bash,
+            *([self.gate_passthrough()] if name == "python3" else []),
             "R=" + shlex.quote(str(self.root)),
             'ID="$(date +%%s%%N)-%s"' % name,
             'if [ "$#" -gt 0 ]; then printf \'%s\\0\' "$@" > "$R/calls/$ID.argv"; '
