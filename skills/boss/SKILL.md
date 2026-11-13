@@ -693,11 +693,29 @@ rounds the PR's size and risk allow (below). When the rounds run out, what is st
 becomes a ticket and the PR merges, unless an open finding is of class a. A verdict on an
 older head is not a verdict on the head you merge: fixes after the last GO get one
 more run unless they are test-only and the reviewed production code is byte-identical
-(say so in the PR). The merge rule: a Codex GO on the head that merges may merge; a GO that is not Codex's (a
+(say so in the PR). A merge of main into the branch is not a fix: see "Review by risk"
+below, which also decides which PRs Codex reviews at all. The merge rule: a Codex GO on the head that merges may merge; a GO that is not Codex's (a
 provisional fallback review, or the owner's merge on tests alone) may merge only on a branch the
 repo marks non-deploying, which `boss_merge.py` decides; anything else does not merge. No plan is
 dispatched from without a Codex GO. A reviewer that fabricates citations can still be right on substance:
 check the citations, then judge the finding.
+
+**Review by risk: Codex reviews once, and only code that touches gates, security, deploys or
+data (the owner, 2026-11-13; it overrides the size grades below where they differ).** The
+Codex re-reviews of 30 merged PRs found 6 real bugs, all in gate or security code, and 31
+runs at about 75k tokens each used up the weekly Codex quota.
+
+1. Codex reviews a PR once, and only a PR whose code touches gates (merge, review, claim,
+   guard or consent code), security (the sensitive list below), deploys or data.
+2. A tests-only or docs-only PR merges on green CI with at most one Opus pass (the
+   `boss_review.py` command, which falls to Opus where Codex does not run).
+3. A second review round happens only after a class a or b finding, never after class c or d.
+4. After main is merged into a branch there is no re-settle comment and no new review. You
+   check that the code files are byte-identical to the reviewed head:
+   `git diff <reviewed> <final> -- <files>` is empty, where `<files>` are the PR's own code
+   files, and say so in the PR.
+5. Re-measure on 2026-11-27: tokens, minutes and findings per PR, before the grades are
+   touched again.
 
 **How many rounds: graded by risk and size (the owner, 2026-11-05).** PR 11 ran twelve
 rounds and its late findings were edge cases of the wrapper itself; a flat cap
@@ -1009,7 +1027,10 @@ Parse `$ARGUMENTS`: empty or `status` → **A** · `dispatch <task> [worker]` �
    three. I decide sensitive (login, auth or access rights; secrets, and code that screens
    them; deleting, migrating or overwriting data; anything on a production host; a CI
    workflow that runs an AI agent) and record it on the PR; you may raise it, never lower
-   it; in doubt it is sensitive. Over 500 added lines: split first. Findings that are only
+   it; in doubt it is sensitive. Only a PR that touches gates, security, deploys or data gets
+   Codex at all; a tests-only or docs-only PR gets at most one Opus pass; a second round only
+   after a class a or b finding; after a merge of main there is no new review, you check the
+   code files are byte-identical to the reviewed head. Over 500 added lines: split first. Findings that are only
    tests, docs, style or far-fetched cases become tickets and the review ends; the PR
    merges on its last GO. The standards review (`code-review`) runs once per PR,
    not on every head."* For a branch that deploys nothing, add: *"Run only the test files your
