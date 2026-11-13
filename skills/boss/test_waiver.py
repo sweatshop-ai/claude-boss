@@ -136,6 +136,7 @@ class Recorded(Base):
         self.consent(cmd)
         self.assertEqual(self.waive(cmd).exit_code, 0, self.err)
         self.assertEqual(marker.read_text().strip(), os.path.realpath(self.checkout))
+        self.assertEqual(len(self.comments()), 1)
 
     def test_the_comment_and_the_record_show_the_command_redacted(self):
         secret = "ghp_" + "a" * 36
@@ -150,6 +151,7 @@ class Recorded(Base):
     def test_a_second_waiver_is_round_two(self):
         self.assertEqual(self.waive().round, 1)
         self.assertEqual(self.waive().round, 2)
+        self.assertEqual(len(self.comments()), 2)
 
 
 class Refused(Base):
@@ -195,6 +197,7 @@ class Refused(Base):
     def test_the_timeout_is_the_policys(self):
         self.assertEqual(policy.WAIVE_TEST_TIMEOUT, 900)
         self.assertEqual(policy.CONSENT_TTL, 600)
+        self.sb.expect_unused("gh")
 
     def test_a_dirty_checkout_before_the_tests(self):
         (self.checkout / "scratch.txt").write_text("x")      # untracked files count
@@ -269,6 +272,7 @@ class TheTokenIsChecked(Base):
             with self.subTest(delta):
                 got, why, _ = consent.check(TRACK, digest, now=issued + delta)
                 self.assertEqual(got, ok, why)
+        self.sb.expect_unused("gh")
 
     def test_a_token_that_expired_refuses_the_waiver(self):
         self.consent(CMD, now=time.time() - policy.CONSENT_TTL - 5)
@@ -361,6 +365,7 @@ class Infrastructure(Base):
         result = self.waive()
         self.assertEqual((result.exit_code, result.status), (7, "post-failed"), self.err)
         self.assertEqual(json.loads(result.record.read_text())["status"], "post-failed")
+        self.assertEqual(len(self.comments()), 1)
 
     def test_a_gh_that_fails(self):
         self.gh.configure(view=[{"rc": 1}])
@@ -384,11 +389,13 @@ class Usage(Base):
         for track in ("../x", "", "A b", "a/b"):
             with self.assertRaises(ValueError):
                 br.waive(REPO, PR, str(self.checkout), AUTHOR, track, CMD)
+        self.sb.expect_unused("gh")
 
     def test_an_empty_command(self):
         for cmd in ("", "  ", "a\0b"):
             with self.assertRaises(ValueError):
                 br.waive(REPO, PR, str(self.checkout), AUTHOR, TRACK, cmd)
+        self.sb.expect_unused("gh")
 
     def cli(self, *argv):
         err = io.StringIO()
@@ -419,6 +426,7 @@ class Usage(Base):
     def test_the_command_line_exit_5_on_a_refusal(self):
         self.token_file().unlink()
         self.assertEqual(self.cli(*self.WAIVE, "--checkout", str(self.checkout)), 5)
+        self.assertNothingRecorded()
 
 
 class Choose(Base):
@@ -433,6 +441,7 @@ class Choose(Base):
         rc, msg = codex_blocker.choose(TRACK, "tests-alone", test_cmd=CMD)
         self.assertEqual(rc, 0, msg)
         self.assertEqual(codex_blocker.choice(TRACK)[2], "tests-alone")
+        self.sb.expect_unused("gh")
 
     def test_tests_alone_is_denied_without_the_token_and_writes_nothing(self):
         self.token_file().unlink()
@@ -440,23 +449,27 @@ class Choose(Base):
         rc, msg = codex_blocker.choose(TRACK, "tests-alone", test_cmd=CMD)
         self.assertEqual(rc, 2, msg)
         self.assertEqual(self.tracker.read_text(), before)
+        self.sb.expect_unused("gh")
 
     def test_tests_alone_is_denied_for_another_command_or_none(self):
         before = self.tracker.read_text()
         for cmd in ("/bin/false", None, ""):
             self.assertEqual(codex_blocker.choose(TRACK, "tests-alone", test_cmd=cmd)[0], 2, cmd)
         self.assertEqual(self.tracker.read_text(), before)
+        self.sb.expect_unused("gh")
 
     def test_wait_and_accept_fallback_need_no_token(self):
         self.token_file().unlink()
         self.assertEqual(codex_blocker.choose(TRACK, "wait")[0], 0)
         self.assertEqual(codex_blocker.choose(TRACK, "accept-fallback")[0], 0)
+        self.sb.expect_unused("gh")
 
     def test_revoking_to_wait_after_tests_alone_is_free(self):
         self.assertEqual(codex_blocker.choose(TRACK, "tests-alone", test_cmd=CMD)[0], 0)
         self.token_file().unlink()
         self.assertEqual(codex_blocker.choose(TRACK, "wait")[0], 0)
         self.assertEqual(codex_blocker.choice(TRACK)[2], "wait")
+        self.sb.expect_unused("gh")
 
     def test_the_command_line(self):
         script = HERE / "codex_blocker.py"
@@ -470,6 +483,7 @@ class Choose(Base):
         self.assertEqual(denied.returncode, 2, denied.stderr)
         self.assertEqual(run("--choose", TRACK, "tests-alone").returncode, 2)
         self.assertEqual(self.lines(), [])
+        self.sb.expect_unused("gh")
 
 
 class Question(unittest.TestCase):
