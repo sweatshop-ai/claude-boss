@@ -328,6 +328,37 @@ def read_first_parent(repo: str, commit: str, io_timeout: float) -> str:
     return sha
 
 
+_QUEUE_QUERY = ("query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name)"
+                "{pullRequest(number:$number){state autoMergeRequest{enabledAt} isInMergeQueue}}}")
+
+
+def stop_queued_merge(repo: str, pr: int, io_timeout: float) -> str:
+    """After a `gh pr merge` that left the PR unmerged (queued, or auto-merge enabled): turn auto-merge off and read
+    back that no auto-merge request and no merge-queue entry is left. "" when verified off, else why not (ticket 54:
+    a merge that completes later is made on a base tip nobody compared)."""
+    run = boss_review._spawn(["gh", "pr", "merge", str(pr), "--repo", repo, "--disable-auto"], io_timeout)
+    if run.timed_out or run.code != 0:
+        return "gh pr merge --disable-auto %s" % ("ran past %ss" % io_timeout if run.timed_out else
+                                                  "failed (%s): %s" % (run.code, run.err.strip()[-200:]))
+    owner, _, name = repo.partition("/")
+    run = boss_review._spawn(["gh", "api", "graphql", "-f", "query=" + _QUEUE_QUERY, "-f", "owner=" + owner,
+                              "-f", "name=" + name, "-F", "number=%d" % pr], io_timeout)
+    try:
+        if run.timed_out or run.code != 0:
+            raise ValueError("the read-back failed")
+        node = json.loads(run.out.decode("utf-8"))["data"]["repository"]["pullRequest"]
+        auto, queued, state = node["autoMergeRequest"], node["isInMergeQueue"], node["state"]
+        if type(queued) is not bool or not isinstance(state, str):
+            raise ValueError("a field of the wrong kind")
+    except (ValueError, KeyError, TypeError, RecursionError):
+        return "it could not be verified that auto-merge and the merge queue are off"
+    if state == "MERGED":
+        return "the PR merged meanwhile"
+    if auto is not None or queued:
+        return "after --disable-auto the PR still has %s" % ("a merge-queue entry" if queued else "an auto-merge request")
+    return ""
+
+
 class Compare(NamedTuple):
     problem: str | None         # None, or the reason the compare cannot be used
     files: tuple = ()           # every name a changed file had, before and after a rename
@@ -687,7 +718,7 @@ def merge(repo: str, pr: int, *, dry_run: bool = False, since: str | None = None
         if not isinstance(state, str) or not isinstance(now_base, str):
             raise GhRead("wrong kind")
         problem = None if state == "MERGED" and now_base == seen.base else \
-            "not-merged" if state != "MERGED" else "base-changed"
+            "merge-not-completed" if state != "MERGED" else "base-changed"
         if problem is None:
             oid = (after.get("mergeCommit") or {}).get("oid")
             if not isinstance(oid, str) or not boss_review._SHA.fullmatch(oid):
@@ -698,9 +729,14 @@ def merge(repo: str, pr: int, *, dry_run: bool = False, since: str | None = None
     except (GhRead, KeyError, AttributeError):
         state, now_base, problem = None, None, "unverified"
     if problem:
+        undone = ""
+        if problem == "merge-not-completed":        # queued, or auto-merge on: it would merge later, on a tip nobody compared
+            why = stop_queued_merge(repo, pr, io_timeout)
+            undone = ("; the queued merge was stopped (auto-merge off, not in a merge queue)" if not why else
+                      "; THE MERGE MAY STILL COMPLETE LATER on an unchecked base (%s): the owner must stop it by hand" % why)
         _alert("boss_merge: %s#%d (head %s) after gh pr merge: %s (state %s, base %s, checked on %s, compares made on %s, "
-               "merge made on %s). A merge cannot be undone: the owner must check by hand what was merged"
-               % (key, pr, seen.head, problem, state, now_base, seen.base, seen.base_sha, merged_on))
+               "merge made on %s)%s. A merge cannot be undone: the owner must check by hand what was merged"
+               % (key, pr, seen.head, problem, state, now_base, seen.base, seen.base_sha, merged_on, undone))
         return finish(EXIT_MERGE_FAILED, problem, "failed")
     return finish(EXIT_MERGED, got.reason, "merged")
 

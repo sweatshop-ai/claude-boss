@@ -84,6 +84,10 @@ if argv[:2] == ["pr", "view"]:
         fields = argv[argv.index("--json") + 1].split(",")
         sys.stdout.write(json.dumps({f: state[f] for f in fields if f not in e.get("drop", [])}))
     finish({"rc": e.get("rc", 0), "err": e.get("err", "")})
+if argv[:2] == ["pr", "merge"] and "--disable-auto" in argv:
+    e = entry("disable")
+    patched(e, {"autoMerge": None, "inQueue": False})
+    finish(e)
 if argv[:2] == ["pr", "merge"]:
     e = entry("merge")
     if e.get("probe"):       # what the gate holds while it merges: the PR's lock, and a line saying it is about to
@@ -104,6 +108,12 @@ if argv[:2] == ["pr", "diff"]:
 if argv[:2] == ["pr", "comment"]:
     e = entry("comment")
     patched(e)
+    finish(e)
+if argv[:2] == ["api", "graphql"]:        # the read-back after --disable-auto (ticket 54)
+    e = entry("graphql")
+    state = patched(e)
+    sys.stdout.write(e["raw"] if "raw" in e else json.dumps({"data": {"repository": {"pullRequest": {
+        "state": state["state"], "autoMergeRequest": state["autoMerge"], "isInMergeQueue": state["inQueue"]}}}}))
     finish(e)
 if argv[0] == "api" and "/git/ref/heads/" in argv[1]:       # the base branch's tip (ticket 54)
     e = entry("ref")
@@ -143,7 +153,7 @@ class MergeGh:
         (self.side / "gh_handler.py").write_text(GH_HANDLER, encoding="utf-8")
         self.set_pr(number=PR, url="https://github.com/%s/pull/%d" % (REPO, PR), headRefOid=head,
                     baseRefName="main", state="OPEN", title=TITLE, body=BODY, diff=DIFF, baseSha=BASE_SHA,
-                    mergeParent=BASE_SHA, mergeCommit={"oid": MERGE_SHA})
+                    mergeParent=BASE_SHA, mergeCommit={"oid": MERGE_SHA}, autoMerge=None, inQueue=False)
         self.configure()
         sb.stub_script("gh", 'exec python3 "$R/side/gh_handler.py" "$R/side" "$@"')
 
@@ -179,6 +189,8 @@ class Gate:
         self.assertEqual(self.sb.calls_of("codex"), [], "codex was called")
         for call in self.sb.calls_of("gh"):
             argv = call.argv
+            if argv[:2] == ["api", "graphql"]:
+                continue
             if argv[0] == "pr":
                 self.assertEqual(argv[argv.index("--repo") + 1].lower() if "--repo" in argv else None, KEY, argv)
             else:
@@ -211,7 +223,8 @@ class Gate:
 
     @staticmethod
     def _base_call(call):
-        return call.argv[0] == "api" and ("/git/ref/heads/" in call.argv[1] or call.argv[1].endswith("/commits/" + MERGE_SHA))
+        return call.argv[0] == "api" and (call.argv[1] == "graphql" or "/git/ref/heads/" in call.argv[1]
+                                          or call.argv[1].endswith("/commits/" + MERGE_SHA))
 
     def gh_calls(self, *prefix):
         """The calls that start with `prefix`; the reads of the base's tip and of the merge commit are `base_calls`."""
@@ -221,7 +234,10 @@ class Gate:
         return [c.argv[1] for c in self.sb.calls_of("gh") if self._base_call(c)]
 
     def merges(self):
-        return self.gh_calls("pr", "merge")
+        return [c for c in self.gh_calls("pr", "merge") if "--disable-auto" not in c.argv]
+
+    def disables(self):
+        return [c for c in self.gh_calls("pr", "merge") if "--disable-auto" in c.argv]
 
     def log(self):
         path = self.reviews / "merges.jsonl"
@@ -815,7 +831,7 @@ class Command(Base):
                 self.put(1)
                 before = len(self.alerts())
                 self.assertEqual(self.run_gate(), 5)
-                self.assertEqual(self.last()["reason"], "not-merged")
+                self.assertEqual(self.last()["reason"], "merge-not-completed")
                 self.assertEqual(len(self.alerts()), before + 1)
                 self.assertEqual(self.alerts()[-1].argv[0], "0")
 
@@ -838,7 +854,7 @@ class Command(Base):
         self.put(1)
         self.assertEqual(self.run_gate(), 5)
         self.assertIn("boss-alert 0 failed (1)", self.err)
-        self.assertEqual(self.last()["reason"], "not-merged")
+        self.assertEqual(self.last()["reason"], "merge-not-completed")
 
     def test_an_alert_that_cannot_be_started_is_said_and_the_exit_code_stands(self):
         with mock.patch.dict(os.environ, {"BOSS_ALERT": str(self.sb.root / "nope")}):
@@ -1646,6 +1662,94 @@ class BaseTip(Base):
                 self.assertEqual(self.last()["reason"], "unverified")
                 self.assertEqual(len(self.alerts()), before + 1)
                 self.assertIn("by hand", self.alerts()[-1].argv[1])
+
+
+class QueuedMerge(Base):
+    """Ticket 54: `gh pr merge` that returns without merging (a merge queue, or auto-merge) is stopped, and said so."""
+
+    def merge_returns(self, state="OPEN", **cfg):
+        """The gate on a PR whose `gh pr merge` leaves it in `state`, with `cfg` for the other stub entries."""
+        self.gh.configure(**dict({"api": [{"raw": deploy_answer(GOOD_DEPLOY)}]}, **cfg))
+        self.gh.set_pr(state="OPEN", autoMerge=None, inQueue=False)
+        self.put(1)
+        return self.run_gate()
+
+    def assert_refused(self):
+        self.assertEqual((self.last()["decision"], self.last()["exit"], self.last()["reason"]),
+                         ("failed", 5, "merge-not-completed"))
+        (alert,) = self.alerts()
+        self.assertEqual(alert.argv[0], "0")
+        for text in ("owner/repo#5", "merge-not-completed", "by hand"):
+            self.assertIn(text, alert.argv[1])
+        return alert.argv[1]
+
+    def test_a_queued_merge_is_disabled_verified_off_refused_and_alerted(self):
+        self.assertEqual(self.merge_returns(merge=[{"patch": {"state": "OPEN", "inQueue": True}}]), 5, self.err)
+        self.assertEqual([c.argv for c in self.disables()],
+                         [["pr", "merge", str(PR), "--repo", REPO, "--disable-auto"]])
+        self.assertIn("was stopped", self.assert_refused())
+        graphql = [c for c in self.sb.calls_of("gh") if c.argv[:2] == ["api", "graphql"]]
+        self.assertEqual(len(graphql), 1)
+
+    def test_an_auto_merge_that_was_enabled_is_disabled_too(self):
+        self.assertEqual(self.merge_returns(merge=[{"patch": {"state": "OPEN", "autoMerge": {"enabledAt": "t"}}}]), 5,
+                         self.err)
+        self.assertEqual(len(self.disables()), 1)
+        self.assertIn("was stopped", self.assert_refused())
+
+    def test_a_disable_that_fails_alerts_that_the_merge_may_still_complete(self):
+        self.assertEqual(self.merge_returns(merge=[{"patch": {"state": "OPEN", "inQueue": True}}],
+                                            disable=[{"rc": 1, "err": "boom"}]), 5, self.err)
+        text = self.assert_refused()
+        self.assertIn("MAY STILL COMPLETE", text)
+        self.assertIn("--disable-auto failed", text)
+
+    def test_a_disable_that_does_not_take_effect_alerts_the_same(self):
+        self.assertEqual(self.merge_returns(merge=[{"patch": {"state": "OPEN", "inQueue": True}}],
+                                            disable=[{"patch": {}}]), 5, self.err)
+        text = self.assert_refused()
+        self.assertIn("MAY STILL COMPLETE", text)
+        self.assertIn("merge-queue entry", text)
+
+    def test_a_still_enabled_auto_merge_after_the_disable_alerts_the_same(self):
+        self.assertEqual(self.merge_returns(merge=[{"patch": {"state": "OPEN", "autoMerge": {"enabledAt": "t"}}}],
+                                            disable=[{"patch": {}}]), 5, self.err)
+        self.assertIn("an auto-merge request", self.assert_refused())
+
+    def test_a_read_back_that_cannot_be_verified_alerts_that_the_merge_may_still_complete(self):
+        for label, graphql in (("fails", {"rc": 1, "err": "boom"}), ("not json", {"raw": "no"}),
+                               ("no pull request", {"raw": json.dumps({"data": {"repository": None}})}),
+                               ("no queue field", {"raw": json.dumps({"data": {"repository": {"pullRequest": {
+                                   "state": "OPEN", "autoMergeRequest": None}}}})}),
+                               ("queue not a bool", {"raw": json.dumps({"data": {"repository": {"pullRequest": {
+                                   "state": "OPEN", "autoMergeRequest": None, "isInMergeQueue": "no"}}}})})):
+            with self.subTest(label):
+                before = len(self.alerts())
+                self.assertEqual(self.merge_returns(merge=[{"patch": {"state": "OPEN", "inQueue": True}}],
+                                                    graphql=[graphql]), 5, self.err)
+                self.assertEqual(self.last()["reason"], "merge-not-completed")
+                self.assertEqual(len(self.alerts()), before + 1)
+                self.assertIn("could not be verified", self.alerts()[-1].argv[1])
+                self.assertIn("MAY STILL COMPLETE", self.alerts()[-1].argv[1])
+
+    def test_a_pr_that_merged_while_it_was_being_dequeued_is_alerted(self):
+        self.assertEqual(self.merge_returns(merge=[{"patch": {"state": "OPEN", "inQueue": True}}],
+                                            disable=[{"patch": {"state": "MERGED", "inQueue": False}}]), 5, self.err)
+        self.assertIn("merged meanwhile", self.assert_refused())
+
+    def test_a_merge_that_completed_never_calls_the_disable(self):
+        self.assertEqual(self.merge_returns(), 0, self.err)
+        self.assertEqual(self.disables(), [])
+        self.assertEqual(self.alerts(), [])
+
+    def test_the_gate_never_passes_auto(self):
+        for cfg in ({}, {"merge": [{"patch": {"state": "OPEN", "inQueue": True}}]}):
+            self.gh.set_pr(state="OPEN")
+            self.merge_returns(**cfg)
+        argvs = [c.argv for c in self.sb.calls_of("gh")]
+        self.assertTrue(any(a[:2] == ["pr", "merge"] for a in argvs))
+        self.assertTrue(all("--auto" not in a for a in argvs))
+        self.assertNotIn('"--auto"', Path(bm.__file__).read_text(encoding="utf-8"))
 
 
 # ----------------------------------------------------- end to end, from the real writers ----

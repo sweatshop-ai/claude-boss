@@ -35,6 +35,15 @@ Codex round 1 (NO-GO, 82,323 tokens): the compares used the branch name `main` a
 
 **Accepted window:** between the second read and the merge there are milliseconds. A base that moves in it is merged by GitHub as a 3-way merge, which keeps the base's change or refuses on a conflict, never drops it, and step 3 reports it afterwards. Closing it entirely needs a merge call that pins the base, which `gh pr merge` does not offer.
 
+## Round 3: merge queues are not supported (Chiara, 2026-11-13)
+
+Codex round 2 (NO-GO, 85,430 tokens): on a merge-queue base `gh pr merge` returns success after enqueueing or enabling auto-merge, and the old `not-merged` alert left that merge active, so it could complete later on a base tip nobody compared. The rule is the same guarantee as above: the gate only merges against the base it checked.
+
+- When `gh pr merge` returns and the PR is not MERGED, the gate runs `gh pr merge --disable-auto`, then reads back through GraphQL (`gh api graphql`: `state`, `autoMergeRequest`, `isInMergeQueue`; gh 2.46 has no `isInMergeQueue` in `pr view --json`) that no auto-merge request and no queue entry is left. It refuses with `merge-not-completed` (exit 5, formerly `not-merged`) and alerts either way; the alert says "THE MERGE MAY STILL COMPLETE LATER" when the disable failed, did not take effect, or could not be verified, and the owner must stop it by hand. A PR that turns out MERGED meanwhile is alerted too.
+- The gate never passes `--auto` itself; a test pins every `gh` call and the source.
+- **Merge queues are not supported: the gate always refuses them.** A queued merge is a merge at a time and on a base tip the gate did not compare, and `--disable-auto` does not remove a queue entry on every setup (the read-back says so, and the alert asks for a hand stop).
+- Tests: class `QueuedMerge` (queued, auto-enabled, disable failed, disable without effect, unverifiable read-back, merged meanwhile, never `--auto`).
+
 ## Done when
 
 - [x] Tests first, red, then green (`MergedBase`: the base changes a PR file, a rename, a base that has not moved, an untrusted base compare, the combination)
