@@ -930,16 +930,22 @@ starts to deploy is outside what the gate can see.
 
 **A PR that waits only for the owner's merge goes to the desk.** That is a PR with its GO that you may not order
 through the gate because its branch deploys. A gate refusal is not handed over: it is an instruction to get the right
-review (P13/P14 above). Before handing over, check that the live head is the one the GO was given on and that CI is green on it
-(`gh pr view N --json headRefOid`; the desk pins whatever head it finds and merges on mergeable, and neither check is the desk's). Hand it over with
-`desk ready OWNER/REPO N --what "<one line on what the PR does>" --rec merge --by <your name> --why "<the reviews, CI, and the head sha>"`,
-not to a Paste and an `ASK` per PR. `--after M` names a PR that must merge first; `--rec wait` when your advice is to wait. `desk` is not on PATH: run AgentView's
-`hooks/desk`, beside `hooks/paste`, by its path (on the author's machine
-`/home/tiroir/Projects/agentview/hooks/desk`; the owner merges from the desk page there). It pins the PR's head, so
-**do not push after it, and tell the worker who owns the branch the head is pinned**: a new head needs a new `desk ready`, which replaces the item. Then run
-`desk status OWNER/REPO N`: it must say `waiting` (it also says merged as a sha, or refused and why); a `desk withdraw
-OWNER/REPO N` takes the item back. When `branch_deploys.py <checkout> <base>` lists deploy lines, put them in `--why` ("deploys:
-<the lines>") until the desk checks that itself (merge-desk ticket 05). The `ASK` stays for decisions that are not a merge.
+review (P13/P14 above). The desk pins whatever head it finds and merges on mergeable; neither a GO nor green CI is the desk's
+to check, so the order is:
+1. Tell the worker who owns the branch to push nothing more: the head is about to be pinned.
+2. Check that CI is green on the head the GO was given on (`gh pr view N --json headRefOid,statusCheckRollup`).
+3. Hand it over with
+   `desk ready OWNER/REPO N --what "<one line on what the PR does>" --rec merge --by <your name> --why "<the reviews, CI, and the head sha>"`,
+   not to a Paste and an `ASK` per PR. `--after M` names a PR that must merge first; `--rec wait` when your advice is to wait.
+   When `branch_deploys.py <checkout> <base>` lists deploy lines, put them in `--why` ("deploys: <the lines>") until the desk
+   checks that itself (merge-desk ticket 05).
+4. Run `desk status OWNER/REPO N`: it must say `waiting` **and its pinned sha must be the GO head**. `waiting` alone proves
+   nothing, since any `ready` is waiting; on another sha, `desk withdraw OWNER/REPO N` and start again. A new head later needs a
+   new `desk ready`, which replaces the item.
+
+`desk` is not on PATH: run AgentView's `hooks/desk`, beside `hooks/paste`, by its path (on the author's machine
+`/home/tiroir/Projects/agentview/hooks/desk`; the owner merges from the desk page there). `desk status` also says merged as a sha,
+or refused and why. The `ASK` stays for decisions that are not a merge.
 
 ### P15. The full test suite runs on the CI, not on the shared workstation
 

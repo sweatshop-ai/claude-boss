@@ -978,6 +978,8 @@ class ConciergeTexts(unittest.TestCase):
         self.assertIn("hooks/desk", p14)
         self.assertIn("branch_deploys.py", p14)             # a deploying branch says so in --why until the desk checks it
         self.assertIn("not to a Paste and an `ASK` per PR", p14)
+        self.assertIn("its pinned sha must be the GO head", p14)   # `waiting` alone proves nothing
+        self.assertIn("A gate refusal is not handed over", p14)
         self.assertIn("goes to the desk", self.text("references", "escalation.md"))
         self.assertIn("desk ready", self.text("references", "concierge.md"))
         self.assertIn("desk ready", self.text("references", "concierge-brief.md"))
