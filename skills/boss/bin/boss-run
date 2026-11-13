@@ -95,7 +95,7 @@ edit of settings.json / CLAUDE.md	(settings\.json|settings\.local\.json|CLAUDE\.
 DROP TABLE / DATABASE	DROP[[:space:]]+(TABLE|DATABASE)
 git reset --hard	git[[:space:]]+reset[^&|;]*--hard
 git clean -f	git[[:space:]]+clean[^&|;]*[[:space:]]-[a-z]*f
-PR merge outside boss_merge	(^|[^[:alnum:]_.-])gh[[:space:]]([^&|;]*[[:space:]])?pr([[:space:]]+(--repo([[:space:]]+[^[:space:]]+|=[^[:space:]]*)|-R([[:space:]]+[^[:space:]]+|[^[:space:]]+)))*[[:space:]]+merge|(-X|--method)[[:space:]=]*PUT[^&|;]*pulls/[^/[:space:]]+/merge|pulls/[^/[:space:]]+/merge[^&|;]*(-X|--method)[[:space:]=]*PUT|mergePullRequest|enablePullRequestAutoMerge
+PR merge outside boss_merge	(^|[^[:alnum:]_.-])gh[[:space:]]([^&|;]*[[:space:]])?pr([[:space:]]+(--repo([[:space:]]+[^[:space:]]*|=[^[:space:]]*)|-R([[:space:]]+[^[:space:]]*|[^[:space:]]+)))*[[:space:]]+merge|(-X|--method)[[:space:]=]*PUT[^&|;]*pulls/[^/[:space:]]+/merge|pulls/[^/[:space:]]+/merge[^&|;]*(-X|--method)[[:space:]=]*PUT|mergePullRequest|enablePullRequestAutoMerge
 RULES
 }
 

@@ -354,6 +354,8 @@ class HardRules(Base):
     def test_the_merge_rule_works_on_an_argument_list_as_on_a_string(self):
         self.sb.stub("gh")
         for args in (("gh", "pr", "merge", "5"), ("gh", "pr", "--repo", "o/r", "merge", "5"),
+                     ("gh", "pr", "--repo", "", "merge", "5"), ("gh", "pr", "-R", "", "merge", "5"),
+                     ("gh", "pr", "-R", "", "--repo", "", "-Ro/r", "merge", "5"),
                      ("gh", "api", "-X", "PUT", "repos/o/r/pulls/5/merge")):
             with self.subTest(args):
                 self.assertEqual(self.dry(*args).returncode, 5)
