@@ -392,6 +392,18 @@ def _within(base: str):
     return lambda path: path == base or path.startswith(prefix)
 
 
+def _is_preset(fb: Fallback) -> bool:
+    """True for the OPUS/FABLE presets, however a caller sets `allowed_tools`, `timeout` or `when` on them.
+
+    A preset is its name and model with no confinement of its own (`extra_args`, `env_unset`): `--fallback opus
+    --fallback-tools Read,Grep,Glob` (boss-goal) is still the preset. The PR gate's `fallback_spec` carries the
+    same name and model but confines the child with both, so it is custom and keeps the filtered PATH. Full
+    equality with a PRESETS value would call the boss-goal spec custom (ticket 45)."""
+    base = PRESETS.get(fb.name)
+    return (base is not None and fb.model == base.model
+            and fb.extra_args == base.extra_args and fb.env_unset == base.env_unset)
+
+
 def claude_launch(fb: Fallback, prompt: str, cwd: str | None = None) -> tuple[list[str], dict] | None:
     """The argv and environment to start the fallback's `claude` with, or None when it is not there.
 
@@ -420,7 +432,7 @@ def claude_launch(fb: Fallback, prompt: str, cwd: str | None = None) -> tuple[li
                             # relative `cwd` resolved against a deleted process cwd. Nothing to keep out, nothing safe to start: fail closed
         return None
     inside = _within(base) if base else (lambda path: False)
-    preset = fb in PRESETS.values()     # not "unsets nothing": a custom spec is confined by its own flags, so it gets the filtered PATH
+    preset = _is_preset(fb)     # not "unsets nothing": a custom spec is confined by its own flags, so it gets the filtered PATH
     if env is None:
         env = dict(os.environ)
     keep, child_keep = [], []
