@@ -1186,6 +1186,18 @@ class DocsAndTests(unittest.TestCase):
                      "xdocs/a.md", "README.md.py"):
             self.assertFalse(bm.is_doc(name), name)
 
+    def test_files_problem_is_the_file_condition_of_rule_2_alone(self):
+        """Ticket 52: `boss_review.py --opus-direct` asks it too, so the review and the gate share one answer."""
+        tests = bm.Deploy("ok", frozenset(), ("tests/*",))
+        self.assertIsNone(bm.files_problem(("tests/a.py", "README.md", "docs/x.md"), tests))
+        self.assertEqual(bm.files_problem(("tests/a.py", "src/b.py", "SKILL.md"), tests),
+                         "not docs or tests: src/b.py, SKILL.md")
+        self.assertEqual(bm.files_problem((), tests), "not docs or tests: (no file)")
+        self.assertEqual(bm.files_problem(("tests/a.py",), bm.Deploy("ok", frozenset(), None)),
+                         "no test_paths in the deploy list")
+        self.assertEqual(bm.files_problem(("tests/SKILL.md",), bm.Deploy("ok", frozenset(), ("tests/*",))),
+                         "not docs or tests: tests/SKILL.md")
+
     def test_stray_names_are_those_that_are_neither(self):
         self.assertEqual(bm.not_docs_or_tests(("tests/a.py", "README.md", "docs/x.md"), ("tests/*",)), [])
         self.assertEqual(bm.not_docs_or_tests(("tests/a.py", "src/b.py", "SKILL.md"), ("tests/*",)),

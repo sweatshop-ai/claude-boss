@@ -455,19 +455,28 @@ def _answering(attempts: list[dict]) -> dict | None:
     return next((a for a in attempts if a["reason"] == "answered"), None)
 
 
-def _sound(data: dict, code: int, fallback: Fallback | None = None, read_answer: bool = True) -> bool:
+def _sound(data: dict, code: int, fallback: Fallback | None = None, read_answer: bool = True,
+           direct: bool = False) -> bool:
     """Whether the chain's result is plainly what was asked for and agrees with its own exit code: a
     Codex attempt, followed by exactly one attempt of `fallback` when one was given and Codex's reason
     is one it runs after (and by none otherwise); the result names the attempt that answered, or
     "none"; a verdict and exit 0 go with an answer and with nothing else. A malformed value raises
-    KeyError or TypeError; the caller counts that as unsound."""
+    KeyError or TypeError; the caller counts that as unsound. With `direct` (`--opus-direct`, Codex skipped) the
+    result is exactly one attempt, the `fallback`'s, and one by Codex is a contradiction."""
+    if direct and fallback is None:
+        return False
     reviewer, output, parsed, attempts = (data[k] for k in ("reviewer", "output", "parsed", "attempts"))
     if not (isinstance(attempts, list) and attempts
             and all(isinstance(a, dict) and all(k in a for k in _ATTEMPT_KEYS) for a in attempts)):
         return False
-    if len(attempts) != 1 + (fallback is not None and attempts[0]["reason"] in fallback.when):
-        return False
-    who = [("codex", None)] + ([(fallback.name, fallback.model)] if len(attempts) == 2 else [])
+    if direct:
+        if len(attempts) != 1:
+            return False
+        who = [(fallback.name, fallback.model)]
+    else:
+        if len(attempts) != 1 + (fallback is not None and attempts[0]["reason"] in fallback.when):
+            return False
+        who = [("codex", None)] + ([(fallback.name, fallback.model)] if len(attempts) == 2 else [])
     for a, (name, model) in zip(attempts, who):
         if not (a["reviewer"] == name and a["model"] == model
                 and isinstance(a["output"], str) and isinstance(a["stderr_tail"], str)
@@ -495,18 +504,18 @@ def _follows(word: str, output: str) -> bool:
     return found is not None and found.word == word
 
 
-def _refused_for_nul(data: dict, code: int, fallback: Fallback | None) -> bool:
+def _refused_for_nul(data: dict, code: int, fallback: Fallback | None, direct: bool = False) -> bool:
     """Whether the result is sound in everything but the reading of its answer, and the answer
     (the answering attempt's, Codex's or the fallback's) holds a NUL (the one case `_follows` refuses
     for want of a reading, not for a contradiction)."""
     try:
         won = _answering(data["attempts"])
-        return won is not None and "\0" in won["output"] and _sound(data, code, fallback, read_answer=False)
+        return won is not None and "\0" in won["output"] and _sound(data, code, fallback, read_answer=False, direct=direct)
     except (ValueError, KeyError, TypeError, AttributeError, IndexError):
         return False
 
 
-def _chain_result(run: _Out, fallback: Fallback | None = None) -> dict:
+def _chain_result(run: _Out, fallback: Fallback | None = None, direct: bool = False) -> dict:
     """The chain's JSON, once it is plainly the result asked for (a Codex attempt, then the fallback's
     when it was due); else _Infra. A child that crashed, was killed or printed something else says
     nothing about Codex, so it is no outage."""
@@ -516,24 +525,29 @@ def _chain_result(run: _Out, fallback: Fallback | None = None) -> dict:
         raise _Infra("the chain exited %s: %s" % (run.code, run.err.strip()[-300:]))
     try:
         data = json.loads(run.out.decode("utf-8"))
-        sound = _sound(data, run.code, fallback)
+        sound = _sound(data, run.code, fallback, direct=direct)
     except (ValueError, KeyError, TypeError) as exc:
         raise _Infra("the chain printed no result I can read: %s: %s" % (type(exc).__name__, exc))
     if not sound:
-        if _refused_for_nul(data, run.code, fallback):
+        if _refused_for_nul(data, run.code, fallback, direct):
             raise _Refused("the chain's answer holds a NUL: it cannot be read as the chain read it",
                            [{k: a[k] for k in ("reviewer", "reason", "exit_code")} for a in data["attempts"]])
         raise _Infra("the chain printed a result that is not a consistent %s one"
-                     % ("Codex-only" if fallback is None else "Codex-then-fallback"))
+                     % ("direct" if direct else "Codex-only" if fallback is None else "Codex-then-fallback"))
     return data
 
 
-def _ask_codex(checkout: str, brief: str, codex_timeout: int, fallback: Fallback | None = None) -> dict:
+def _ask_codex(checkout: str, brief: str, codex_timeout: int, fallback: Fallback | None = None,
+               direct: bool = False) -> dict:
     """01's chain in a child process, told `--cwd` the checkout: every reviewer it starts runs
     standing in that directory (the chain's own option; this was a child cwd before it had one).
     With a `fallback` the chain gets all of it (`fallback_flags`: the confinement and the removed
-    variables travel with the name and model) and may wait for it as well; without one it is Codex only."""
-    deadline = codex_timeout + policy.REVIEW_CHAIN_SLACK
+    variables travel with the name and model) and may wait for it as well; without one it is Codex only.
+    With `direct` (ticket 52) the chain is told `--skip-codex`: Codex is not started and the fallback, which is
+    then required, answers alone."""
+    if direct and fallback is None:
+        raise ValueError("a direct pass needs the fallback to ask")
+    deadline = policy.REVIEW_CHAIN_SLACK if direct else codex_timeout + policy.REVIEW_CHAIN_SLACK
     if fallback is not None:
         deadline += fallback.timeout
     try:
@@ -542,13 +556,14 @@ def _ask_codex(checkout: str, brief: str, codex_timeout: int, fallback: Fallback
             prompt.write_text(brief, encoding="utf-8")
             run = _spawn([sys.executable, str(CHAIN), "--prompt-file", str(prompt), "--words", "GO,NO-GO",
                           "--match", "token", "--strict",
+                          *(["--skip-codex"] if direct else []),
                           *(["--no-fallback"] if fallback is None else fallback_flags(fallback)),
                           "--effort", REVIEW_EFFORT,
                           "--codex-timeout", str(codex_timeout), "--cwd", os.path.join(os.getcwd(), checkout)],   # absolute, components kept: abspath would fold link/..
                          deadline)
     except OSError as exc:
         raise _Infra("the brief for the chain could not be written: %s" % exc)
-    return _chain_result(run, fallback)
+    return _chain_result(run, fallback, direct)
 
 
 # ------------------------------------------------------------------- writing rounds ----
@@ -899,15 +914,27 @@ def stderr_block(tail: str) -> str:
 FALLBACK_LAST_LINE = "Same model family as the workers, so Codex re-reviews this head before any deploy."
 
 
+DIRECT_LAST_LINE = ("Review by risk, rule 2: this PR changes only tests and docs, so Opus reviewed it directly. "
+                    "Codex was not asked and no Codex re-review is planned.")
+
+
 def comment_body(number: int, author: str, head_sha: str, verdict: str, findings: str = "", *,
-                 fallback: FallbackLabel | None = None) -> str:
+                 fallback: FallbackLabel | None = None, direct_model: str | None = None) -> str:
     """The comment: fixed words, the round, a validated name, the head reviewed, the verdict and, when
     there are findings, `findings_block`'s text after a blank line. Never the raw output.
 
     With `fallback` it is a fallback review, headed so and never "Codex review": the verdict is
     provisional when it is a GO, Codex's reason follows the findings (for `error` with its exit code and
     stderr block under `Codex said:`), and the last line says the fallback shares the workers' model
-    family."""
+    family.
+
+    With `direct_model` (`--opus-direct`, ticket 52) it is the direct Opus pass of review by risk, headed so and
+    saying plainly that it is no fallback: Codex was not asked, so there is no reason for its absence and no
+    Codex re-review to come."""
+    if direct_model is not None:
+        body = ("Direct Opus review %d (%s, review by risk, not a fallback; run by %s)\nHead: %s\nVerdict: %s"
+                % (number, direct_model, author, head_sha, "provisional GO" if verdict == "GO" else verdict))
+        return "\n\n".join(filter(None, (body, findings, DIRECT_LAST_LINE)))
     if fallback is None:
         body = "Codex review %d (run by %s)\nHead: %s\nVerdict: %s" % (number, author, head_sha, verdict)
         return body + "\n\n" + findings if findings else body
@@ -1258,10 +1285,15 @@ def _sync_health(track: str | None, tracker_path: Path | None) -> None:
 
 
 def _keep_and_post(job: _Job, seen: _Pr, chain: dict, findings: str,
-                   label: FallbackLabel | None = None, *, tracker_path: Path | None = None) -> ReviewResult:
+                   label: FallbackLabel | None = None, *, tracker_path: Path | None = None,
+                   direct: bool = False) -> ReviewResult:
     """Under the PR's lock: look at the PR and the checkout again, claim the next round, keep what
     the review said, post, and make the claimed file the full record. A provisional GO is listed in
-    `tracker_path` first (`_list_and_post`); the PR's lock is taken before the tracker's, never after."""
+    `tracker_path` first (`_list_and_post`); the PR's lock is taken before the tracker's, never after.
+
+    A `direct` round (`--opus-direct`) is a provisional round that Codex was never asked for: its one attempt is
+    Opus's, kept in the record and not in attempts.jsonl (Codex's health counts that file), and its GO is posted
+    unlisted, because nothing is owed a Codex re-review."""
     reviews = _reviews_dir()
     pr_dir = reviews / job.key / ("pr%d" % job.pr)
     try:
@@ -1279,30 +1311,33 @@ def _keep_and_post(job: _Job, seen: _Pr, chain: dict, findings: str,
         attempts = [{k: a[k] for k in ("reviewer", "reason", "exit_code", "stderr_tail", "model")}
                     for a in chain["attempts"]]
         verdict = (chain["parsed"] or {}).get("word")
-        kind = "provisional" if len(chain["attempts"]) == 2 else "codex"     # the fallback ran
+        kind = "provisional" if direct or len(chain["attempts"]) == 2 else "codex"     # the fallback ran
         won = _answering(chain["attempts"])
         model = won["model"] if won else None
         try:
-            append_attempts(reviews / "attempts.jsonl",
-                            [{"ts": ts, "repo": job.key, "pr": job.pr, "round": number,
-                              "reviewer": a["reviewer"], "reason": a["reason"], "exit_code": a["exit_code"]}
-                             for a in attempts])
+            if not direct:
+                append_attempts(reviews / "attempts.jsonl",
+                                [{"ts": ts, "repo": job.key, "pr": job.pr, "round": number,
+                                  "reviewer": a["reviewer"], "reason": a["reason"], "exit_code": a["exit_code"]}
+                                 for a in attempts])
             write_out(path.with_suffix(".out"), _out_text(chain))
             if (live.head, live.base, checkout and checkout.head) != (seen.head, seen.base, seen.head):
                 # the PR moved, or the checkout did: either way the head named is not the head read
                 status, exit_code = "head-moved", EXIT_MOVED
             elif verdict is None:
                 status, exit_code = "no-verdict", EXIT_NO_VERDICT
-            elif kind == "provisional" and verdict == "GO":
+            elif kind == "provisional" and verdict == "GO" and not direct:
                 status, exit_code = _list_and_post(job, seen, number, ts, verdict, findings, label, tracker_path)
-            elif _post(job, comment_body(number, job.author, seen.head, verdict, findings, fallback=label)):
+            elif _post(job, comment_body(number, job.author, seen.head, verdict, findings, fallback=label,
+                                         direct_model=model if direct else None)):
                 status, exit_code = "posted", EXIT_FOR_VERDICT[verdict]
             else:
                 status, exit_code = "post-failed", EXIT_INFRA
             replace_record(path, {
                 "repo": job.key, "pr": job.pr, "round": number, "head_sha": seen.head, "base": seen.base,
                 "reviewer": chain["reviewer"], "model": model, "kind": kind, "verdict": verdict,
-                "status": status, "author": job.author, "ts": ts, "attempts": attempts})
+                "status": status, "author": job.author, "ts": ts, "attempts": attempts,
+                **({"review": "opus-direct"} if direct else {})})
         except OSError as exc:
             _say("round %d is left empty: %s" % (number, exc))
             return ReviewResult(EXIT_INFRA, number, None, verdict, path, kind)
@@ -1311,12 +1346,28 @@ def _keep_and_post(job: _Job, seen: _Pr, chain: dict, findings: str,
         os.close(lock)
 
 
+def _direct_problem(job: _Job, seen: _Pr) -> str | None:
+    """Why this PR may not take the direct Opus pass, None when every file it changes is a test or narrow docs.
+    The classification is boss_merge's own (rule 2: `read_deploy`, `read_compare`, `files_problem`), so the review
+    and the gate cannot disagree about what a docs or tests PR is. Any doubt is a reason: a deploy list that is
+    missing or has no `test_paths`, a compare that failed, was cut short or lists no file."""
+    import boss_merge      # here and not at the top: boss_merge imports this module
+    deploy = boss_merge.read_deploy(job.repo, seen.base, job.io_timeout)
+    if deploy.test_paths is None:
+        return "no test_paths in the deploy list of %s (deploy list %s)" % (seen.base, deploy.state)
+    own = boss_merge.read_compare(job.repo, seen.base, seen.head, job.io_timeout, boss_merge.OWN_STATUSES)
+    if own.problem:
+        return "%s: %s" % (own.problem, own.note)
+    return boss_merge.files_problem(own.files, deploy)
+
+
 def review(repo: str, pr: int, checkout: str, author: str, *,
            codex_timeout: int = policy.REVIEW_CODEX_TIMEOUT,
            io_timeout: int = policy.REVIEW_IO_TIMEOUT,
            fallback_timeout: int = policy.REVIEW_FALLBACK_TIMEOUT,
            allow_fallback: bool = False,
-           track: str | None = None) -> ReviewResult:
+           track: str | None = None,
+           opus_direct: bool = False) -> ReviewResult:
     """Review one PR head. With `allow_fallback` and a usable `track` (a regular file of the user's,
     pm/<track>.md), a Codex that does not answer (absent, timeout, error) runs the confined fallback and its
     verdict is recorded as provisional; a provisional GO is listed in that tracker before it is posted
@@ -1325,9 +1376,17 @@ def review(repo: str, pr: int, checkout: str, author: str, *,
 
     With `track`, the Codex health is synced into that track's tracker once the chain has returned
     (codex_blocker.sync: the "Codex down" blocker is raised or cleared); a failed sync is said on stderr
-    and the exit code stays the review's."""
+    and the exit code stays the review's.
+
+    With `opus_direct` (ticket 52, review by risk rule 2) Codex is not asked: the confined Opus reviewer runs
+    alone, and only when every file the PR changes is a test or narrow docs (`_direct_problem`; a refusal is exit 5
+    with nothing claimed). The round is the provisional one the merge gate's rule 2 accepts, bound to the head and
+    labelled Opus, but with no Codex attempt in attempts.jsonl, no tracker line and no health sync: Codex neither
+    failed nor is owed a re-review. It takes neither `track` nor `allow_fallback`."""
     key = repo_key(repo)
     check_name(author, "author")
+    if opus_direct and (track is not None or allow_fallback):
+        raise ValueError("opus_direct takes neither a track nor allow_fallback: Codex is not asked and nothing is listed")
     if type(pr) is not int or pr < 1:
         raise ValueError("pr must be a positive integer: %r" % (pr,))
     if not os.path.isdir(checkout):
@@ -1344,6 +1403,11 @@ def review(repo: str, pr: int, checkout: str, author: str, *,
     seen = _prepare(job)
     if isinstance(seen, ReviewResult):
         return seen
+    if opus_direct:
+        why = _direct_problem(job, seen)
+        if why:
+            _say("--opus-direct refused: %s" % why)
+            return _nothing(EXIT_REFUSED)
     try:
         _site_rules()     # a review that could not be published is not asked for
     except OSError as exc:
@@ -1355,11 +1419,11 @@ def review(repo: str, pr: int, checkout: str, author: str, *,
         if (recheck.head, recheck.base) != (seen.head, seen.base):
             _say("the PR moved while its text was read: nothing reviewed")
             return _nothing(EXIT_MOVED)
-        spec = fallback_spec(timeout=fallback_timeout) if allow_fallback else None
+        spec = fallback_spec(timeout=fallback_timeout) if allow_fallback or opus_direct else None
         chain = _ask_codex(checkout, build_brief(seen.head, seen.base, seen.title, seen.body, diff),
-                           codex_timeout, spec)
+                           codex_timeout, spec, direct=opus_direct)
     except _Infra as exc:
-        if isinstance(exc, _Refused):
+        if isinstance(exc, _Refused) and not opus_direct:       # a direct pass is no Codex outage: nothing to count
             _log_refused(job, exc.attempts)
             _sync_health(track, tracker_path)
         return _failed(str(exc))
@@ -1367,18 +1431,20 @@ def review(repo: str, pr: int, checkout: str, author: str, *,
     if chain["parsed"]:
         try:
             findings = findings_block(chain["output"])
-            if len(chain["attempts"]) == 2 and chain["reviewer"] == spec.name:
+            if not opus_direct and len(chain["attempts"]) == 2 and chain["reviewer"] == spec.name:
                 codex = chain["attempts"][0]
                 label = FallbackLabel(chain["attempts"][1]["model"], codex["reason"])
                 if codex["reason"] == "error":
                     label = label._replace(exit_code=codex["exit_code"], stderr=stderr_block(codex["stderr_tail"]))
         except OSError as exc:
-            _log_refused(job, [{k: a[k] for k in ("reviewer", "reason", "exit_code")} for a in chain["attempts"]],
-                         "the attempts of the answer whose findings could not be made safe")
-            _sync_health(track, tracker_path)
+            if not opus_direct:
+                _log_refused(job, [{k: a[k] for k in ("reviewer", "reason", "exit_code")} for a in chain["attempts"]],
+                             "the attempts of the answer whose findings could not be made safe")
+                _sync_health(track, tracker_path)
             return _failed("the findings cannot be made safe to publish: %s" % exc)
-    result = _keep_and_post(job, seen, chain, findings, label, tracker_path=tracker_path)
-    _sync_health(track, tracker_path)      # outside the PR's lock, which _keep_and_post has let go
+    result = _keep_and_post(job, seen, chain, findings, label, tracker_path=tracker_path, direct=opus_direct)
+    if not opus_direct:
+        _sync_health(track, tracker_path)      # outside the PR's lock, which _keep_and_post has let go
     return result
 
 
@@ -1662,6 +1728,13 @@ def main(argv: list[str] | None = None) -> int:
                          "--author, --track and --test-cmd. Exit 0 recorded; 2 usage; 5 refused (nothing "
                          "recorded); 6 the head moved; 7 infrastructure")
     ap.add_argument("--test-cmd", metavar="CMD", help="with --waive: the command run as /bin/sh -c in --checkout")
+    ap.add_argument("--opus-direct", action="store_true",
+                    help="review by risk rule 2: run the confined Opus review straight away, without asking Codex, "
+                         "for a PR whose every file is a test or narrow docs (the merge gate's own classification). "
+                         "A PR with any other file, or any doubt about its files, is refused (exit 5, the file "
+                         "named, nothing recorded). The round is provisional and labelled Opus; it is no Codex "
+                         "failure and is not listed for a Codex recheck. Takes --repo, --pr, --checkout and "
+                         "--author, no --track")
     ap.add_argument("--check-fallback", action="store_true",
                     help="instead of a review: run the read-only fallback once, in --checkout, and check "
                          "its init event (one real, one-word call; takes no --repo, --pr or --author)")
@@ -1670,6 +1743,11 @@ def main(argv: list[str] | None = None) -> int:
              "--track": args.track}
     if args.waive and args.check_fallback:
         ap.error("--waive does not take --check-fallback")
+    if args.opus_direct:
+        others = [flag for flag, on in (("--waive", args.waive), ("--check-fallback", args.check_fallback),
+                                        ("--track", args.track is not None)) if on]
+        if others:
+            ap.error("--opus-direct does not take %s" % ", ".join(others))
     if args.test_cmd is not None and not args.waive:
         ap.error("--test-cmd is only for --waive")
     if args.waive:
@@ -1698,15 +1776,16 @@ def main(argv: list[str] | None = None) -> int:
         ap.error("the following arguments are required: %s" % ", ".join(missing))
     try:
         result = review(args.repo, args.pr, args.checkout, args.author, track=args.track,
-                        allow_fallback=args.track is not None)
+                        allow_fallback=args.track is not None, opus_direct=args.opus_direct)
     except ValueError as exc:
         print("boss_review: %s" % exc, file=sys.stderr)
         return EXIT_USAGE
     if result.round is not None:
-        print("%s review %d: %s (%s) %s" % ("Fallback" if result.kind == "provisional" else "Codex", result.round,
+        print("%s review %d: %s (%s) %s" % ("Direct Opus" if args.opus_direct else
+                                            "Fallback" if result.kind == "provisional" else "Codex", result.round,
                                             result.verdict or "no verdict",
                                             result.status or "round left empty", result.record))
-    if args.track is None and result.exit_code == EXIT_NO_VERDICT:
+    if args.track is None and result.exit_code == EXIT_NO_VERDICT and not args.opus_direct:
         _say("no fallback review was run: it needs a usable --track T")
     return result.exit_code
 

@@ -469,8 +469,10 @@ def _claude(prompt, fb: Fallback, timeout, parse, cwd) -> _Turn:
 def run_chain(prompt: str, *, words: tuple[str, ...] | None = None, lines: Shape | None = None,
               effort: str = "medium", codex_timeout: int = DEFAULT_TIMEOUT,
               fallback: Fallback | None = None, strict: bool = False,
-              cwd: str | None = None) -> Result:
-    """Ask Codex, then the fallback if one is given and Codex's reason is in its `when`.
+              cwd: str | None = None, skip_codex: bool = False) -> Result:
+    """Ask Codex, then the fallback if one is given and Codex's reason is in its `when`. With `skip_codex` (which
+    needs a fallback) Codex is not started and the fallback alone is asked: one attempt, for a caller that chose
+    not to spend Codex on this review (review by risk, ticket 52).
 
     A usable answer is a VERDICT: line in `words`, or `lines.min` lines under `lines.label`;
     give one of the two. The first attempt with a usable answer answers; if none has one,
@@ -480,10 +482,15 @@ def run_chain(prompt: str, *, words: tuple[str, ...] | None = None, lines: Shape
     parse = _acceptance(words, lines, strict)
     if cwd is not None and not os.path.isdir(cwd):
         raise ValueError("cwd is not a directory: %s" % cwd)
-    tried = [_codex(prompt, effort, codex_timeout, parse, cwd)]
-    if fallback is not None and tried[0].attempt.reason in fallback.when:
-        timeout = 2 * codex_timeout if fallback.timeout is None else fallback.timeout
-        tried.append(_claude(prompt, fallback, timeout, parse, cwd))
+    if skip_codex and fallback is None:
+        raise ValueError("skip_codex needs a fallback: nothing would be asked")
+    timeout = None if fallback is None else 2 * codex_timeout if fallback.timeout is None else fallback.timeout
+    if skip_codex:
+        tried = [_claude(prompt, fallback, timeout, parse, cwd)]
+    else:
+        tried = [_codex(prompt, effort, codex_timeout, parse, cwd)]
+        if fallback is not None and tried[0].attempt.reason in fallback.when:
+            tried.append(_claude(prompt, fallback, timeout, parse, cwd))
     attempts = tuple(turn.attempt for turn in tried)
     for turn in tried:
         if turn.answer:
@@ -559,6 +566,8 @@ def _parser() -> argparse.ArgumentParser:
     ap.add_argument("--fallback-env-unset", type=_csv, metavar="NAMES",
                     help="comma list of environment variables the `claude` call does not inherit")
     ap.add_argument("--no-fallback", action="store_true", help="Codex only (also the default)")
+    ap.add_argument("--skip-codex", action="store_true",
+                    help="do not ask Codex: ask the fallback alone (needs a fallback; one attempt)")
     ap.add_argument("--strict", action="store_true",
                     help="two usable VERDICT lines that disagree are no verdict")
     return ap
@@ -574,6 +583,8 @@ def main(argv: list[str] | None = None) -> int:
     given = [flag for flag, value in options.items() if value is not None]
     if args.no_fallback and (given or args.fallback):
         ap.error("--no-fallback conflicts with %s" % ", ".join(given or ["--fallback"]))
+    if args.skip_codex and (args.no_fallback or not (args.fallback or args.fallback_name)):
+        ap.error("--skip-codex needs a fallback (--fallback or --fallback-name with --fallback-model)")
     if args.fallback and (args.fallback_name or args.fallback_model):
         ap.error("--fallback %s already names the fallback and its model" % args.fallback)
     if given and not args.fallback and not (args.fallback_name and args.fallback_model):
@@ -611,7 +622,7 @@ def main(argv: list[str] | None = None) -> int:
         ap.error(str(exc))
     result = run_chain(prompt, words=words, lines=lines, effort=args.effort,
                        codex_timeout=args.codex_timeout, fallback=fallback, strict=args.strict,
-                       cwd=args.cwd)
+                       cwd=args.cwd, skip_codex=args.skip_codex)
     print(json.dumps(dataclasses.asdict(result)))
     return 0 if result.reviewer != "none" else 1
 

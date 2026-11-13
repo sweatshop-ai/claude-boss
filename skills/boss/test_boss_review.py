@@ -96,6 +96,14 @@ if argv[:2] == ["pr", "comment"]:
     time.sleep(e.get("sleep", 0))
     sys.stderr.write(e.get("err", ""))
     sys.exit(e.get("rc", 0))
+if argv[:1] == ["api"]:       # side/gh.json "api": {endpoint fragment: {"raw": text, "rc": code}}; no match fails
+    for fragment, e in (cfg.get("api") or {}).items():
+        if fragment in argv[1]:
+            sys.stdout.write(e.get("raw", ""))
+            sys.stderr.write(e.get("err", ""))
+            sys.exit(e.get("rc", 0))
+    sys.stderr.write("gh stub: no api answer for %r\n" % (argv,))
+    sys.exit(1)
 sys.stderr.write("gh stub: no handler for %r\n" % (argv,))
 sys.exit(64)
 '''
@@ -118,8 +126,8 @@ class Gh:
         state.update(fields)
         path.write_text(json.dumps(state), encoding="utf-8")
 
-    def configure(self, view=None, comment=None, diff=None):
-        (self.side / "gh.json").write_text(json.dumps({"view": view, "comment": comment, "diff": diff}),
+    def configure(self, view=None, comment=None, diff=None, api=None):
+        (self.side / "gh.json").write_text(json.dumps({"view": view, "comment": comment, "diff": diff, "api": api}),
                                            encoding="utf-8")
 
 
@@ -878,9 +886,9 @@ class Contract(Base):
         sig = inspect.signature(br.review)
         self.assertEqual(list(sig.parameters),
                          ["repo", "pr", "checkout", "author", "codex_timeout", "io_timeout",
-                          "fallback_timeout", "allow_fallback", "track"])
+                          "fallback_timeout", "allow_fallback", "track", "opus_direct"])
         self.assertEqual([p.kind.name for p in sig.parameters.values()],
-                         ["POSITIONAL_OR_KEYWORD"] * 4 + ["KEYWORD_ONLY"] * 5)
+                         ["POSITIONAL_OR_KEYWORD"] * 4 + ["KEYWORD_ONLY"] * 6)
         self.assertIsNone(sig.parameters["track"].default)
         self.assertEqual((sig.parameters["codex_timeout"].default, sig.parameters["io_timeout"].default,
                           sig.parameters["fallback_timeout"].default, sig.parameters["allow_fallback"].default),
