@@ -22,7 +22,8 @@ Who uses it:
     is_open(text)
     set_status(text, value)     the first status line rewritten, or one inserted
     strip_header(body)          (body without a leading header, whether it had one)
-    with_body(text, body)       `body` under the heading and the status line
+    with_body(text, body)       `body` under the heading and the status line,
+                                the sheaf comments it drops kept at the end
     section(text, title)        the body of `## <title>`
     tickets_source(text)        the first line under `## Tickets`
     next_items(text)            the lines of `## Next, in priority order`
@@ -107,28 +108,99 @@ def strip_header(body: str):
     return "\n".join(lines[i:]), True
 
 
+COMMENT_OPEN_RE = re.compile(r"<!--\s*(?:sheaf|rd)-comment\b")
+# What sheaf glues to the end of a heading line: whole comments, on that one line.
+HEAD_TAIL = r"(?:<!--\s*(?:sheaf|rd)-comment\b[^\n]*?-->)*"
+
+
+def comment_blocks(text: str) -> list:
+    """Every sheaf comment in `text`, byte for byte: from `<!-- sheaf-comment` (or
+    the older `rd-comment`) to the first `-->`. sheaf writes a `--` inside a
+    comment as `-&#45;`, so that is its end. The contents are not read. A block
+    that never closes is a ValueError: where it ends is a guess."""
+    out, at = [], 0
+    while True:
+        m = COMMENT_OPEN_RE.search(text, at)
+        if not m:
+            return out
+        end = text.find("-->", m.end())
+        if end < 0:
+            raise ValueError("a sheaf comment opens and never closes (`<!-- sheaf-comment` "
+                             "without `-->`); close it by hand before rewriting this goal")
+        out.append(text[m.start():end + 3])
+        at = end + 3
+
+
+def lost_comments(dropped: str, kept: str) -> list:
+    """The comment blocks of `dropped` that `kept` does not already hold, as many
+    times over as they stand in `dropped`. A body from `boss-goal show` holds its
+    blocks, so they are not carried twice."""
+    have = comment_blocks(kept)
+    lost = []
+    for b in comment_blocks(dropped):
+        if b in have:
+            have.remove(b)
+        else:
+            lost.append(b)
+    return lost
+
+
+HEADING_LINE_RE = re.compile(r"^#{2,6}\s")
+
+
+def _reglue(old_lines, body: str) -> str:
+    """`body` with the comments glued to a heading of `old_lines` glued to the
+    same heading of `body`, byte for byte. A comment on a heading line that
+    `body` does not have again, or has with another comment already glued to it,
+    cannot stay where it was and is not moved elsewhere: a ValueError."""
+    new = body.split("\n")
+    for ln in old_lines:
+        if not HEADING_LINE_RE.match(ln) or not COMMENT_OPEN_RE.search(ln):
+            continue
+        blocks = comment_blocks(ln)
+        if not lost_comments(ln, body):
+            continue
+        text = ln.split("<!--", 1)[0].rstrip()
+        tail = ln[len(text):]
+        rest = tail
+        for b in blocks:
+            rest = rest.replace(b, "", 1)
+        at = [i for i, b in enumerate(new) if b.rstrip() == text]
+        if rest.strip() or len(at) != 1:
+            raise ValueError("a sheaf comment is glued to the heading %r, which the new body "
+                             "does not have exactly once; keep that heading line (as `boss-goal "
+                             "show` prints it) or move the comment by hand" % text)
+        new[at[0]] = text + tail
+    return "\n".join(new)
+
+
 def with_body(text: str, body: str) -> str:
     """`body` under the header of `text`: its `# ` heading and its status line,
     in the order they stand. The status stays as it was; only `set_status`
-    changes it."""
+    changes it. The sheaf comments of the lines it drops go at the end."""
     lines = text.splitlines()
     keep = {_heading_at(lines)}
     keep.add(next((i for i, ln in enumerate(lines) if ln.startswith("_Status:")), -1))
     head = [lines[i] for i in sorted(keep) if i >= 0]
-    return "\n".join(head + [body.rstrip("\n")]) + "\n"
+    rest = [ln for i, ln in enumerate(lines) if i not in keep]
+    body = _reglue(rest, body)
+    dropped = "\n".join(ln for ln in rest if not HEADING_LINE_RE.match(ln))
+    lost = lost_comments(dropped, "\n".join(head + [body]))
+    return "\n".join(head + [body.rstrip("\n")] + ([""] + lost if lost else [])) + "\n"
 
 
 # --------------------------------------------------------------- sections
 
 def section(text: str, title: str) -> str:
     """The body of `## <title>`, up to the next `## `, stripped."""
-    m = re.search(r"^##\s+%s\s*$(.*?)(?=^##\s|\Z)" % re.escape(title), text, re.M | re.S)
+    m = re.search(r"^##\s+%s\s*%s\s*$(.*?)(?=^##\s|\Z)" % (re.escape(title), HEAD_TAIL),
+                  text, re.M | re.S)
     return m.group(1).strip() if m else ""
 
 
 def _section_span(lines, title):
     """(first, end) line indices of `## <title>`'s body, or None."""
-    head = re.compile(r"^##\s+%s\s*$" % re.escape(title))
+    head = re.compile(r"^##\s+%s\s*%s\s*$" % (re.escape(title), HEAD_TAIL))
     at = next((i for i, ln in enumerate(lines) if head.match(ln)), None)
     if at is None:
         return None
@@ -164,7 +236,8 @@ def next_count(text: str) -> int:
 
 def set_next(text: str, body: str) -> str:
     """`text` with `## Next, in priority order` holding `body`; the sections after
-    it stay. A file without the section gets it at the end."""
+    it stay. A file without the section gets it at the end. The sheaf comments of
+    the lines it replaces stay at the end of the section."""
     lines = text.split("\n")
     span = _section_span(lines, NEXT)
     new = body.rstrip("\n").split("\n")
@@ -172,7 +245,9 @@ def set_next(text: str, body: str) -> str:
         return text.rstrip("\n") + "\n\n## %s\n%s\n" % (NEXT, "\n".join(new))
     first, end = span
     tail = lines[end:]
-    return "\n".join(lines[:first] + new + ([""] + tail if tail else [""]))
+    lost = lost_comments("\n".join(lines[first:end]), body)
+    return "\n".join(lines[:first] + new + ([""] + lost if lost else [])
+                     + ([""] + tail if tail else [""]))
 
 
 BOX_RE = re.compile(r"^- \[([ x])\] (.*)$")
@@ -260,7 +335,11 @@ def main(argv) -> int:
             if not body.strip():
                 print("objective: nothing on stdin but a header", file=sys.stderr)
                 return 1
-        new = with_body(text, body) if cmd == "set-body" else set_next(text, body)
+        try:
+            new = with_body(text, body) if cmd == "set-body" else set_next(text, body)
+        except ValueError as e:
+            print("objective: %s: %s" % (path, e), file=sys.stderr)
+            return 1
     try:
         _write(path, new)
     except OSError as e:
