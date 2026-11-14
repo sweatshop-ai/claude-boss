@@ -515,5 +515,55 @@ class QuestionsGoThroughTheConcierge(GuardCase):
         self.assertEqual(self.ask(), {})
 
 
+class AskedCommandsNeedAPaste(GuardCase):
+    """The owner, 2026-11-14: a command he must type is always a Paste on the boss's own card."""
+
+    def go(self, tool, tool_input, sid=None):
+        payload = {"session_id": sid or self.sid, "hook_event_name": "PreToolUse",
+                   "tool_name": tool, "tool_input": tool_input}
+        env = dict(os.environ, CLAUDE_CONFIG_DIR=str(self.cfg), HOME=str(self.cfg))
+        res = subprocess.run([sys.executable, str(GUARD)], input=json.dumps(payload),
+                             capture_output=True, text=True, env=env, timeout=15)
+        self.assertEqual(res.returncode, 0, res.stderr)
+        out = res.stdout.strip()
+        return json.loads(out)["hookSpecificOutput"] if out else {}
+
+    def ask(self, question, options=()):
+        q = {"question": question, "options": [{"label": o} for o in options]}
+        return self.go("AskUserQuestion", {"questions": [q]})
+
+    def test_a_question_with_a_command_and_no_paste_is_denied(self):
+        out = self.ask("Run it?", ["Yes: $ gh run cancel 12", "No"])
+        self.assertEqual(out["permissionDecision"], "deny")
+        self.assertIn("paste create", out["permissionDecisionReason"])
+
+    def test_a_command_in_the_question_text_is_denied_too(self):
+        self.assertEqual(self.ask("Please type $ systemctl restart x")["permissionDecision"], "deny")
+
+    def test_naming_the_paste_lets_it_through(self):
+        self.assertEqual(self.ask("Run $ gh run cancel 12 (Paste: Cancel runs, on my card)"), {})
+
+    def test_a_consent_question_needs_the_paste_as_well(self):
+        out = self.ask("CONSENT: I will run the box write. Or you run $ ssh box 'rm x'?")
+        self.assertEqual(out["permissionDecision"], "deny")
+
+    def test_a_question_without_a_command_is_left_alone(self):
+        self.assertEqual(self.ask("Costs $5 or $ 10 a month. Which?"), {})
+
+    def test_an_ask_message_with_a_command_and_no_paste_is_denied(self):
+        out = self.go("SendMessage", {"to": "Odile", "message": "ASK q7: Petra, boss of x: run $ git push?"})
+        self.assertEqual(out["permissionDecision"], "deny")
+
+    def test_an_ask_message_that_names_the_paste_passes(self):
+        self.assertEqual(self.go("SendMessage", {"to": "Odile",
+                                                 "message": "ASK q7: run $ git push? Paste: Push, on my card"}), {})
+
+    def test_other_messages_are_left_alone(self):
+        self.assertEqual(self.go("SendMessage", {"to": "Odile", "message": "tell them $ ls is fine"}), {})
+
+    def test_a_session_that_is_no_boss_is_left_alone(self):
+        self.assertEqual(self.go("SendMessage", {"to": "x", "message": "ASK q1: $ ls"}, sid="other"), {})
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -848,8 +848,11 @@ Two kinds, and they need different words:
 Never work around either, and **never ask another worker to run the blocked
 command** — that launders a permission decision they made.
 
-**A command only the owner can run goes on your session card as well as in the
-question** (the owner, 2026-11-01). How: `references/escalation.md`, Rules.
+**Every command the owner types is a Paste on your own card, made by you before you
+ask** (the owner, 2026-11-01 and 2026-11-14), for each option that has them type something, a
+consent question too. When they pick such an option, the Paste is your first action. The guard
+refuses an `ASK` or `AskUserQuestion` with a `$ ` command that names no Paste.
+How: `references/escalation.md`, Rules.
 
 **Ask through your concierge, never in your own turn: `references/concierge.md`.**
 An open `AskUserQuestion` stops you; the guard refuses it while your concierge

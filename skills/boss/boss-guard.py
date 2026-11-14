@@ -29,6 +29,11 @@ names `codex_blocker.py --choose .. tests-alone` or `boss_review.py --waive` wit
 second line of defence only, since `bash -c`, a variable or a script hide the words. The commands check the
 token themselves.
 
+The second deny (the owner, 2026-11-14: "If you want me to run a command, you must always give me a paste in
+AgentView"): an AskUserQuestion, or a SendMessage whose text starts `ASK`, that holds a `$ ` command and names no
+Paste. The boss makes the Paste on its own card first and the question names its title. The check is on the text
+only: AgentView has no cheap way to ask whether a Paste exists.
+
 Active only for sessions that registered themselves as a boss:
     ~/.claude/pm/.boss-sessions/<session_id>
 """
@@ -293,6 +298,33 @@ def is_consent(questions):
                if isinstance(q, dict))
 
 
+# a command for the owner's hand, after `$ ` at a word start (a price like "5$ " does not match)
+OWNER_COMMAND = re.compile(r"(?:^|\s)\$ +[A-Za-z./~_]")
+PASTE_NAMED = re.compile(r"\bpastes?\b", re.I)
+
+PASTE_DENIAL = (
+    "This question has the owner type a command (after `$ `) and names no Paste. Make the Paste on your own card "
+    "first, then send the question again naming its title: write the command to a file in your scratchpad, run "
+    "`agentview hooks/paste create <session-id> <file> --title '<short>' --provider claude` "
+    "(/home/tiroir/Projects/agentview/hooks/paste on the author's machine) and say in the question "
+    "\"Paste: <title> on my card\". An option that has the owner type something needs its own Paste too.")
+
+
+def question_text(questions):
+    parts = []
+    for q in questions:
+        if not isinstance(q, dict):
+            continue
+        parts += [str(q.get("question") or ""), str(q.get("header") or "")]
+        for o in q.get("options") or []:
+            parts += [str(o.get("label") or ""), str(o.get("description") or "")] if isinstance(o, dict) else [str(o)]
+    return "\n".join(parts)
+
+
+def needs_paste(text):
+    return bool(OWNER_COMMAND.search(text)) and not PASTE_NAMED.search(text)
+
+
 def flag_value(words, flag):
     """The value after `flag` (or in `flag=value`), or None."""
     for i, w in enumerate(words):
@@ -389,7 +421,15 @@ def main():
         if tool == "AskUserQuestion":
             record_consent(sid, payload)
         return 0
+    if tool == "SendMessage":
+        msg = (payload.get("tool_input") or {}).get("message")
+        if isinstance(msg, str) and msg.lstrip().startswith("ASK") and needs_paste(msg):
+            deny(PASTE_DENIAL)
+        return 0
     if tool == "AskUserQuestion":
+        if needs_paste(question_text(ti_questions(payload))):
+            deny(PASTE_DENIAL)
+            return 0
         name = None if is_consent(ti_questions(payload)) else concierge_name(sid)
         if name:
             print(json.dumps({
