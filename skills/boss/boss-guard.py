@@ -299,14 +299,15 @@ def is_consent(questions):
 
 
 # a command for the owner's hand, after `$ ` at a word start (a price like "5$ " does not match)
-OWNER_COMMAND = re.compile(r"(?:^|\s)\$ +[A-Za-z./~_]")
+OWNER_COMMAND = re.compile(r"(?:^|[\s`'\"(\[])\$ +[A-Za-z./~_'\"-]")
+ASK_MESSAGE = re.compile(r"\s*ASK\b")
 PASTE_NAMED = re.compile(r"\bpastes?\b", re.I)
 
 PASTE_DENIAL = (
     "This question has the owner type a command (after `$ `) and names no Paste. Make the Paste on your own card "
     "first, then send the question again naming its title: write the command to a file in your scratchpad, run "
-    "`agentview hooks/paste create <session-id> <file> --title '<short>' --provider claude` "
-    "(/home/tiroir/Projects/agentview/hooks/paste on the author's machine) and say in the question "
+    "`<agentview>/hooks/paste create <session-id> <file> --title '<short>' --provider claude` "
+    "(<agentview> is /home/tiroir/Projects/agentview on the author's machine) and say in the question "
     "\"Paste: <title> on my card\". An option that has the owner type something needs its own Paste too.")
 
 
@@ -423,7 +424,7 @@ def main():
         return 0
     if tool == "SendMessage":
         msg = (payload.get("tool_input") or {}).get("message")
-        if isinstance(msg, str) and msg.lstrip().startswith("ASK") and needs_paste(msg):
+        if isinstance(msg, str) and ASK_MESSAGE.match(msg) and needs_paste(msg):
             deny(PASTE_DENIAL)
         return 0
     if tool == "AskUserQuestion":

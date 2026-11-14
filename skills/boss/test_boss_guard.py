@@ -558,6 +558,18 @@ class AskedCommandsNeedAPaste(GuardCase):
         self.assertEqual(self.go("SendMessage", {"to": "Odile",
                                                  "message": "ASK q7: run $ git push? Paste: Push, on my card"}), {})
 
+    def test_a_command_in_backticks_or_brackets_is_denied(self):
+        for q in ("Run `$ gh run cancel 1`?", "Run ($ ls)?", 'Run "$ ls"?'):
+            self.assertEqual(self.ask(q)["permissionDecision"], "deny", q)
+
+    def test_the_header_and_an_option_description_are_read(self):
+        q = {"question": "Which?", "header": "Pick", "options": [{"label": "A", "description": "you run $ make x"}]}
+        self.assertEqual(self.go("AskUserQuestion", {"questions": [q]})["permissionDecision"], "deny")
+
+    def test_an_ask_with_leading_space_is_read_and_lowercase_ask_is_not_an_ask(self):
+        self.assertEqual(self.go("SendMessage", {"to": "O", "message": "  ASK q1: $ ls"})["permissionDecision"], "deny")
+        self.assertEqual(self.go("SendMessage", {"to": "O", "message": "ask them: $ ls"}), {})
+
     def test_other_messages_are_left_alone(self):
         self.assertEqual(self.go("SendMessage", {"to": "Odile", "message": "tell them $ ls is fine"}), {})
 
