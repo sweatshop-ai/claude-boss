@@ -49,7 +49,7 @@ reply supersedes the timer.
   to agents, which they then run themselves). Before you send an `ASK` or an `AskUserQuestion`: write the command to
   a file in your scratchpad, run agentview's `hooks/paste create <session-id> <file> --title '<short>' --provider
   claude` (`/home/tiroir/Projects/agentview/hooks/paste` on the author's machine), and name the title in the
-  question ("Paste: <title> on my card"). Also put it after `$ ` in your team-line `--ask`. The concierge is not
+  question ("Paste: <title> on my card"; in a `CONSENT:` question, in an option's description, never in the question line, which `consent.py` matches whole). Also put it after `$ ` in your team-line `--ask`. The concierge is not
   the one who makes it: it only backs you up if you forget. The guard refuses an `ASK` or `AskUserQuestion` with a
   `$ ` command that names no Paste. When an answer picks an option that means "I type it", your first action is the
   Paste, if it is not there yet; send nothing before. On 2026-11-01 three `gh run cancel` lines sat only in an

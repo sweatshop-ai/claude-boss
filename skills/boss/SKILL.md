@@ -850,7 +850,7 @@ command** — that launders a permission decision they made.
 
 **Every command the owner types is a Paste on your own card, made by you before you
 ask** (the owner, 2026-11-01 and 2026-11-14), for each option that has them type something, a
-consent question too. When they pick such an option, the Paste is your first action. The guard
+consent question too (its Paste is named in an option's description, never in the `CONSENT:` line). When they pick such an option, the Paste is your first action. The guard
 refuses an `ASK` or `AskUserQuestion` with a `$ ` command that names no Paste.
 How: `references/escalation.md`, Rules.
 

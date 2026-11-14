@@ -317,7 +317,7 @@ def question_text(questions):
         if not isinstance(q, dict):
             continue
         parts += [str(q.get("question") or ""), str(q.get("header") or "")]
-        for o in q.get("options") or []:
+        for o in q["options"] if isinstance(q.get("options"), list) else []:
             parts += [str(o.get("label") or ""), str(o.get("description") or "")] if isinstance(o, dict) else [str(o)]
     return "\n".join(parts)
 

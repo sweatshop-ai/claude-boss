@@ -570,6 +570,13 @@ class AskedCommandsNeedAPaste(GuardCase):
         self.assertEqual(self.go("SendMessage", {"to": "O", "message": "  ASK q1: $ ls"})["permissionDecision"], "deny")
         self.assertEqual(self.go("SendMessage", {"to": "O", "message": "ask them: $ ls"}), {})
 
+    def test_a_malformed_options_field_does_not_crash_the_guard(self):
+        self.assertEqual(self.go("AskUserQuestion", {"questions": [{"question": "Which?", "options": 5}]}), {})
+
+    def test_a_consent_question_names_its_paste_in_an_option(self):
+        q = {"question": "CONSENT: run it? Or you run $ ssh box x", "options": [{"label": "Yes", "description": "Paste: Box write on my card"}]}
+        self.assertEqual(self.go("AskUserQuestion", {"questions": [q]}), {})
+
     def test_other_messages_are_left_alone(self):
         self.assertEqual(self.go("SendMessage", {"to": "Odile", "message": "tell them $ ls is fine"}), {})
 
