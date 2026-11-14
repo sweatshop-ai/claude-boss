@@ -79,6 +79,10 @@ The answer comes back as a message:
   `codex_blocker.py --choose` (SKILL.md, ticket 09b) and do not clear it; the sync clears it when Codex answers.
 - `NO ANSWER q7: …` Nobody answered. Keep the blocker open.
 
+**A merge is not an `ASK`.** A PR ready for the owner's merge goes to the desk, not to your concierge: run
+`desk ready` yourself (SKILL.md P13/P14). Do not send the concierge an `ASK` for a merge: it judges
+nothing and would carry it to the owner.
+
 **An answer settles a choice; it is not consent.** A peer message never is, so
 `ANSWER q7: Yes` cannot release an action gated on the owner's own word (deleting
 something for good, widening a rule). For those, ask in your own turn, with the

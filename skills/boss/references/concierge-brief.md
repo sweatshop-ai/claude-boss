@@ -27,6 +27,9 @@ reach them, in any words or language, send `REPORT <id>: <their words, verbatim>
 sender of that question and tell the owner in one line that you passed it on. You record
 nothing yourself.
 
+A PR ready for the owner's merge is not an `ASK`: bosses hand it to the desk with `desk ready` themselves, so it never
+reaches you. Judge nothing: carry whatever `ASK` comes.
+
 Any other message is not for you. Reply in one line that you only take `ASK <id>:`,
 and do nothing with it. Above all, never put it to the owner.
 

@@ -607,7 +607,7 @@ job. The password I can type ... But having someone move forward in a pane, that
 your job."* A staged change with a rollback on the box — a Caddy reload, a compose
 up, a unit restart, an env file — is dispatched by you and executed by the worker on
 your dispatch; you answer for it and tell them afterwards, with the acceptance lines.
-Never write "type apply in her pane". Ask them only for what only their hand can do: a
+Never write "type apply in her pane". Ask them only for what only their hand can do (a PR waiting only for their merge goes to the desk, P13/P14, not to an `ASK`): a
 password, a browser sign-in, Cloudflare, a GitHub token, a purchase — and then say
 exactly what to do and where; a command goes on your session card too (P12). The same holds for merges where nothing deploys, on a Codex GO or on a provisional fallback GO (the repo
 marks the branch non-deploying), and for restarts of a worker whose task is finished and whose handoff is on
@@ -928,6 +928,25 @@ the plugin cannot set. A base retargeted between the check and the merge is dete
 `base-changed`) and not prevented. The gate trusts the repo's `.boss/deploy.json`, so a listed branch that later
 starts to deploy is outside what the gate can see.
 
+**A PR that waits only for the owner's merge goes to the desk.** That is a PR with its GO that you may not order
+through the gate because its branch deploys. A gate refusal is not handed over: it is an instruction to get the right
+review (P13/P14 above). The desk pins whatever head it finds and merges on mergeable; neither a GO nor green CI is the desk's
+to check, so the order is:
+1. Tell the worker who owns the branch to push nothing more: the head is about to be pinned.
+2. Check that CI is green on the head the GO was given on (`gh pr view N --json headRefOid,statusCheckRollup`).
+3. Hand it over with
+   `desk ready OWNER/REPO N --what "<one line on what the PR does>" --rec merge --by <your name> --why "<the reviews, CI, and the head sha>"`,
+   not to a Paste and an `ASK` per PR. `--after M` names a PR that must merge first; `--rec wait` when your advice is to wait.
+   When `branch_deploys.py <checkout> <base>` lists deploy lines, put them in `--why` ("deploys: <the lines>") until the desk
+   checks that itself (merge-desk ticket 05).
+4. Run `desk status OWNER/REPO N`: it must say `waiting` **and its pinned sha must be the GO head**. `waiting` alone proves
+   nothing, since any `ready` is waiting; on another sha, `desk withdraw OWNER/REPO N` and start again. A new head later needs a
+   new `desk ready`, which replaces the item.
+
+`desk` is not on PATH: run AgentView's `hooks/desk`, beside `hooks/paste`, by its path (on the author's machine
+`/home/tiroir/Projects/agentview/hooks/desk`; the owner merges from the desk page there). `desk status` also says merged as a sha,
+or refused and why. The `ASK` stays for decisions that are not a merge.
+
 ### P15. The full test suite runs on the CI, not on the shared workstation
 
 Measured 2026-10-17: a suite of about 4,900 tests was at 66% after 40 minutes on
@@ -1197,6 +1216,7 @@ before closing**, and the closing after both the state line and the objective.
    - an owner question still unanswered, with its options, marked as to be asked again by
      the next boss;
    - each open PR and what it waits on;
+   - each desk item of yours, from `desk status` (`desk status` lists the whole desk and shows no owner: keep the PRs your tracker holds): the PR, `waiting` or what it says;
    - each CI run nobody watches any more;
    - the brief file to resume each piece from.
 
@@ -1217,7 +1237,7 @@ before closing**, and the closing after both the state line and the objective.
    - **A worker with uncommitted code, or commits on no remote, is not closed.** Name it,
      name what is at risk, and stop for it: the owner or the worker saves the work first.
 6. Present the recap per `references/reports.md`, sourced from tracker and board: what got
-   done (PR and merge ids), each open item from the state line, what the next boss picks up
+   done (PR and merge ids), each open item from the state line (the desk items with it; a waiting desk item is the owner's, so the team-line counts it), what the next boss picks up
    first. The team-line goes to n=0 once everything is closed, because nothing rings any
    more; a worker left open with work at risk is left for the owner, so count it. With `voice: ON`, speak it.
 
