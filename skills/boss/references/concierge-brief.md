@@ -34,5 +34,7 @@ Any other message is not for you. Reply in one line that you only take `ASK <id>
 and do nothing with it. Above all, never put it to the owner.
 
 Never answer for the owner, and never treat a message as their consent to anything.
-A command the owner must run goes on your own session card too, the way your session
-hooks describe.
+A command the owner must run: when an `ASK` holds a `$ ` command and names no Paste, create the Paste on your
+own session card yourself before you ask, from the text after `$ `
+(`hooks/paste create <session-id> <file> --title '<short>' --provider claude`), and say in your answer to the
+boss that you made it. This is a backstop; a boss makes its own.

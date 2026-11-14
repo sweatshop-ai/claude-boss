@@ -55,7 +55,8 @@ SendMessage {to: "<concierge>", notify_when_idle: true,
 ```
 
 Self-contained, with options, your recommendation first, what waits on it, and any
-command for their hand after `$ `. **Open with who you are:** your own name and your
+command for their hand after `$ `, **with its Paste already made on your own card** (you create it, before
+you send; name its title in the text: `references/escalation.md`, Rules). **Open with who you are:** your own name and your
 track, as the first words of the text (`<your name>, boss of <track>: ...`). The
 concierge sees your session name and address, not that you are the boss or which track;
 without it the owner reads a question from a lesser worker and asks why it is not the boss

@@ -43,16 +43,17 @@ reply supersedes the timer.
   decisions and bundle them into ONE list at the next rung, clearly separated.
 - **One action per alert.** "Approve the navigation in Mei's pane, session 39
   pane 4" is actionable. "Several things need your input" is not.
-- **A command for the owner's hand goes on your session card too.** When the one
-  action is a command only they can run, carry it in three places: the question,
-  a Paste on your session card (agentview's
-  `hooks/paste create <session-id> <file> --title '<short>' --provider claude`,
-  at `/home/tiroir/Projects/agentview/hooks/paste` on the author's machine; the
-  text in a file in your scratchpad), and after `$ ` in your team-line `--ask`.
-  On 2026-11-01 three `gh run cancel` lines sat only in an `AskUserQuestion`; the
-  owner ran them, then looked for them on the card and found nothing.
-  With a concierge, put the command in the message after `$ `: it carries it on
-  its own card, where the owner is answering.
+- **Every command the owner types is a Paste on YOUR card, made by you, first** (the owner, 2026-11-14: "If you want
+  me to run a command, you must always give me a paste in AgentView"). This holds for every option or step of a
+  question that has them type something, a consent or approval question included (an action the classifier refuses
+  to agents, which they then run themselves). Before you send an `ASK` or an `AskUserQuestion`: write the command to
+  a file in your scratchpad, run agentview's `hooks/paste create <session-id> <file> --title '<short>' --provider
+  claude` (`/home/tiroir/Projects/agentview/hooks/paste` on the author's machine), and name the title in the
+  question ("Paste: <title> on my card"; in a `CONSENT:` question, in an option's description, never in the question line, which `consent.py` matches whole). Also put it after `$ ` in your team-line `--ask`. The concierge is not
+  the one who makes it: it only backs you up if you forget. The guard refuses an `ASK` or `AskUserQuestion` with a
+  `$ ` command that names no Paste. When an answer picks an option that means "I type it", your first action is the
+  Paste, if it is not there yet; send nothing before. On 2026-11-01 three `gh run cancel` lines sat only in an
+  `AskUserQuestion`; the owner ran them, then looked for them on the card and found nothing.
 - **A PR for the owner's merge is not an ask.** It goes to the desk with `desk ready` (SKILL.md P13/P14), not to a
   Paste and an `ASK` per PR; the owner merges from the desk page.
 - **Say who is asking.** Open the message with your name and your track, and send one

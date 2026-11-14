@@ -13,6 +13,8 @@ _Avoid_: marker (that is the ladder's token on an open blocker)
 the boss's turn never stops on a question. Not a worker: no ticket is for it and the pulse does not count it. The
 pane option `@worker_role` says which pane it is.
 
+**Paste**: a titled text a session leaves on its AgentView card for the owner (`hooks/paste create`). Every command the owner must type is one, made by the boss itself before it asks. _Avoid_: clipboard.
+
 **Agent-teams teammate**: a session that a Claude Code agent-teams lead
 (`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS`) spawned inside its own process. Not a
 worker: it has no pane and no stamp, dies with its lead, and the boss neither
