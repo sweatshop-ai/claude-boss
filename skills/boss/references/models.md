@@ -38,13 +38,14 @@ Same tokenizer across Fable 5.1 and Opus 4.7+, so the context lines (150k/250k
 for workers, 150k/250k for the boss) and the 60k/90k cost-per-turn lines need no
 re-baselining. The boss's pair was 400k/500k until 2026-11-15.
 
-**Effort: `high` on the boss, `medium` on every worker**, pinned by
+**Effort: `medium` on the boss and on every worker**, pinned by
 `boss-start` and by `spawn`. Claude Code's default is `high` on every model
 except Opus 4.7, so a global `effortLevel` would otherwise decide it. The boss
 ran at `xhigh` until 2026-10-20 on the argument that its turns are
 cache-read-dominated; that holds for token counts, not dollars: on six measured
-boss sessions, output (thinking included) was 17-30% of the cost. `high` keeps
-its judgement calls sound for less. Workers, Opus and Sonnet
+boss sessions, output (thinking included) was 17-30% of the cost. It ran at
+`high` from then until 2026-11-15, when the owner set it to `medium` with the
+move to Opus 5.5. Workers, Opus and Sonnet
 alike, run at `medium` (the owner, 2026-10-20; `xhigh` from 2026-09-08): a
 worker lives in the output columns, and its work is checked by the boss and
 the review chain. `BOSS_WORKER_EFFORT` overrides it for the machine. `max` was

@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.25.0
+
+- **The boss runs at effort `medium` (the owner, 2026-11-15; was `high`).** `bin/boss-start` defaults `BOSS_EFFORT` to `medium`; SKILL.md and `references/models.md` say so. This release also ships the 2026-11-15 change below: a boss started before it was installed ran on 0.24.1 with `--autocompact 450k`.
 
 - **The boss costs less per turn: Opus 5.5, compaction at 200k, and no polling (2026-11-15).** Measured over 2026-11-13..15 on the owner's fleet: bosses were 25% of the spend, 67% of it cache reads at a 220-260k median context; review subagents were 29% (767 of 808 subagents). `bin/boss-start` now starts the boss on `opus` (Opus 5.5) with `--fallback-model sonnet` and `--autocompact 200k`, was `fable`, `opus` and `450k`: Opus 5.5 is cheaper than Fable on every price column, cache reads included ($0.20 against $0.25); a measured boss call costs $0.067 against $0.108. `policy.py` lowers the boss band to `BOSS_EVAL, BOSS_RESTART = 150_000, 250_000` (was 400k/500k). SKILL.md gains "4. Waiting": wait on one event instead of re-running `gh pr list` or `cat`, an idle notice after the report needs no tool call, `team-line` once per turn, batch tracker edits. The review dispatch text forbids workers' own review subagents beyond `boss_review.py` and `code-review` once, re-reads only the diff of fixes, and review lenses are no longer a burst example; the boss does not re-review a PR its worker had reviewed. `references/models.md` is rewritten with the 2026-11-15 prices. Bosses already running keep their old settings until restarted with `boss-start`.
 
