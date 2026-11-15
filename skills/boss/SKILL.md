@@ -16,7 +16,7 @@ The owner watches those panes and can talk to any worker directly.
 ## Session start — do these six things
 
 A boss is launched with `boss-start` (`${CLAUDE_PLUGIN_ROOT}/skills/boss/bin/boss-start`),
-which runs `claude --model opus --effort high --autocompact 200k
+which runs `claude --model opus --effort medium --autocompact 200k
 --fallback-model sonnet` inside tmux. If you were started as bare `claude`, say so
 in your first reply: you are then on whatever `~/.claude/settings.json` says,
 and the fix is the owner typing `/autocompact 200k` in your pane — you cannot run it.
@@ -195,7 +195,7 @@ machinery that watches your team can see it.
 ### Lifecycle
 
 ```bash
-boss-start [track]                                        # the owner runs this: opus, high, autocompact 200k
+boss-start [track]                                        # the owner runs this: opus, medium, autocompact 200k
 boss-lifecycle.sh spawn <project-dir> [name] [--model M]  # prints pane id + name; M defaults to opus, effort medium
 boss-lifecycle.sh spawn <dir> --concierge                 # holds your questions to the owner; sonnet
 boss-lifecycle.sh claim <pane-id> [name] [--concierge]    # adopt a worker; --concierge re-marks a restarted concierge
