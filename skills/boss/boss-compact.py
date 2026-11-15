@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Compaction hooks for boss sessions — the boss compacts, so make it survivable.
 
-A boss runs with --autocompact 450k (bin/boss-start). Compaction summarises;
+A boss runs with --autocompact 200k (bin/boss-start). Compaction summarises;
 what the summary drops is gone. Two events let us steer that:
 
   PreCompact               Nothing useful to say. This hook used to emit an

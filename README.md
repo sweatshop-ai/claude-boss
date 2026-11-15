@@ -62,7 +62,7 @@ with a handoff is enough, and a boss over a single worker is overhead.
 | `boss-guard.py` | PreToolUse | The boss implementing instead of delegating. Says so once, then keeps a running count — measured across 21 sessions, the old version repeated one sentence 2,589 times, about 215,000 tokens. |
 | `boss-guard.py` | PreToolUse, AskUserQuestion | A question that would stop the boss's turn, when it has a concierge to hold it: its one deny. Without a live concierge the question goes through. See `skills/boss/references/concierge.md`. |
 | `boss-pulse.py` | Stop | A boss going quiet with idle workers, an overdue escalation rung, or an open blocker it never put to anyone. |
-| `boss-compact.py` | PreCompact, SessionStart | Hands the tracker back after an autocompact, so a 450k compaction costs the boss nothing. |
+| `boss-compact.py` | PreCompact, SessionStart | Hands the tracker back after an autocompact, so a 200k compaction costs the boss nothing. |
 | `boss-reap.py` | SessionEnd | Per-session state outliving its session. |
 
 They all early-exit unless the session registered itself as a boss, so an

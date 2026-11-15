@@ -34,9 +34,11 @@ WORKER, BOSS = "worker", "boss"
 # OVER the "Session age" rule for a long worker applies.
 WORKER_SPLIT, WORKER_OVER = 150_000, 250_000
 
-# A boss compacts at 450k (bin/boss-start) and its state is the tracker. EVAL:
-# start evaluating; RESTART: overdue.
-BOSS_EVAL, BOSS_RESTART = 400_000, 500_000
+# A boss compacts at 200k (bin/boss-start) and its state is the tracker. EVAL:
+# start evaluating; RESTART: overdue. Lowered from 400k/500k on 2026-11-15: a
+# boss turn re-reads its whole context, and four bosses at a 220-260k median
+# were 25% of the fleet's spend over 2026-11-13..15.
+BOSS_EVAL, BOSS_RESTART = 150_000, 250_000
 
 # How many workers one boss runs at once (2026-10-21, the owner: finish sooner,
 # spend the weekly budget sooner). The binding limit is the weekly usage cap,

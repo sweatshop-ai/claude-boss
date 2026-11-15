@@ -26,7 +26,7 @@ class Flags(unittest.TestCase):
 
     def test_boss_bands(self):
         B = policy.BOSS
-        self.assertEqual(policy.flag_for(policy.WORKER_OVER, 0, B), [])
+        self.assertEqual(policy.flag_for(policy.BOSS_EVAL - 1, 0, B), [])
         self.assertEqual(policy.flag_for(policy.BOSS_EVAL, 0, B), ["CTX-EVAL"])
         self.assertEqual(policy.flag_for(policy.BOSS_RESTART, 0, B), ["CTX-RESTART"])
 
@@ -40,7 +40,7 @@ class Flags(unittest.TestCase):
 
     def test_heavy_by_role(self):
         self.assertTrue(policy.heavy(policy.WORKER_SPLIT, 0))
-        self.assertFalse(policy.heavy(policy.WORKER_SPLIT, 0, policy.BOSS))
+        self.assertFalse(policy.heavy(policy.BOSS_EVAL - 1, 0, policy.BOSS))
         self.assertTrue(policy.heavy(0, policy.COST_RECYCLE, policy.BOSS))
 
 
