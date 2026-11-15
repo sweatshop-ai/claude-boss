@@ -370,10 +370,10 @@ def queue_problem(repo: str, pr: int, base: str, io_timeout: float, line: dict |
             rules = json.loads(run.out.decode("utf-8"))
             if not isinstance(rules, list) or not all(isinstance(r, dict) and isinstance(r.get("type"), str) for r in rules):
                 raise ValueError("the branch rules are not a list I can read")
-            if any(r["type"] == "merge_queue" for r in rules):
-                return "merge-queue-unsupported", "%s has a merge-queue rule" % base
             if line is not None:
                 line["queue_rules"] = "read"
+            if any(r["type"] == "merge_queue" for r in rules):
+                return "merge-queue-unsupported", "%s has a merge-queue rule" % base
         owner, _, name = repo.partition("/")
         run = boss_review._spawn(["gh", "api", "graphql", "-f", "query=" + _QUEUE_QUERY, "-f", "owner=" + owner,
                                   "-f", "name=" + name, "-f", "base=" + base, "-F", "number=%d" % pr], io_timeout)

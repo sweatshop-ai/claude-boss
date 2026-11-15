@@ -1684,6 +1684,7 @@ class MergeQueue(Base):
     def test_a_ruleset_of_type_merge_queue_refuses(self):
         self.refused(3, "merge-queue-unsupported", rules=[{"raw": json.dumps([{"type": "deletion"}, {"type": "merge_queue"}])}])
         self.assertIn("merge-queue rule", self.err)
+        self.assertEqual(self.last()["queue_rules"], "read")
 
     def test_a_merge_queue_that_github_reports_for_the_branch_refuses(self):
         self.refused(3, "merge-queue-unsupported", graphql=[self.graphql(queue={"id": "MQ_1"})])
