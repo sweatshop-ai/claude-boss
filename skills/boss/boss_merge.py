@@ -332,22 +332,48 @@ _QUEUE_QUERY = ("query($owner:String!,$name:String!,$base:String!,$number:Int!){
                 "{mergeQueue(branch:$base){id} pullRequest(number:$number){autoMergeRequest{enabledAt} isInMergeQueue}}}")
 
 
-def queue_problem(repo: str, pr: int, base: str, io_timeout: float) -> tuple[str, str] | None:
+# What GitHub answers `GET /repos/{repo}/rules/branches/{branch}` on a private repository on the free plan: rulesets are
+# a paid feature there, and so are merge queues, so this answer means no ruleset (and no merge_queue rule) can exist.
+# https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue
+# https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/about-rulesets
+_NO_RULESETS_MESSAGE = "Upgrade to GitHub Pro or make this repository public to enable this feature."
+
+
+def _plan_has_no_rulesets(run) -> bool:
+    """True only for that exact answer: a failed read, HTTP 403 in gh's error, and a JSON body whose status is "403" and
+    whose message is GitHub's upgrade text. Any other 403, a 404, a timeout, a body that is not that: False."""
+    if run.timed_out or run.code is None or run.code == 0 or "(HTTP 403)" not in run.err:
+        return False
+    try:
+        body = json.loads(run.out.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError):
+        return False
+    return isinstance(body, dict) and body.get("status") == "403" and body.get("message") == _NO_RULESETS_MESSAGE
+
+
+def queue_problem(repo: str, pr: int, base: str, io_timeout: float, line: dict | None = None) -> tuple[str, str] | None:
     """(reason, note) when the merge must not be made because something could be left scheduled: a merge queue on the
     base (a ruleset of type merge_queue, or the queue GitHub reports for the branch, which covers legacy protection too),
     or an auto-merge request or queue entry the PR already has. None when all of that was read and is absent. Fails
     closed: whatever cannot be read refuses (ticket 54: the gate never passes `--auto`, so on a base with no queue
-    `gh pr merge` merges or fails and schedules nothing)."""
+    `gh pr merge` merges or fails and schedules nothing). One answer is not a failure: the plan has no rulesets, so no
+    merge_queue rule; the queue and auto-merge reads still run. `line["queue_rules"]` records which case applied."""
     run = boss_review._spawn(["gh", "api", "repos/%s/rules/branches/%s" % (repo, urllib.parse.quote(base, safe=""))],
                              io_timeout)
     try:
-        if run.timed_out or run.code != 0:
-            raise ValueError("the branch rules could not be read")
-        rules = json.loads(run.out.decode("utf-8"))
-        if not isinstance(rules, list) or not all(isinstance(r, dict) and isinstance(r.get("type"), str) for r in rules):
-            raise ValueError("the branch rules are not a list I can read")
-        if any(r["type"] == "merge_queue" for r in rules):
-            return "merge-queue-unsupported", "%s has a merge-queue rule" % base
+        if _plan_has_no_rulesets(run):
+            if line is not None:
+                line["queue_rules"] = "plan-has-no-rulesets"
+        else:
+            if run.timed_out or run.code != 0:
+                raise ValueError("the branch rules could not be read")
+            rules = json.loads(run.out.decode("utf-8"))
+            if not isinstance(rules, list) or not all(isinstance(r, dict) and isinstance(r.get("type"), str) for r in rules):
+                raise ValueError("the branch rules are not a list I can read")
+            if line is not None:
+                line["queue_rules"] = "read"
+            if any(r["type"] == "merge_queue" for r in rules):
+                return "merge-queue-unsupported", "%s has a merge-queue rule" % base
         owner, _, name = repo.partition("/")
         run = boss_review._spawn(["gh", "api", "graphql", "-f", "query=" + _QUEUE_QUERY, "-f", "owner=" + owner,
                                   "-f", "name=" + name, "-f", "base=" + base, "-F", "number=%d" % pr], io_timeout)
@@ -693,7 +719,7 @@ def merge(repo: str, pr: int, *, dry_run: bool = False, since: str | None = None
         line.update(round=got.round, kind=got.kind)
         if got.exit != EXIT_MERGED:
             return finish(got.exit, got.reason, "refused", note)
-        queued = queue_problem(repo, pr, seen.base, io_timeout)       # before the dry run too: it must say what the merge would
+        queued = queue_problem(repo, pr, seen.base, io_timeout, line)       # before the dry run too: it must say what the merge would
         if queued:
             return finish(EXIT_GH_READ if queued[0] == "gh-read-failed" else EXIT_REFUSED, queued[0], "refused", queued[1])
         if dry_run:
