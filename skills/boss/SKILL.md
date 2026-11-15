@@ -16,11 +16,10 @@ The owner watches those panes and can talk to any worker directly.
 ## Session start — do these six things
 
 A boss is launched with `boss-start` (`${CLAUDE_PLUGIN_ROOT}/skills/boss/bin/boss-start`),
-which runs `claude --model fable --effort high --autocompact 450k
---fallback-model opus` inside tmux. If you were started as bare `claude`, say so
-in your first reply: you are then on whatever `~/.claude/settings.json` says and
-will compact only at the 1M ceiling, and the fix is the owner typing
-`/autocompact 450k` in your pane — you cannot run it.
+which runs `claude --model opus --effort high --autocompact 200k
+--fallback-model sonnet` inside tmux. If you were started as bare `claude`, say so
+in your first reply: you are then on whatever `~/.claude/settings.json` says,
+and the fix is the owner typing `/autocompact 200k` in your pane — you cannot run it.
 
 1. **Register as a boss** so the guard knows who you are, and find out whether
    your voice is on:
@@ -196,7 +195,7 @@ machinery that watches your team can see it.
 ### Lifecycle
 
 ```bash
-boss-start [track]                                        # the owner runs this: fable, high, autocompact 450k
+boss-start [track]                                        # the owner runs this: opus, high, autocompact 200k
 boss-lifecycle.sh spawn <project-dir> [name] [--model M]  # prints pane id + name; M defaults to opus, effort medium
 boss-lifecycle.sh spawn <dir> --concierge                 # holds your questions to the owner; sonnet
 boss-lifecycle.sh claim <pane-id> [name] [--concierge]    # adopt a worker; --concierge re-marks a restarted concierge
@@ -246,7 +245,7 @@ can tell whether the output is right.
 
 ---
 
-## Cost — the three things that actually spend tokens
+## Cost — the four things that actually spend tokens
 
 Measured 2026-08-30 across the fleet (`~/.claude/plans/2026-08-30-boss-team-token-audit.md`).
 
@@ -343,13 +342,15 @@ Two limits:
 it takes a turn. Recycling an old **active** one saves a great deal. These are
 different actions; do not collapse them.*
 
-**Your own context: compact, don't clear (2026-09-08).** You keep a 400–500k
+**Your own context: compact, don't clear (2026-09-08; band lowered 2026-11-15).** You keep a 150–250k
 band, and `list` shows your own row (`self`) with `CTX-EVAL` and `CTX-RESTART`. The
 remedy differs. A worker holds things that exist nowhere else — probe scripts, a
 diagnosis, a half-formed plan — so it gets a handoff and a restart. Your durable
 state is the tracker, on disk, by construction; a compaction costs you little.
-So you never restart yourself: `boss-start` sets `--autocompact 450k` and the
-harness compacts you before you reach the 500k line. You cannot trigger it
+So you never restart yourself: `boss-start` sets `--autocompact 200k` and the
+harness compacts you before you reach the 250k line. The band was 400–500k until
+2026-11-15; over 2026-11-13..15 four bosses ran at a 220–260k median, re-read it on
+every wake-up and were 25% of the fleet's spend. You cannot trigger it
 earlier — there is no programmatic `/compact`. **After a compaction, redo the
 session-start ritual**: `boss-lifecycle.sh list --mine`, then plain `list`. A
 `SessionStart` hook (`boss-compact.py`) injects your tracker's live state into
@@ -358,9 +359,8 @@ track into the marker; the tracker is what the compaction summary cannot lose.
 Open blockers listed there are still live — resume their ladders from the
 recorded T+0.
 
-Workers are deliberately left at the default (compaction at the 1M ceiling) so
-that your one-task rule and the 150k split fire first. Do not set `autoCompactWindow`
-globally — it would take that choice away from you for every worker.
+Workers compact at the owner's global `autoCompactWindow` (200k since 2026-11-15);
+your one-task rule and the 150k split fire first.
 
 ### 2. Broadcasts. They cost N times one message.
 
@@ -383,6 +383,22 @@ If the owner wants more than 12 running, split them across two bosses on separat
 tracks rather than one boss holding all of it.
 
 ---
+
+### 4. Waiting. Every wake-up re-reads your whole context.
+
+A boss turn costs its full context in cache reads, so a look that decides nothing
+costs as much as a decision. Over 2026-11-13..15 one boss made 1,909 calls in 38
+hours: 235 `gh pr list`, 142 `cat` of task output, 120 `team-line`, 39 `sleep`.
+
+- **Wait on one event, not in a loop.** For a PR's checks or a merge, start one
+  background `until` loop or one `Monitor` that exits on every terminal state;
+  do not re-run `gh pr list` or `cat` an output file to see whether it moved.
+- **An idle notice after the report is a no-op.** When the worker's report has
+  already arrived by `SendMessage` and you acted on it, the later idle notice
+  needs no tool call: end the turn.
+- **`team-line` once, at the end of the turn**, not after each step.
+- **Batch.** Several tracker lines go in one edit; several reports that arrive
+  together get one turn.
 
 ## Objective — what you are for
 
@@ -1065,8 +1081,8 @@ Parse `$ARGUMENTS`: empty or `status` → **A** · `dispatch <task> [worker]` �
    first. For a judgment task, add: *"Use a
    cheap subagent for the mechanical parts; keep for yourself only the steps where
    a plausible-looking wrong answer would pass."* Add too: *"If this ticket splits
-   into parts that touch no shared files — review lenses, competing hypotheses,
-   independent research angles — you may run it as a burst: start with 3 background
+   into parts that touch no shared files — competing hypotheses, independent
+   research angles — you may run it as a burst: start with 3 background
    subagents, at most 5, each in its own worktree when it edits. Use agent-teams
    teammates instead only when the parts must talk to each other. Their reports
    count against your 150k."* The worker decides; `references/models.md` has the
@@ -1083,7 +1099,11 @@ Parse `$ARGUMENTS`: empty or `status` → **A** · `dispatch <task> [worker]` �
    code files are byte-identical to the reviewed head. Over 500 added lines: split first. Findings that are only
    tests, docs, style or far-fetched cases become tickets and the review ends; the PR
    merges on its last GO. The standards review (`code-review`) runs once per PR,
-   not on every head."* For a branch that deploys nothing, add: *"Run only the test files your
+   not on every head. Run no review subagents of your own beyond these: no extra
+   'fresh agent' rounds, no review burst. After fixes, a re-read covers only the diff
+   of the fixes."* (2026-11-15: 767 of 808 subagents over two days were reviews, 29% of
+   the fleet's spend.) You do not launch a review of your own on a PR its worker has
+   had reviewed: read the round file. For a branch that deploys nothing, add: *"Run only the test files your
    change touches; the CI runs the full suite (P15)."* When that CI runs on a
    small shared runner pool, add P16's three push rules word for word. For a task
    that runs tests, a script or the app, add (P17): *"Before you trust a run, prove it hits

@@ -1,43 +1,42 @@
 # Choosing a worker's model, and where the cheap model belongs
 
-## Which model runs the boss (2026-09-08)
+## Which model runs the boss (2026-11-15; Fable from 2026-09-08)
 
-The boss runs on **Fable 5.1**; workers default to **Opus 5**. `boss-start`
-sets the first, `boss-lifecycle.sh spawn` the second.
+The boss runs on **Opus 5.5**, and so do workers by default. `boss-start` sets
+the first, `boss-lifecycle.sh spawn` the second.
 
 Apply the criterion below to the boss itself. Its deliverable is a judgement:
 whether a worker's "zero found" counted the right unit, whether a plan collides
 with another worker, whether the 26% asymmetry mentioned in passing is the real
 finding. Nobody checks the boss's reading of a report; if it misses the defect,
-the defect ships. That is the right-hand column. A worker's failure is loud by
-comparison — tests, CI, the boss's own review — which is the left-hand column,
-and Opus is the full model there.
+the defect ships. That is the right-hand column, and it rules out Sonnet for the
+boss even at half the price.
 
-**The cost argument is weaker than it looks, in both directions.** List prices
-(platform.claude.com/docs/en/about-claude/pricing, read 2026-09-08):
+**Why not Fable any more.** List prices
+([platform.claude.com pricing](https://platform.claude.com/docs/en/about-claude/pricing), read 2026-11-15):
 
 | | input | cache write 5m | cache read | output |
 |---|---:|---:|---:|---:|
-| Fable 5.1 | $10 | $12.50 | **$0.25** | $50 |
+| Fable 5.1 | $10 | $12.50 | $0.25 | $50 |
+| Opus 5.5 | $4 | $5 | **$0.20** | $20 |
 | Opus 5 | $5 | $6.25 | $0.50 | $25 |
+| Sonnet 5.5 | $2 | $2.50 | $0.10 | $10 |
 
-Fable is 2× Opus on every column except cache reads, where it is half — a
-0.025× multiplier instead of 0.1×. The 2026-08-30 audit measured cache reads at
-97–99% of a boss's context in every band. At a typical boss turn (300k context:
-97% cache read, 2% cache write, 1% fresh, 1.5k output) that comes to about
-$0.24 on Opus and $0.25 on Fable. The boss on Fable is not the expensive choice;
-it is close to free relative to Opus, because a boss mostly re-reads.
+The 2026-09-08 choice rested on Fable re-reading at half the price of Opus 5
+($0.25 against $0.50), since a boss mostly re-reads. Opus 5.5 re-reads at $0.20
+(a 0.05× multiplier) and is cheaper on every other column too. On a measured boss
+turn (chat-box boss, 2026-11-13..15: 239k cache read, 1.7k cache write, 527 output)
+a call costs $0.067 on Opus 5.5, $0.108 on Fable and $0.034 on Sonnet 5.5.
 
-**Where Fable is expensive is a worker.** A worker writes: code, diffs, long
-tool output re-read once. Output at $50 instead of $25 and cache writes at
-$12.50 instead of $6.25 are the columns a worker lives in. That is why `spawn`
-defaults to Opus regardless of the global `model` setting, and why `/model
-fable` typed by the owner in their own terminal must not leak into the fleet.
-Override per worker with `--model` when the criterion below says so.
+**Where Fable is expensive is everywhere now**, a worker above all: output at
+$50 and cache writes at $12.50 are the columns a worker lives in. `spawn`
+defaults to Opus regardless of the global `model` setting, and `/model fable`
+typed by the owner in their own terminal must not leak into the fleet. Override
+per worker with `--model` when the criterion below says so.
 
 Same tokenizer across Fable 5.1 and Opus 4.7+, so the context lines (150k/250k
-for workers, 400k/500k for the boss) and the 60k/90k cost-per-turn lines need no
-re-baselining.
+for workers, 150k/250k for the boss) and the 60k/90k cost-per-turn lines need no
+re-baselining. The boss's pair was 400k/500k until 2026-11-15.
 
 **Effort: `high` on the boss, `medium` on every worker**, pinned by
 `boss-start` and by `spawn`. Claude Code's default is `high` on every model
