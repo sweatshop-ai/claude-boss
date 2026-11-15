@@ -871,7 +871,7 @@ class Command(Base):
         self.assertEqual((intent["decision"], intent["exit"], intent["reason"]), ("merging", None, "codex-go"))
         for line in (first, intent, second):
             self.assertEqual(set(line), {"ts", "repo", "pr", "head", "base", "round", "kind", "decision", "exit",
-                                         "reason", "config", "dry_run", "base_sha"})
+                                         "reason", "config", "dry_run", "base_sha", "queue_rules"})
         self.assertEqual((first["repo"], first["pr"], first["head"], first["base"], first["round"], first["kind"],
                           first["decision"], first["exit"], first["reason"], first["config"], first["dry_run"]),
                          (KEY, PR, HEAD, "main", 1, "codex", "allowed", 0, "codex-go", "ok", True))
@@ -1708,6 +1708,51 @@ class MergeQueue(Base):
             with self.subTest(label):
                 self.gh.set_pr(state="OPEN")
                 self.refused(bm.EXIT_GH_READ, "gh-read-failed", **cfg)
+
+    UPGRADE = {"rc": 1, "raw": json.dumps({"message": "Upgrade to GitHub Pro or make this repository public to enable "
+                                                        "this feature.", "documentation_url": "https://docs.github.com/rest/repos/rules#get-rules-for-a-branch",
+                                           "status": "403"}), "err": "gh: Upgrade to GitHub Pro or make this repository public to enable this feature. (HTTP 403)"}
+
+    def test_the_plan_has_no_rulesets_answer_means_no_queue_rule_and_the_gate_goes_on(self):
+        self.assertEqual(self.go(rules=[self.UPGRADE]), 0, self.err)
+        self.assertEqual(len(self.merges()), 1)
+        self.assertEqual(self.last()["decision"], "merged")
+        self.assertEqual(self.last()["queue_rules"], "plan-has-no-rulesets")
+        self.assertEqual(self.alerts(), [])
+
+    def test_a_rules_read_that_worked_says_so_in_the_log(self):
+        self.assertEqual(self.go(), 0, self.err)
+        self.assertEqual(self.last()["queue_rules"], "read")
+
+    def test_the_plan_answer_still_reads_the_queue_and_the_auto_merge_state(self):
+        self.refused(3, "merge-queue-unsupported", rules=[self.UPGRADE], graphql=[self.graphql(queue={"id": "MQ_1"})])
+        self.gh.set_pr(state="OPEN")
+        self.refused(3, "merge-queue-unsupported", rules=[self.UPGRADE], graphql=[self.graphql(auto={"enabledAt": "t"})])
+        self.gh.set_pr(state="OPEN")
+        self.refused(bm.EXIT_GH_READ, "gh-read-failed", rules=[self.UPGRADE], graphql=[{"rc": 1, "err": "boom"}])
+
+    def test_only_that_one_answer_passes(self):
+        msg = "Upgrade to GitHub Pro or make this repository public to enable this feature."
+        body = lambda m, status: json.dumps({"message": m, "status": status})
+        bad = (("another 403", {"rc": 1, "raw": body("Resource not accessible by integration", "403"),
+                                "err": "gh: Resource not accessible by integration (HTTP 403)"}),
+               ("rate limit 403", {"rc": 1, "raw": body("API rate limit exceeded for user", "403"), "err": "gh: API rate limit (HTTP 403)"}),
+               ("404", {"rc": 1, "raw": body("Not Found", "404"), "err": "gh: Not Found (HTTP 404)"}),
+               ("the message on another status", {"rc": 1, "raw": body(msg, "404"), "err": "gh: " + msg + " (HTTP 404)"}),
+               ("the message with the status but exit 0", {"raw": body(msg, "403")}),
+               ("no body", {"rc": 1, "err": "gh: " + msg + " (HTTP 403)"}),
+               ("body not json", {"rc": 1, "raw": "Upgrade to GitHub Pro", "err": "gh: " + msg + " (HTTP 403)"}),
+               ("the message only inside another text", {"rc": 1, "raw": body("x " + msg, "403"), "err": "gh: x (HTTP 403)"}))
+        for label, entry in bad:
+            with self.subTest(label):
+                self.gh.set_pr(state="OPEN")
+                self.refused(bm.EXIT_GH_READ, "gh-read-failed", rules=[entry])
+
+    def test_the_plan_answer_that_arrives_after_the_timeout_refuses(self):
+        self.gh.configure(api=[{"raw": deploy_answer(GOOD_DEPLOY)}], rules=[dict(self.UPGRADE, sleep=3)])
+        self.put(1)
+        self.assertEqual(self.run_gate(io_timeout=0.4), bm.EXIT_GH_READ)
+        self.assertEqual(self.merges(), [])
 
     def test_a_refusal_writes_no_merging_line_and_a_dry_run_asks_the_same(self):
         self.assertEqual(self.go(dry_run=True, graphql=[self.graphql(queue={"id": "MQ_1"})]), 3, self.err)
