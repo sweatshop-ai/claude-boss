@@ -130,10 +130,22 @@ Point `BOSS_HARD_RULES` elsewhere if you prefer.
 
 ## Handing a plan to a boss
 
-`/claude-boss:hand-to-boss <plan> [boss-model] [worker-model]` takes a plan
+`/claude-boss:hand-to-boss [plan] [boss-model] [worker-model]` takes a plan
 and the tickets `to-tickets` cut from it, writes a brief for a boss, commits
 it beside the tickets, and starts that boss in its own tmux session
-(`boss-<track>`). It answers with the boss's name, so you can talk to it.
+(`boss-<track>`, window `<track>`). It answers with the boss's name, so you can
+talk to it.
+
+With no plan or no tickets yet, it drafts them from the conversation, when the
+goal, the scope and the acceptance criteria are already settled there. It shows
+the plan, the ticket graph (a Mermaid diagram) and the frontier on a sheaf page,
+and launches only after you approve. Too little to go on: it says what is missing
+and stops.
+
+The boss is on Remote Control as `<track> (boss)`, and its concierge as
+`<track> (concierge)`, so you can follow the track and answer its questions from
+claude.ai/code or your phone. `boss-start <track>` does this for any boss started
+with a track; `BOSS_REMOTE_CONTROL=0` turns it off.
 
 ```
 grill -> plan -> to-tickets -> hand-to-boss -> boss + workers
@@ -147,13 +159,14 @@ something must not be touched. `--dry-run <dir>` writes the brief and stops.
 
 It needs two skills this plugin does not ship: one to settle the plan
 (`grill`, or Matt Pocock's `grilling`) and `to-tickets` from the same suite,
-whose local-file ticket format it reads. Without tickets in that format it
-stops and says so.
+whose local-file ticket format it reads and, when it drafts tickets itself,
+follows.
 
 It never fires on its own. To see the frontier of any ticket folder:
 
 ```bash
 python3 skills/hand-to-boss/frontier.py path/to/issues
+python3 skills/hand-to-boss/frontier.py --mermaid path/to/issues   # the graph
 ```
 
 ## The board

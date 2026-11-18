@@ -267,6 +267,12 @@ launch_claude() {
   if [[ "$r" == concierge ]]; then
     local brief="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/references/concierge-brief.md"
     cmd="$cmd --append-system-prompt-file ${brief@Q}"
+    # A boss on Remote Control (boss-start exports its track) puts its concierge
+    # there too, so the owner can answer from the phone (Thierry, 2026-11-18).
+    if [[ -n "${BOSS_RC_TRACK:-}" ]]; then
+      local rc="--remote-control=$BOSS_RC_TRACK (concierge)"
+      cmd="$cmd ${rc@Q}"
+    fi
   else
     cmd="$cmd --disallowedTools AskUserQuestion"
   fi

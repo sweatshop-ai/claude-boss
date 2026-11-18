@@ -40,7 +40,9 @@ It prints the pane and the name; if you already have a live one, it prints that 
 and starts nothing, so a resumed boss can run it again. `list --mine` flags it
 `concierge`. It runs on Sonnet, keeps the `AskUserQuestion` every worker lacks, and
 gets its instructions from `references/concierge-brief.md` at every start, so a
-restart loses nothing and you send it no brief. While it lives the guard refuses your
+restart loses nothing and you send it no brief. When `boss-start` put you on Remote
+Control (it exports `BOSS_RC_TRACK`), the concierge goes on it too, as
+`<track> (concierge)`, so the owner can answer from the phone. While it lives the guard refuses your
 own `AskUserQuestion`. If it is dead or stuck on a prompt, the guard lets yours
 through, so you can never be left unable to ask. On a trust dialog in that folder
 (the machine has not trusted it) it is stuck the same way; look at its pane once.

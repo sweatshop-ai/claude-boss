@@ -27,6 +27,7 @@ sub-issues is external.
 Usage:
     frontier.py <issues-dir>                     the frontier as text, for the brief
     frontier.py --json <issues-dir>              the same, as JSON
+    frontier.py --mermaid <issues-dir>           the graph as a Mermaid flowchart, for review
     frontier.py claim <issues-dir> <NN> <name>   write the claim line, set in-progress
     frontier.py claim gh:owner/repo#N <issue> <name>   label the issue worker:<name>
 
@@ -330,6 +331,31 @@ def as_text(out):
     return "\n".join(rows)
 
 
+STATE_STYLE = {
+    "done": "fill:#e6e6e6,stroke:#999,color:#555",
+    "claimed": "fill:#dbe9ff,stroke:#3b6fd4",
+    "ready": "fill:#d8f5d0,stroke:#2e8b2e",
+    "waiting": "fill:#fff4cc,stroke:#c9a400",
+    "external": "fill:#ffe0e0,stroke:#c0392b",
+}
+
+
+def as_mermaid(out):
+    """The graph for the owner to approve: one node per ticket, coloured by
+    state, an arrow from each blocker, a dashed one from each external blocker."""
+    label = lambda s: s.replace('"', "#quot;")
+    rows = ["graph TD"]
+    for t in out["tickets"]:
+        rows.append('  t%s["%s: %s"]:::%s' % (t["num"], t["num"], label(t["title"]), t["state"]))
+    for t in out["tickets"]:
+        rows += ["  t%s --> t%s" % (n, t["num"]) for n in t["blocked_by"]]
+        for i, what in enumerate(t["external"], 1):
+            rows.append('  x%s_%d(["External: %s"]):::external' % (t["num"], i, label(what)))
+            rows.append("  x%s_%d -.-> t%s" % (t["num"], i, t["num"]))
+    rows += ["  classDef %s %s" % kv for kv in STATE_STYLE.items()]
+    return "\n".join(rows)
+
+
 def claim(folder, num, name):
     gh = GH_SOURCE.match(folder)
     if gh:
@@ -386,10 +412,11 @@ def main(argv):
             print("usage: frontier.py claim <issues-dir> <NN> <name>", file=sys.stderr)
             return 1
         return claim(*argv[1:])
-    as_json = "--json" in argv
-    args = [a for a in argv if a != "--json"]
-    if len(args) != 1:
-        print("usage: frontier.py [--json] <issues-dir> | claim <issues-dir> <NN> <name>", file=sys.stderr)
+    as_json, as_graph = "--json" in argv, "--mermaid" in argv
+    args = [a for a in argv if a not in ("--json", "--mermaid")]
+    if len(args) != 1 or (as_json and as_graph):
+        print("usage: frontier.py [--json | --mermaid] <issues-dir> | claim <issues-dir> <NN> <name>",
+              file=sys.stderr)
         return 1
     tickets, errors = load(args[0])
     for e in errors:
@@ -397,7 +424,7 @@ def main(argv):
     if tickets is None or errors:
         return 2
     out = classify(tickets)
-    print(json.dumps(out, indent=2) if as_json else as_text(out))
+    print(json.dumps(out, indent=2) if as_json else as_mermaid(out) if as_graph else as_text(out))
     return 0
 
 

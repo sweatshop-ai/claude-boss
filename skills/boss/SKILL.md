@@ -195,7 +195,7 @@ machinery that watches your team can see it.
 ### Lifecycle
 
 ```bash
-boss-start [track]                                        # the owner runs this: opus, medium, autocompact 200k
+boss-start [track]                                        # the owner runs this: opus, medium, autocompact 200k; a track names the window and turns on Remote Control "<track> (boss)"
 boss-lifecycle.sh spawn <project-dir> [name] [--model M]  # prints pane id + name; M defaults to opus, effort medium
 boss-lifecycle.sh spawn <dir> --concierge                 # holds your questions to the owner; sonnet
 boss-lifecycle.sh claim <pane-id> [name] [--concierge]    # adopt a worker; --concierge re-marks a restarted concierge
