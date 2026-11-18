@@ -173,7 +173,10 @@ case "$1" in
     if [[ "$*" == "send-keys -t %5 Enter" && -f "$STUB_DIR/dialog" && ! -f "$STUB_DIR/slow" ]]; then
       echo bash > "$STUB_DIR/cmd"; fi ;;
   set-option)
-    if [[ -f "$STUB_DIR/set-fails" ]]; then exit 1; fi ;;
+    if [[ -f "$STUB_DIR/set-fails" ]]; then exit 1; fi
+    # the pane's track, like real tmux: -p sets it, -pu clears it
+    if [[ "$2" == -p && "$5" == @rc_track ]]; then echo "$6" > "$STUB_DIR/rc_track"; fi
+    if [[ "$2" == -pu && "$5" == @rc_track ]]; then rm -f "$STUB_DIR/rc_track"; fi ;;
   split-window) echo %5 ;;
   capture-pane)
     if [[ -s "$STUB_DIR/dialog" ]]; then cat "$STUB_DIR/dialog"
@@ -744,6 +747,7 @@ class RestartKeepsName(unittest.TestCase):
         r, _ = self.run_restart()
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertNotIn("--remote-control", self.launches()[0])
+        self.assertFalse((self.tmp / "rc_track").exists())
 
     def test_a_worker_is_never_on_remote_control(self):
         self.with_rc_track("plans-live")
@@ -765,6 +769,7 @@ class RestartKeepsName(unittest.TestCase):
         self.assertIn("set-option -pu -t %5 @worker_role", (self.tmp / "calls").read_text())
         self.assertIn("set-option -pu -t %5 @custom_title", (self.tmp / "calls").read_text())
         self.assertIn("set-option -pu -t %5 @rc_track", (self.tmp / "calls").read_text())
+        self.assertFalse((self.tmp / "rc_track").exists())
 
     def test_the_concierge_flag_means_spawn_and_claim_only(self):
         for cmd in ("restart", "retire", "move"):

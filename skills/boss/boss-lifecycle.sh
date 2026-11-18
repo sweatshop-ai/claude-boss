@@ -271,7 +271,9 @@ launch_claude() {
     # there too, so the owner can answer from the phone (Thierry, 2026-11-18).
     # The track is stamped on the pane, so a restart by anyone keeps it.
     local track="${BOSS_RC_TRACK:-$(pane_prop "$pane" '#{@rc_track}' 2>/dev/null || true)}"
-    if [[ -n "$track" && "${BOSS_REMOTE_CONTROL:-1}" != 0 ]]; then
+    if [[ "${BOSS_REMOTE_CONTROL:-1}" == 0 ]]; then
+      tmux set-option -pu -t "$pane" @rc_track 2>/dev/null || true
+    elif [[ -n "$track" ]]; then
       tmux set-option -p -t "$pane" @rc_track "$track"
       local remote_ctl="--remote-control=$track (concierge)"
       cmd="$cmd ${remote_ctl@Q}"
@@ -562,8 +564,10 @@ cmd_restart() {
   dir=$(pane_prop "$pane" '#{pane_current_path}')
   local keep; keep=$(agent_name "$pane")
   ROLE=$(pane_prop "$pane" '#{@worker_role}' 2>/dev/null || true)
+  local rc_track; rc_track=$(pane_prop "$pane" '#{@rc_track}' 2>/dev/null || true)
   cmd_retire "$pane" >/dev/null
   if [[ -n "$ROLE" ]]; then tmux set-option -p -t "$pane" @worker_role "$ROLE"; fi
+  if [[ -n "$rc_track" ]]; then tmux set-option -p -t "$pane" @rc_track "$rc_track"; fi
   local sid; sid=$(preassign_name "$keep")
   launch_claude "$pane" "$dir" "$sid"
   # A recycled worker keeps its name: the owner tracks the pane by the name on it,
@@ -586,8 +590,10 @@ cmd_move() {
   local pane; pane=$(resolve_pane "$target")
   local keep; keep=$(agent_name "$pane")
   ROLE=$(pane_prop "$pane" '#{@worker_role}' 2>/dev/null || true)
+  local rc_track; rc_track=$(pane_prop "$pane" '#{@rc_track}' 2>/dev/null || true)
   cmd_retire "$pane" >/dev/null
   if [[ -n "$ROLE" ]]; then tmux set-option -p -t "$pane" @worker_role "$ROLE"; fi
+  if [[ -n "$rc_track" ]]; then tmux set-option -p -t "$pane" @rc_track "$rc_track"; fi
   local sid; sid=$(preassign_name "$keep")
   launch_claude "$pane" "$dir" "$sid"
   if [[ -n "$keep" && "$keep" != "-" && -z "$sid" ]]; then
