@@ -338,6 +338,38 @@ class FrontierCase(unittest.TestCase):
         self.assertIn("03  after 02", r.stdout)
         self.assertNotIn("after 01", r.stdout)
 
+    def run_mermaid(self):
+        return subprocess.run([sys.executable, str(FRONTIER), "--mermaid", str(self.dir)],
+                              capture_output=True, text=True)
+
+    def test_mermaid_draws_every_ticket_edge_and_state(self):
+        self.put("01-a.md", ticket("01", "A", "None", status="done"))
+        self.put("02-b.md", ticket("02", "B \"quoted\"", "None"))
+        self.put("03-c.md", ticket("03", "C", "\n- 01: A\n- 02: B\n- External: DNS (ops)"))
+        r = self.run_mermaid()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        lines = r.stdout.splitlines()
+        self.assertEqual(lines[0], "graph TD")
+        self.assertIn('  t01["01: A"]:::done', lines)
+        self.assertIn('  t02["02: B #quot;quoted#quot;"]:::ready', lines)
+        self.assertIn('  t03["03: C"]:::waiting', lines)
+        self.assertIn("  t01 --> t03", lines)
+        self.assertIn("  t02 --> t03", lines)
+        self.assertIn('  x03_1(["External: DNS (ops)"]):::external', lines)
+        self.assertIn("  x03_1 -.-> t03", lines)
+        self.assertTrue(any(l.startswith("  classDef ready ") for l in lines))
+
+    def test_mermaid_keeps_tags_and_hashes_as_text(self):
+        self.put("01-a.md", ticket("01", "Handle <script> #12;", "None"))
+        r = self.run_mermaid()
+        self.assertIn('  t01["01: Handle #lt;script#gt; #35;12;"]:::ready', r.stdout.splitlines())
+
+    def test_mermaid_refuses_a_broken_graph(self):
+        self.put("01-a.md", ticket("01", "A", "\n- 02: missing"))
+        r = self.run_mermaid()
+        self.assertEqual(r.returncode, 2)
+        self.assertEqual(r.stdout, "")
+
 
 FAKE_GH = r'''#!/usr/bin/env python3
 import json, os, sys

@@ -591,6 +591,71 @@ class StableLink(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(os.readlink(self.home / ".claude" / "routines" / "claude-boss"), str(self.roots[0]))
 
+
+def remote_ctl(out):
+    return [a for a in out["argv"] if a.startswith("--remote-control")]
+
+
+class BossStartNamesTheTrack(unittest.TestCase):
+    """`boss-start <track>` names the tmux window after the track and puts the boss
+    on Remote Control as "<track> (boss)" (Thierry, 2026-11-18). Stub claude and tmux."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="boss-start-"))
+        self.addCleanup(lambda: subprocess.run(["rm", "-rf", str(self.tmp)]))
+        bindir = self.tmp / "bin"
+        bindir.mkdir()
+        (bindir / "claude").write_text(
+            '#!/usr/bin/env python3\nimport json, os, sys\n'
+            'print(json.dumps({"argv": sys.argv[1:], "track": os.environ.get("BOSS_RC_TRACK")}))\n')
+        (bindir / "tmux").write_text('#!/bin/sh\necho "$*" >> "%s/tmux.log"\n' % self.tmp)
+        for f in bindir.iterdir():
+            f.chmod(0o755)
+        self.env = dict(os.environ, PATH="%s:%s" % (bindir, os.environ["PATH"]), TMUX="stub",
+                        TMUX_PANE="%7")
+        self.env.pop("BOSS_RC_TRACK", None)
+        self.env.pop("BOSS_REMOTE_CONTROL", None)
+
+    def start(self, *args, **env):
+        r = subprocess.run([str(BIN / "boss-start"), *args], env=dict(self.env, **env),
+                           capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=30)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        log = self.tmp / "tmux.log"
+        return json.loads(r.stdout), (log.read_text().splitlines() if log.exists() else [])
+
+    def test_no_pane_id_renames_no_window(self):
+        # tmux reads an empty -t as "the current window": some other session's.
+        out, tmux = self.start("plans-live", TMUX_PANE="")
+        self.assertEqual(tmux, [])
+        self.assertIn("--remote-control=plans-live (boss)", out["argv"])
+
+    def test_a_track_names_the_window_and_turns_remote_control_on(self):
+        out, tmux = self.start("plans-live", "/claude-boss:boss monitor")
+        self.assertIn("--remote-control=plans-live (boss)", out["argv"])
+        self.assertEqual(out["argv"][-1], "/claude-boss:boss monitor")
+        self.assertEqual(out["track"], "plans-live")
+        self.assertIn("rename-window -t %7 plans-live", tmux)
+        self.assertIn("set-option -w -t %7 automatic-rename off", tmux)
+        self.assertIn("set-option -w -t %7 allow-rename off", tmux)
+
+    def test_remote_control_can_be_turned_off(self):
+        out, tmux = self.start("plans-live", BOSS_REMOTE_CONTROL="0")
+        self.assertFalse(remote_ctl(out))
+        self.assertIsNone(out["track"])
+        self.assertIn("rename-window -t %7 plans-live", tmux)
+
+    def test_no_track_no_name_and_no_remote_control(self):
+        out, tmux = self.start()
+        self.assertFalse(remote_ctl(out))
+        self.assertIsNone(out["track"])
+        self.assertEqual(tmux, [])
+
+    def test_an_owner_remote_control_flag_is_not_doubled(self):
+        out, _ = self.start("plans-live", "--remote-control=mine")
+        self.assertEqual(remote_ctl(out),
+                         ["--remote-control=mine"])
+
+
 class InstallKeepsUnits(unittest.TestCase):
     """`install.sh` writes the units too, and a re-run must not lose a hand edit.
     Everything runs against a temp HOME with a stub systemctl, never the real config."""

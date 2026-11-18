@@ -162,6 +162,7 @@ case "$1" in
       '#{@boss_pane}') echo '' ;;
       '#{pane_current_command}') cat "$STUB_DIR/cmd" ;;
       '#{@worker_role}') cat "$STUB_DIR/role" 2>/dev/null ;;
+      '#{@rc_track}') cat "$STUB_DIR/rc_track" 2>/dev/null ;;
       '#{pane_pid}') cat "$STUB_DIR/panepid" 2>/dev/null ;;
       *) echo '' ;;
     esac ;;
@@ -172,7 +173,10 @@ case "$1" in
     if [[ "$*" == "send-keys -t %5 Enter" && -f "$STUB_DIR/dialog" && ! -f "$STUB_DIR/slow" ]]; then
       echo bash > "$STUB_DIR/cmd"; fi ;;
   set-option)
-    if [[ -f "$STUB_DIR/set-fails" ]]; then exit 1; fi ;;
+    if [[ -f "$STUB_DIR/set-fails" ]]; then exit 1; fi
+    # the pane's track, like real tmux: -p sets it, -pu clears it
+    if [[ "$2" == -p && "$5" == @rc_track ]]; then echo "$6" > "$STUB_DIR/rc_track"; fi
+    if [[ "$2" == -pu && "$5" == @rc_track ]]; then rm -f "$STUB_DIR/rc_track"; fi ;;
   split-window) echo %5 ;;
   capture-pane)
     if [[ -s "$STUB_DIR/dialog" ]]; then cat "$STUB_DIR/dialog"
@@ -705,12 +709,67 @@ class RestartKeepsName(unittest.TestCase):
         self.assertIn("--append-system-prompt-file", self.launches()[0])
         self.assertIn("concierge-brief.md", self.launches()[0])
 
+    def with_rc_track(self, track):
+        # boss-start exports it into the boss's process, so every Bash call has it.
+        os.environ["BOSS_RC_TRACK"] = track
+        self.addCleanup(os.environ.pop, "BOSS_RC_TRACK", None)
+
+    def test_a_concierge_of_a_boss_on_remote_control_is_on_it_too(self):
+        # The owner answers its questions from the phone (Thierry, 2026-11-18).
+        (self.tmp / "role").write_text("concierge\n")
+        self.with_rc_track("plans-live")
+        r, _ = self.run_restart()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("'--remote-control=plans-live (concierge)'", self.launches()[0])
+
+    def test_the_track_is_stamped_on_the_concierge_pane(self):
+        (self.tmp / "role").write_text("concierge\n")
+        self.with_rc_track("plans-live")
+        r, calls = self.run_restart()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("set-option -p -t %5 @rc_track plans-live", calls)
+
+    def test_a_concierge_restarted_by_someone_else_stays_on_remote_control(self):
+        # The owner or another session restarts it: no BOSS_RC_TRACK in that shell.
+        (self.tmp / "role").write_text("concierge\n")
+        (self.tmp / "rc_track").write_text("plans-live\n")
+        self.with_rc_track("")
+        r, _ = self.run_restart()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("'--remote-control=plans-live (concierge)'", self.launches()[0])
+
+    def test_an_opt_out_beats_a_stamped_track(self):
+        (self.tmp / "role").write_text("concierge\n")
+        (self.tmp / "rc_track").write_text("plans-live\n")
+        self.with_rc_track("")
+        os.environ["BOSS_REMOTE_CONTROL"] = "0"
+        self.addCleanup(os.environ.pop, "BOSS_REMOTE_CONTROL", None)
+        r, _ = self.run_restart()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("--remote-control", self.launches()[0])
+        self.assertFalse((self.tmp / "rc_track").exists())
+
+    def test_a_worker_is_never_on_remote_control(self):
+        self.with_rc_track("plans-live")
+        r, _ = self.run_restart()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("--remote-control", self.launches()[0])
+
+    def test_without_the_boss_track_a_concierge_is_not_on_remote_control(self):
+        (self.tmp / "role").write_text("concierge\n")
+        self.with_rc_track("")
+        r, _ = self.run_restart()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("--remote-control", self.launches()[0])
+
     def test_a_retired_pane_is_no_concierge_any_more(self):
         (self.tmp / "role").write_text("concierge\n")
         r = self.run_lifecycle("retire", "%5", row="w-sid\tidle\tpin1")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("set-option -pu -t %5 @worker_role", (self.tmp / "calls").read_text())
         self.assertIn("set-option -pu -t %5 @custom_title", (self.tmp / "calls").read_text())
+        self.assertIn("set-option -pu -t %5 @rc_track", (self.tmp / "calls").read_text())
+        self.assertFalse((self.tmp / "rc_track").exists())
 
     def test_the_concierge_flag_means_spawn_and_claim_only(self):
         for cmd in ("restart", "retire", "move"):

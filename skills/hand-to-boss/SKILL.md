@@ -1,9 +1,9 @@
 ---
 name: hand-to-boss
-description: Hand an approved plan and its tickets to a new boss session in its own tmux session, which runs a team of workers on them.
+description: Hand a plan and its ticket graph to a new boss session in its own tmux session, which runs a team of workers on them. Drafts the graph from the conversation when there is none yet, and launches only after the owner approves it.
 user_invocable: true
 disable-model-invocation: true
-argument-hint: "<plan-path> [boss-model=opus] [worker-model=sonnet] [--dry-run <dir>]"
+argument-hint: "[plan-path] [boss-model=opus] [worker-model=sonnet] [--dry-run <dir>]"
 ---
 
 # Hand to boss
@@ -14,15 +14,21 @@ The last link of a chain:
 grill -> plan -> to-tickets -> hand-to-boss -> boss + workers
 ```
 
+The chain may stop early. When the owner types this after a discussion, with no
+plan file or no tickets yet, you draft what is missing from the conversation
+(step 1). Either way, the owner sees the plan and the graph before the boss starts,
+and nothing launches without their yes (step 2).
+
 You write a **brief** for a boss that does not exist yet, commit it next to the
 tickets, start that boss in its own tmux session, and report its name. The boss
 then works the ticket graph for hours with a team. That is why this skill fires
 only when the owner types it.
 
-**Arguments**: `$ARGUMENTS` — the plan path; then optionally the boss model
-(default `opus`) and the worker model (default `sonnet`). `--dry-run <dir>` runs
-steps 1 and 2 only and writes the brief into `<dir>`: nothing is committed,
-nothing is launched.
+**Arguments**: `$ARGUMENTS` — optionally the plan path (left out: find it, or
+draft it, step 1); then optionally the boss model (default `opus`) and the worker
+model (default `sonnet`). `--dry-run <dir>` runs steps 1 to 3, writes everything
+it drafts, the review page and the brief into `<dir>`, and asks nothing: nothing is
+committed, nothing is launched.
 
 ## How this differs from a handoff
 
@@ -42,28 +48,91 @@ Three rules are borrowed from those handoffs and hold here:
 - **Suggested skills.** The brief closes with the skills the boss and its workers
   will need.
 
-## 1. Check the input
+## 1. Find the plan and the ticket graph, or draft them
 
-You need a plan file and a folder of ticket files in the format `to-tickets`
-writes: `NN-slug.md`, each with a `**Blocked by:**` field and a `**Status:**`
-line. The tickets usually sit in `.scratch/<feature>/issues/` beside the plan.
+The boss needs a plan file and a folder of ticket files in the format
+`to-tickets` writes: `NN-slug.md`, each with a `**Blocked by:**` field and a
+`**Status:**` line, in `<repo>/.scratch/<track>/issues/` beside the plan. `<track>` is the
+feature slug: short, lowercase, hyphens; it names the tmux session, the window,
+the boss's tracker and its Remote Control sessions.
 
-```bash
-python3 ${CLAUDE_PLUGIN_ROOT}/skills/hand-to-boss/frontier.py <issues-dir>
-```
+Look in this order, and take the first that holds:
 
-Exit 0 prints the frontier. Exit 2 names what is wrong: no tickets, a ticket
-without Blocked by, a reference to a ticket that does not exist.
+1. **A plan path in the arguments.** Its `issues/` folder beside it, if any.
+2. **This conversation.** A plan or ticket folder written or named in it, above
+   all by `to-tickets` or `to-spec` just now.
+3. **The repo.** `<repo>/.scratch/*/issues/` and `<repo>/.scratch/*/*.md` changed
+   in the last day (`find <repo>/.scratch -newermt '-1 day'`). More than one candidate and the
+   conversation does not say which: ask the owner with `AskUserQuestion`, one
+   option per candidate.
 
-**No plan, no tickets, or exit 2: stop.** Tell the owner which is missing and
-point to `grill` to settle the plan and `to-tickets` to cut it. The graph is the
-thing the boss works from; a plan improvised here would be one nobody approved.
+Then one of three cases:
 
-Done when: the plan exists, `frontier.py` exits 0, and at least one ticket is
+- **A. Plan and tickets exist.** Check the graph:
+
+  ```bash
+  python3 ${CLAUDE_PLUGIN_ROOT}/skills/hand-to-boss/frontier.py <issues-dir>
+  ```
+
+  Exit 0 prints the frontier. Exit 2 names what is wrong (no tickets, a ticket
+  without Blocked by, a reference to a ticket that does not exist, a cycle): name
+  it to the owner and stop. These tickets were approved when they were cut; you
+  do not edit them.
+- **B. A plan, no tickets.** Cut them as `to-tickets` would. Read its skill file,
+  `ls ~/.claude/plugins/cache/*/mattpocock-skills/*/skills/engineering/to-tickets/SKILL.md`
+  (the newest version), and follow its slice rules and its local ticket template;
+  its quiz is step 2 here. Missing: the format in the `frontier.py` docstring.
+  Write them to `<repo>/.scratch/<track>/issues/`.
+- **C. Only the conversation.** The decisions are in it but no file holds them.
+  Write the plan to `<repo>/.scratch/<track>/plan.md`: goal, the decisions taken (each
+  with who took it, from the conversation), scope and what is out of scope, the
+  repos and branches, open questions. Point to what exists (files, ADRs, PRs);
+  never copy it. Then cut the tickets as in B.
+
+**Enough material** for B or C means: the goal is stated, the scope is settled,
+and every ticket you write has acceptance criteria you took from the
+conversation or the plan, not invented. Missing any of them: draft nothing, tell
+the owner what is missing in one line each, and point to `grilling` to settle it.
+A graph built on guesses is one the owner would approve without having decided it.
+
+Done when: `frontier.py` exits 0 on the folder, and at least one ticket is
 **Ready now**. None ready means the team would start idle: say which blockers
 hold everything and stop.
 
-## 2. Write the brief
+## 2. Show the graph and wait for approval
+
+The plan and the graph go to the owner before anything is committed or launched,
+in all three cases: in A it is the last look before hours of work, in B and C it
+is the first. Write `<repo>/.scratch/<track>/review.md` in the owner's language, as a project
+document (the sheaf house rules: an H1 naming the subject, a lead of 1–3
+sentences, `##` labels from the trade):
+
+- the plan's path and, in 3–5 lines, what the boss will build and what it will
+  not touch;
+- the graph, from `frontier.py --mermaid <issues-dir>`, in a ` ```mermaid ` block;
+- the frontier as text, from `frontier.py <issues-dir>`;
+- a table of the tickets: number, title, blocked by, what it delivers;
+- the open points: every external blocker and who holds it ("not yet asked" when
+  nobody was), every guess you had to make;
+- which files you drafted and which already existed.
+
+Render it and open it for the owner:
+
+```bash
+sheaf <repo>/.scratch/<track>/review.md
+```
+
+Give the `http://127.0.0.1:…` URL it prints. No `sheaf` on the machine: show the
+plan's path, the frontier and the ticket table in the chat instead. In
+`--dry-run`, render it and give the URL, then go to step 3 without asking.
+
+Then ask once, with `AskUserQuestion`: **launch the boss on this graph**
+(recommended), **change it first** (they say what, or edit the page), or **stop**.
+On "change it": re-read the plan, the tickets and `review.md` from disk (the owner
+may have edited them on the page), apply what they asked, run `frontier.py`
+again, re-render, and ask again. Nothing goes further on any answer but "launch".
+
+## 3. Write the brief
 
 Copy `brief-template.md` (beside this file) to `boss-brief.md` in the folder
 that holds the `issues/` folder, and fill every `{{placeholder}}`:
@@ -105,12 +174,13 @@ Done when: `grep -n '{{' boss-brief.md` finds no placeholder left, every path in
 it exists, and it holds no secret. In `--dry-run`, stop here and give the owner
 the path.
 
-## 3. Commit the brief
+## 4. Commit the brief
 
-Commit `boss-brief.md` alone, by path, next to the tickets:
+Commit `boss-brief.md` by path, next to the tickets, with what you drafted in
+steps 1 and 2 (the plan, the ticket files, `review.md`), never anything else:
 
 ```bash
-git -C <repo> add -- <brief path> && git -C <repo> commit -m "Boss brief for <feature>" -- <brief path>
+git -C <repo> add -- <paths> && git -C <repo> commit -m "Boss brief for <feature>" -- <paths>
 ```
 
 Then push if the repo's rules let you push that branch without asking. When the
@@ -119,14 +189,19 @@ with other sessions' uncommitted work and a pull would carry theirs — leave it
 committed, and say in one line that it is not pushed and why. The boss reads the
 file from disk; the push is backup, not a precondition.
 
-## 4. Launch
+## 5. Launch
 
 The boss starts through `boss-start`, never a bare `claude`: that is where the
 boss's effort, autocompact and fallback settings live, and a boss started
-without them compacts only at the 1M ceiling.
+without them compacts only at the 1M ceiling. Given the track, `boss-start` also
+names the tmux window `<track>` and puts the boss on Remote Control as
+`<track> (boss)`; the concierge the boss spawns joins as `<track> (concierge)`.
+So the owner can follow the track and answer its questions from claude.ai/code
+or the phone. `BOSS_REMOTE_CONTROL=0` in the launch line turns both off, only when
+the owner asks for that.
 
-Name the tmux session `boss-<track>`, where `<track>` is the feature slug. Two
-checks before anything starts:
+Name the tmux session `boss-<track>` and its window `<track>`. Two checks before
+anything starts:
 
 - **Free.** `tmux has-session -t boss-<track>` must fail, and `boss-tracker list`
   must not show the track. Either exists → a boss may already run this plan;
@@ -145,7 +220,7 @@ checks before anything starts:
   `tmux attach -t boss-<track>`), or to stop. Only their hand answers it.
 
 ```bash
-tmux new-session -d -s boss-<track> -c <repo> \
+tmux new-session -d -s boss-<track> -n <track> -c <repo> \
   "BOSS_MODEL=<boss-model> BOSS_WORKER_MODEL=<worker-model> \
    ${CLAUDE_PLUGIN_ROOT}/skills/boss/bin/boss-start <track> \
    '/claude-boss:boss monitor — your brief is <brief path>. Read it first, then every source it names.' ; \
@@ -171,7 +246,7 @@ detaches, and the boss keeps running. Any other terminal, or `wezterm cli`
 fails: open nothing, and the report's attach line is the way in. Never let a
 failed tab stop the launch.
 
-## 5. Find the boss's name
+## 6. Find the boss's name
 
 The pane id: `tmux list-panes -t boss-<track> -F '#{pane_id}'`. Wait up to 90
 seconds for Claude to register in it, with `Monitor` on an until-loop, never
@@ -194,11 +269,17 @@ or permission dialog there is the owner's hand: ask them through
 other screen (an error, a shell prompt) is the finding; report it rather than
 relaunching.
 
-Report, in three lines, in the owner's conversation language:
+Check Remote Control on the same screen: `tmux capture-pane -p -t <pane-id>`
+shows `/remote-control is active` and the session's `https://claude.ai/code/…`
+link. Missing: say so in the report; the boss runs anyway.
+
+Report, in four lines, in the owner's conversation language:
 
 - the boss's name (what `SendMessage` reaches),
-- the tmux session `boss-<track>`, whether its tab opened, and
+- the tmux session `boss-<track>`, window `<track>`, whether its tab opened, and
   `tmux attach -t boss-<track>`,
+- Remote Control: `<track> (boss)` and its link, or that it is off and why; the
+  concierge joins as `<track> (concierge)` when the boss starts it,
 - the brief's path, and whether it is pushed.
 
 Done when the name comes from the `ListAgents` row, not from the pane title.

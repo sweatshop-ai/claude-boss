@@ -40,6 +40,17 @@
 #                          survived), so an owner's --settings in the extra
 #                          args is refused rather than silently dropping either.
 #
+#   --remote-control "<track> (boss)"
+#                          With a track, the boss is on Remote Control under the
+#                          track's name, so the owner can follow it from
+#                          claude.ai/code or the phone (Thierry, 2026-11-18).
+#                          BOSS_RC_TRACK carries the track into the boss's
+#                          Bash calls, and boss-lifecycle.sh puts the concierge
+#                          on it as "<track> (concierge)". BOSS_REMOTE_CONTROL=0
+#                          turns both off. The tmux window takes the track's name
+#                          too, with renaming off so Claude's title does not
+#                          replace it.
+#
 # Global settings would do it too (autoCompactWindow, model), but they would
 # apply to every worker as well, and for workers both are wrong.
 #
@@ -80,10 +91,31 @@ done
 track=""
 if [[ $# -gt 0 && "$1" != -* ]]; then track=$1; shift; fi
 
-printf 'boss-start: model=%s effort=%s autocompact=%s fallback=%s%s\n' \
-  "$MODEL" "$EFFORT" "$AUTOCOMPACT" "$FALLBACK" "${track:+ track=$track}" >&2
+remote_ctl=()
+unset BOSS_RC_TRACK
+if [[ -n "$track" ]]; then
+  # An empty -t means "the current window" to tmux, which from a client
+  # without $TMUX_PANE is some other session's window: rename nothing then.
+  if [[ -n "${TMUX_PANE:-}" ]]; then
+    tmux rename-window -t "$TMUX_PANE" "$track" || true
+    tmux set-option -w -t "$TMUX_PANE" automatic-rename off || true
+    tmux set-option -w -t "$TMUX_PANE" allow-rename off || true
+  fi
+  owner_remote_ctl=""
+  for a in "$@"; do
+    if [[ "$a" == --remote-control || "$a" == --remote-control=* ]]; then owner_remote_ctl=1; fi
+  done
+  if [[ "${BOSS_REMOTE_CONTROL:-1}" != 0 ]]; then
+    export BOSS_RC_TRACK=$track
+    [[ -n "$owner_remote_ctl" ]] || remote_ctl=("--remote-control=$track (boss)")
+  fi
+fi
+
+printf 'boss-start: model=%s effort=%s autocompact=%s fallback=%s%s%s\n' \
+  "$MODEL" "$EFFORT" "$AUTOCOMPACT" "$FALLBACK" "${track:+ track=$track}" \
+  "${BOSS_RC_TRACK:+ remote-control=on}" >&2
 printf '  after it opens, type: /boss%s\n' "${track:+ monitor}" >&2
 
 exec claude --model "$MODEL" --effort "$EFFORT" --autocompact "$AUTOCOMPACT" \
   --fallback-model "$FALLBACK" \
-  --settings '{"env":{"CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS":"0"}}' "$@"
+  --settings '{"env":{"CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS":"0"}}' "${remote_ctl[@]}" "$@"
