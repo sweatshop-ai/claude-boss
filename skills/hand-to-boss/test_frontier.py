@@ -359,6 +359,11 @@ class FrontierCase(unittest.TestCase):
         self.assertIn("  x03_1 -.-> t03", lines)
         self.assertTrue(any(l.startswith("  classDef ready ") for l in lines))
 
+    def test_mermaid_keeps_tags_and_hashes_as_text(self):
+        self.put("01-a.md", ticket("01", "Handle <script> #12;", "None"))
+        r = self.run_mermaid()
+        self.assertIn('  t01["01: Handle #lt;script#gt; #35;12;"]:::ready', r.stdout.splitlines())
+
     def test_mermaid_refuses_a_broken_graph(self):
         self.put("01-a.md", ticket("01", "A", "\n- 02: missing"))
         r = self.run_mermaid()

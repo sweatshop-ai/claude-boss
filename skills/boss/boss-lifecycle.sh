@@ -271,7 +271,7 @@ launch_claude() {
     # there too, so the owner can answer from the phone (Thierry, 2026-11-18).
     # The track is stamped on the pane, so a restart by anyone keeps it.
     local track="${BOSS_RC_TRACK:-$(pane_prop "$pane" '#{@rc_track}' 2>/dev/null || true)}"
-    if [[ -n "$track" ]]; then
+    if [[ -n "$track" && "${BOSS_REMOTE_CONTROL:-1}" != 0 ]]; then
       tmux set-option -p -t "$pane" @rc_track "$track"
       local remote_ctl="--remote-control=$track (concierge)"
       cmd="$cmd ${remote_ctl@Q}"
@@ -549,6 +549,7 @@ cmd_retire() {
   else
     tmux set-option -pu -t "$pane" @worker_role 2>/dev/null || true
     tmux set-option -pu -t "$pane" @custom_title 2>/dev/null || true   # the "[concierge]" label goes with the role
+    tmux set-option -pu -t "$pane" @rc_track 2>/dev/null || true       # and its Remote Control track
     printf 'retired %s (pane kept)\n' "$pane"
   fi
 }

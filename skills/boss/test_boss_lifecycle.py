@@ -735,6 +735,16 @@ class RestartKeepsName(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("'--remote-control=plans-live (concierge)'", self.launches()[0])
 
+    def test_an_opt_out_beats_a_stamped_track(self):
+        (self.tmp / "role").write_text("concierge\n")
+        (self.tmp / "rc_track").write_text("plans-live\n")
+        self.with_rc_track("")
+        os.environ["BOSS_REMOTE_CONTROL"] = "0"
+        self.addCleanup(os.environ.pop, "BOSS_REMOTE_CONTROL", None)
+        r, _ = self.run_restart()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("--remote-control", self.launches()[0])
+
     def test_a_worker_is_never_on_remote_control(self):
         self.with_rc_track("plans-live")
         r, _ = self.run_restart()
@@ -754,6 +764,7 @@ class RestartKeepsName(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("set-option -pu -t %5 @worker_role", (self.tmp / "calls").read_text())
         self.assertIn("set-option -pu -t %5 @custom_title", (self.tmp / "calls").read_text())
+        self.assertIn("set-option -pu -t %5 @rc_track", (self.tmp / "calls").read_text())
 
     def test_the_concierge_flag_means_spawn_and_claim_only(self):
         for cmd in ("restart", "retire", "move"):

@@ -343,7 +343,10 @@ STATE_STYLE = {
 def as_mermaid(out):
     """The graph for the owner to approve: one node per ticket, coloured by
     state, an arrow from each blocker, a dashed one from each external blocker."""
-    label = lambda s: s.replace('"', "#quot;")
+    # Mermaid strips <tags> and reads "#12;" as an entity: escape # first, then the rest,
+    # so the graph the owner approves says what the tickets say.
+    label = lambda s: (s.replace("#", "#35;").replace("<", "#lt;").replace(">", "#gt;")
+                        .replace('"', "#quot;"))
     rows = ["graph TD"]
     for t in out["tickets"]:
         rows.append('  t%s["%s: %s"]:::%s' % (t["num"], t["num"], label(t["title"]), t["state"]))
