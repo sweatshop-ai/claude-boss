@@ -137,10 +137,10 @@ it beside the tickets, and starts that boss in its own tmux session
 talk to it.
 
 With no plan or no tickets yet, it drafts them from the conversation, when the
-goal, the scope and the acceptance criteria are already settled there. It shows
-the plan, the ticket graph (a Mermaid diagram) and the frontier on a sheaf page,
-and launches only after you approve. Too little to go on: it says what is missing
-and stops.
+goal, the scope and the acceptance criteria are already settled there; too little
+to go on, it says what is missing and stops. Drafted or found, the plan, the ticket
+graph (a Mermaid diagram) and the frontier go on a sheaf page, and the boss
+launches only after you approve.
 
 The boss is on Remote Control as `<track> (boss)`, and its concierge as
 `<track> (concierge)`, so you can follow the track and answer its questions from

@@ -269,9 +269,12 @@ launch_claude() {
     cmd="$cmd --append-system-prompt-file ${brief@Q}"
     # A boss on Remote Control (boss-start exports its track) puts its concierge
     # there too, so the owner can answer from the phone (Thierry, 2026-11-18).
-    if [[ -n "${BOSS_RC_TRACK:-}" ]]; then
-      local rc="--remote-control=$BOSS_RC_TRACK (concierge)"
-      cmd="$cmd ${rc@Q}"
+    # The track is stamped on the pane, so a restart by anyone keeps it.
+    local track="${BOSS_RC_TRACK:-$(pane_prop "$pane" '#{@rc_track}' 2>/dev/null || true)}"
+    if [[ -n "$track" ]]; then
+      tmux set-option -p -t "$pane" @rc_track "$track"
+      local remote_ctl="--remote-control=$track (concierge)"
+      cmd="$cmd ${remote_ctl@Q}"
     fi
   else
     cmd="$cmd --disallowedTools AskUserQuestion"

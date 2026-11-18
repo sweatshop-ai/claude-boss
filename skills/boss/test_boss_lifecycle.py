@@ -162,6 +162,7 @@ case "$1" in
       '#{@boss_pane}') echo '' ;;
       '#{pane_current_command}') cat "$STUB_DIR/cmd" ;;
       '#{@worker_role}') cat "$STUB_DIR/role" 2>/dev/null ;;
+      '#{@rc_track}') cat "$STUB_DIR/rc_track" 2>/dev/null ;;
       '#{pane_pid}') cat "$STUB_DIR/panepid" 2>/dev/null ;;
       *) echo '' ;;
     esac ;;
@@ -714,6 +715,22 @@ class RestartKeepsName(unittest.TestCase):
         # The owner answers its questions from the phone (Thierry, 2026-11-18).
         (self.tmp / "role").write_text("concierge\n")
         self.with_rc_track("plans-live")
+        r, _ = self.run_restart()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("'--remote-control=plans-live (concierge)'", self.launches()[0])
+
+    def test_the_track_is_stamped_on_the_concierge_pane(self):
+        (self.tmp / "role").write_text("concierge\n")
+        self.with_rc_track("plans-live")
+        r, calls = self.run_restart()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("set-option -p -t %5 @rc_track plans-live", calls)
+
+    def test_a_concierge_restarted_by_someone_else_stays_on_remote_control(self):
+        # The owner or another session restarts it: no BOSS_RC_TRACK in that shell.
+        (self.tmp / "role").write_text("concierge\n")
+        (self.tmp / "rc_track").write_text("plans-live\n")
+        self.with_rc_track("")
         r, _ = self.run_restart()
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("'--remote-control=plans-live (concierge)'", self.launches()[0])

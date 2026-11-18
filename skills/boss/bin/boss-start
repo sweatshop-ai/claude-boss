@@ -91,17 +91,23 @@ done
 track=""
 if [[ $# -gt 0 && "$1" != -* ]]; then track=$1; shift; fi
 
-rc=()
+remote_ctl=()
 unset BOSS_RC_TRACK
 if [[ -n "$track" ]]; then
-  tmux rename-window -t "$TMUX_PANE" "$track" || true
-  tmux set-option -w -t "$TMUX_PANE" automatic-rename off || true
-  tmux set-option -w -t "$TMUX_PANE" allow-rename off || true
-  owner_rc=""
-  for a in "$@"; do [[ "$a" == --remote-control* ]] && owner_rc=1; done
+  # An empty -t means "the current window" to tmux, which from a client
+  # without $TMUX_PANE is some other session's window: rename nothing then.
+  if [[ -n "${TMUX_PANE:-}" ]]; then
+    tmux rename-window -t "$TMUX_PANE" "$track" || true
+    tmux set-option -w -t "$TMUX_PANE" automatic-rename off || true
+    tmux set-option -w -t "$TMUX_PANE" allow-rename off || true
+  fi
+  owner_remote_ctl=""
+  for a in "$@"; do
+    if [[ "$a" == --remote-control || "$a" == --remote-control=* ]]; then owner_remote_ctl=1; fi
+  done
   if [[ "${BOSS_REMOTE_CONTROL:-1}" != 0 ]]; then
     export BOSS_RC_TRACK=$track
-    [[ -n "$owner_rc" ]] || rc=("--remote-control=$track (boss)")
+    [[ -n "$owner_remote_ctl" ]] || remote_ctl=("--remote-control=$track (boss)")
   fi
 fi
 
@@ -112,4 +118,4 @@ printf '  after it opens, type: /boss%s\n' "${track:+ monitor}" >&2
 
 exec claude --model "$MODEL" --effort "$EFFORT" --autocompact "$AUTOCOMPACT" \
   --fallback-model "$FALLBACK" \
-  --settings '{"env":{"CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS":"0"}}' "${rc[@]}" "$@"
+  --settings '{"env":{"CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS":"0"}}' "${remote_ctl[@]}" "$@"

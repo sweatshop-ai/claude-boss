@@ -15,9 +15,9 @@ grill -> plan -> to-tickets -> hand-to-boss -> boss + workers
 ```
 
 The chain may stop early. When the owner types this after a discussion, with no
-plan file or no tickets yet, you draft what is missing from the conversation and
-show it for approval (steps 1 and 2). When the plan and its tickets already exist,
-they were approved when they were cut, and you go straight on.
+plan file or no tickets yet, you draft what is missing from the conversation
+(step 1). Either way, the owner sees the plan and the graph before the boss starts,
+and nothing launches without their yes (step 2).
 
 You write a **brief** for a boss that does not exist yet, commit it next to the
 tickets, start that boss in its own tmux session, and report its name. The boss
@@ -26,9 +26,9 @@ only when the owner types it.
 
 **Arguments**: `$ARGUMENTS` — optionally the plan path (left out: find it, or
 draft it, step 1); then optionally the boss model (default `opus`) and the worker
-model (default `sonnet`). `--dry-run <dir>` runs steps 1 to 3 only and writes
-everything it drafts, and the brief, into `<dir>`: nothing is committed, nothing
-is launched.
+model (default `sonnet`). `--dry-run <dir>` runs steps 1 to 3, writes everything
+it drafts, the review page and the brief into `<dir>`, and asks nothing: nothing is
+committed, nothing is launched.
 
 ## How this differs from a handoff
 
@@ -52,7 +52,7 @@ Three rules are borrowed from those handoffs and hold here:
 
 The boss needs a plan file and a folder of ticket files in the format
 `to-tickets` writes: `NN-slug.md`, each with a `**Blocked by:**` field and a
-`**Status:**` line, in `.scratch/<track>/issues/` beside the plan. `<track>` is the
+`**Status:**` line, in `<repo>/.scratch/<track>/issues/` beside the plan. `<track>` is the
 feature slug: short, lowercase, hyphens; it names the tmux session, the window,
 the boss's tracker and its Remote Control sessions.
 
@@ -61,8 +61,8 @@ Look in this order, and take the first that holds:
 1. **A plan path in the arguments.** Its `issues/` folder beside it, if any.
 2. **This conversation.** A plan or ticket folder written or named in it, above
    all by `to-tickets` or `to-spec` just now.
-3. **The repo.** `.scratch/*/issues/` and `.scratch/*/*.md` changed in the last
-   day (`find .scratch -newermt '-1 day'`). More than one candidate and the
+3. **The repo.** `<repo>/.scratch/*/issues/` and `<repo>/.scratch/*/*.md` changed
+   in the last day (`find <repo>/.scratch -newermt '-1 day'`). More than one candidate and the
    conversation does not say which: ask the owner with `AskUserQuestion`, one
    option per candidate.
 
@@ -74,17 +74,17 @@ Then one of three cases:
   python3 ${CLAUDE_PLUGIN_ROOT}/skills/hand-to-boss/frontier.py <issues-dir>
   ```
 
-  Exit 0 prints the frontier: skip step 2, the graph was approved when it was
-  cut. Exit 2 names what is wrong (no tickets, a ticket without Blocked by, a
-  reference to a ticket that does not exist, a cycle): fix what is mechanical
-  (a missing `**Blocked by:** None`), name the rest to the owner and stop.
+  Exit 0 prints the frontier. Exit 2 names what is wrong (no tickets, a ticket
+  without Blocked by, a reference to a ticket that does not exist, a cycle): name
+  it to the owner and stop. These tickets were approved when they were cut; you
+  do not edit them.
 - **B. A plan, no tickets.** Cut them as `to-tickets` would. Read its skill file,
   `ls ~/.claude/plugins/cache/*/mattpocock-skills/*/skills/engineering/to-tickets/SKILL.md`
   (the newest version), and follow its slice rules and its local ticket template;
   its quiz is step 2 here. Missing: the format in the `frontier.py` docstring.
-  Write them to `.scratch/<track>/issues/`.
+  Write them to `<repo>/.scratch/<track>/issues/`.
 - **C. Only the conversation.** The decisions are in it but no file holds them.
-  Write the plan to `.scratch/<track>/plan.md`: goal, the decisions taken (each
+  Write the plan to `<repo>/.scratch/<track>/plan.md`: goal, the decisions taken (each
   with who took it, from the conversation), scope and what is out of scope, the
   repos and branches, open questions. Point to what exists (files, ADRs, PRs);
   never copy it. Then cut the tickets as in B.
@@ -99,10 +99,11 @@ Done when: `frontier.py` exits 0 on the folder, and at least one ticket is
 **Ready now**. None ready means the team would start idle: say which blockers
 hold everything and stop.
 
-## 2. Show the graph and wait for approval (cases B and C)
+## 2. Show the graph and wait for approval
 
-What you drafted goes to the owner before anything is committed or launched.
-Write `.scratch/<track>/review.md` in the owner's language, as a project
+The plan and the graph go to the owner before anything is committed or launched,
+in all three cases: in A it is the last look before hours of work, in B and C it
+is the first. Write `<repo>/.scratch/<track>/review.md` in the owner's language, as a project
 document (the sheaf house rules: an H1 naming the subject, a lead of 1–3
 sentences, `##` labels from the trade):
 
@@ -112,16 +113,18 @@ sentences, `##` labels from the trade):
 - the frontier as text, from `frontier.py <issues-dir>`;
 - a table of the tickets: number, title, blocked by, what it delivers;
 - the open points: every external blocker and who holds it ("not yet asked" when
-  nobody was), every guess you had to make.
+  nobody was), every guess you had to make;
+- which files you drafted and which already existed.
 
 Render it and open it for the owner:
 
 ```bash
-sheaf .scratch/<track>/review.md
+sheaf <repo>/.scratch/<track>/review.md
 ```
 
 Give the `http://127.0.0.1:…` URL it prints. No `sheaf` on the machine: show the
-plan's path, the frontier and the ticket table in the chat instead.
+plan's path, the frontier and the ticket table in the chat instead. In
+`--dry-run`, render it and give the URL, then go to step 3 without asking.
 
 Then ask once, with `AskUserQuestion`: **launch the boss on this graph**
 (recommended), **change it first** (they say what, or edit the page), or **stop**.

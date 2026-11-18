@@ -424,7 +424,12 @@ def main(argv):
     if tickets is None or errors:
         return 2
     out = classify(tickets)
-    print(json.dumps(out, indent=2) if as_json else as_mermaid(out) if as_graph else as_text(out))
+    if as_json:
+        print(json.dumps(out, indent=2))
+    elif as_graph:
+        print(as_mermaid(out))
+    else:
+        print(as_text(out))
     return 0
 
 
