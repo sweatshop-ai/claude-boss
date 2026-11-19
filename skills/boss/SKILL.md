@@ -96,12 +96,12 @@ Which carrier a job gets is decided by the job, not by habit. A pane costs token
 
 | Job | Carrier |
 |---|---|
-| Read-only, under about an hour, one answer comes back to you: an inventory, a render check, a dependency graph from the trackers | **Subagent**: `subagent_type` `Explore` or `Plan` (no Edit, Write or NotebookEdit), always `run_in_background: true`, never with a `name` (that is a teammate, refused above) |
+| Read-only, under about an hour, one answer comes back to you: an inventory, a render check, a dependency graph from the trackers | **Subagent**: `subagent_type` `Explore` or `Plan` (no Edit, Write or NotebookEdit; they keep Bash, so the job brief says read-only), always `run_in_background: true`, never with a `name` (that is a teammate, refused above) |
 | Waiting on an external state: CI green, a cron firing | **`Monitor`** or a background shell. Neither is in the guard's watched set |
 | It writes to a repo or a box, holds state for hours (a stage, a PR taken to merge), or needs the owner's word in its pane | **Worker** in its own pane |
 | A review | **Not a boss subagent.** The one-round rule stands: the worker's `code-review` plus `/codex-review` is the round, and you run none of your own |
 
-The guard logs an unnamed `Explore` or `Plan` call as `kind: read-only-subagent` and says nothing. A `general-purpose` call, or any type with write tools, keeps the warning: the guard cannot tell from the prompt whether it will write.
+The guard logs an unnamed `Explore` or `Plan` call as `kind: read-only-subagent`, and each call a subagent makes as `kind: subagent-call`, and says nothing. A `general-purpose` call, or any type with write tools, keeps the warning: the guard cannot tell from the prompt whether it will write.
 
 ## Never defer an obvious action back to the owner
 

@@ -264,7 +264,8 @@ def starts_teammate(ti):
         and not ti.get("isolation")
 
 
-# Their tool sets have no Edit, Write or NotebookEdit: the answer comes back and nothing is written.
+# Their tool sets have no Edit, Write or NotebookEdit, but they keep Bash: their own calls are logged
+# (see `subagent-call`), so a write through one is still on record.
 READ_ONLY_AGENTS = {"Explore", "Plan"}
 
 
@@ -477,7 +478,10 @@ def main():
             return 0
         detail = str(fp)[:200]
 
-    read_only = tool == "Agent" and is_read_only_subagent(ti)
+    # A subagent's own calls arrive with the boss's session_id plus an agent_id. The warning would reach the
+    # subagent, not the boss, and each call would spend the boss's count.
+    kind = ("subagent-call" if payload.get("agent_id")
+            else "read-only-subagent" if tool == "Agent" and is_read_only_subagent(ti) else None)
     try:
         boss_store.markers_dir().mkdir(parents=True, exist_ok=True)
         with (boss_store.pm_dir() / "boss-guard.log").open("a", encoding="utf-8") as fh:
@@ -487,13 +491,13 @@ def main():
                 "tool": tool,
                 "detail": detail,
             }
-            if read_only:
-                entry["kind"] = "read-only-subagent"
+            if kind:
+                entry["kind"] = kind
             fh.write(json.dumps(entry) + "\n")
     except OSError:
         pass
 
-    if read_only:
+    if kind:
         return 0                      # coordination: logged, never warned, never counted
     n = bump(sid)
     if tool == "Agent" and starts_teammate(ti):

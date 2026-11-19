@@ -37,7 +37,7 @@ class GuardCase(unittest.TestCase):
         import shutil
         shutil.rmtree(self.tmp, ignore_errors=True)
 
-    def fire(self, command="rm -rf build", tool="Bash", sid=None, tool_input=None):
+    def fire(self, command="rm -rf build", tool="Bash", sid=None, tool_input=None, agent=False):
         """One PreToolUse call. Returns the additionalContext, or '' if silent."""
         if tool_input is None:
             tool_input = ({"command": command} if tool == "Bash"
@@ -48,6 +48,8 @@ class GuardCase(unittest.TestCase):
             "tool_name": tool,
             "tool_input": tool_input,
         }
+        if agent:
+            payload.update(agent_id="a1", agent_type="Explore")
         env = dict(os.environ, CLAUDE_CONFIG_DIR=str(self.cfg), HOME=str(self.cfg))
         res = subprocess.run([sys.executable, str(GUARD)], input=json.dumps(payload),
                              capture_output=True, text=True, env=env, timeout=15)
@@ -395,6 +397,12 @@ class ReadOnlySubagent(GuardCase):
     def test_it_spends_none_of_the_warning_budget(self):
         self.spawn(subagent_type="Explore")
         self.assertIn("Dispatch it to a worker", self.fire("touch f"))
+
+    def test_a_subagents_own_calls_are_logged_and_spend_no_budget(self):
+        for _ in range(3):
+            self.fire(tool_input={"command": "touch f"}, tool="Bash", agent=True)
+        self.assertEqual([l.get("kind") for l in self.log_lines()], ["subagent-call"] * 3)
+        self.assertIn("Dispatch it to a worker", self.fire("touch g"))
 
     def test_a_general_purpose_call_is_warned_as_before(self):
         self.assertIn("Dispatch it to a worker", self.spawn(subagent_type="general-purpose"))
