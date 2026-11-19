@@ -232,7 +232,8 @@ elif sys.argv[1:2] == ["get"]:
 class RequireIdle(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
-        shutil.copy(HERE / "boss-lifecycle.sh", self.tmp / "boss-lifecycle.sh")
+        for mod in ("boss-lifecycle.sh", "memfloor.py", "policy.py", "boss_store.py", "fleet.py", "registry.py"):
+            shutil.copy(HERE / mod, self.tmp / mod)
         (self.tmp / "boss-panes.py").write_text(STUB_PANES)
         bindir = self.tmp / "bin"
         bindir.mkdir()
@@ -653,7 +654,8 @@ class RestartKeepsName(unittest.TestCase):
         # It holds the owner's questions; everyone else sends theirs to it.
         (self.tmp / "cmd").write_text("bash\n")
         env = dict(os.environ, PATH="%s:%s" % (self.tmp / "bin", os.environ["PATH"]), TMUX="stub",
-                   TMUX_PANE="%1", STUB_DIR=str(self.tmp), STUB_ROW="w-sid\tidle\tpin1")
+                   TMUX_PANE="%1", STUB_DIR=str(self.tmp), STUB_ROW="w-sid\tidle\tpin1",
+                   BOSS_MEMINFO=self.meminfo(1))
         r = subprocess.run(["bash", str(self.tmp / "boss-lifecycle.sh"), "spawn", str(self.tmp), "--concierge"],
                            env=env, capture_output=True, text=True, timeout=60)
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -663,6 +665,24 @@ class RestartKeepsName(unittest.TestCase):
         self.assertIn("--model 'sonnet'", launch[0])
         self.assertIn("set-option -p -t %5 @worker_role concierge",
                       (self.tmp / "calls").read_text())
+
+    def meminfo(self, gb):
+        f = self.tmp / "meminfo"
+        f.write_text("MemAvailable:   %d kB\n" % (gb * 1024 * 1024))
+        return str(f)
+
+    def test_a_spawn_under_the_memory_floor_is_refused_before_a_pane_is_made(self):
+        (self.tmp / "cmd").write_text("bash\n")
+        env = dict(os.environ, PATH="%s:%s" % (self.tmp / "bin", os.environ["PATH"]), TMUX="stub",
+                   TMUX_PANE="%1", STUB_DIR=str(self.tmp), STUB_ROW="w-sid\tidle\tpin1",
+                   BOSS_MEMINFO=self.meminfo(8), CLAUDE_CONFIG_DIR=str(self.tmp))
+        r = subprocess.run(["bash", str(self.tmp / "boss-lifecycle.sh"), "spawn", str(self.tmp)],
+                           env=env, capture_output=True, text=True, timeout=60)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("8.0 GB free", r.stderr)
+        self.assertIn("8 GB floor", r.stderr)
+        calls = (self.tmp / "calls").read_text() if (self.tmp / "calls").exists() else ""
+        self.assertNotIn("split-window", calls)
 
     def test_a_restarted_concierge_is_still_a_concierge(self):
         (self.tmp / "role").write_text("concierge\n")

@@ -52,6 +52,7 @@ import park  # noqa: E402
 import policy  # noqa: E402
 import pulse  # noqa: E402
 import registry  # noqa: E402
+import silence_log  # noqa: E402
 import tracker  # noqa: E402
 
 MIN_GAP_S = 60          # never twice inside a minute
@@ -67,7 +68,8 @@ def read_goal(track):
 # ------------------------------------------------------------------ fleet
 
 def team(sid):
-    """This boss's live workers: (the idle ones as (name, coordinate), how many in all).
+    """This boss's live workers: (the idle ones as (name, coordinate), how many in all,
+    the names of all of them, None when the roster cannot be read).
 
     The concierge is not one: it sits idle by design, and no ticket is for it.
 
@@ -79,18 +81,19 @@ def team(sid):
     try:
         seats = fleet.view(fleet.Tmux(timeout=3), registry.live(boss_store.config_dir()))
     except fleet.TmuxUnavailable:
-        return [], 0
+        return [], 0, None
     me = fleet.seat_of(seats, sid=sid)
     if not me:
-        return [], 0
-    idle, size = [], 0
+        return [], 0, None
+    idle, size, names = [], 0, []
     for seat in fleet.workers(seats, me.pane.id):
         if not seat.session:
             continue
         size += 1
+        names.append(seat.session.get("name") or seat.pane.coord)
         if (seat.session.get("status") or "") == "idle":
             idle.append((seat.session.get("name") or seat.pane.coord, seat.pane.coord))
-    return idle, size
+    return idle, size, names
 
 
 def worker_statuses(sid):
@@ -382,45 +385,56 @@ def commit(sid, now, fired):
 # ------------------------------------------------------------------ main
 
 def main():
+    if sys.argv[1:2] == ["why"]:
+        if len(sys.argv) != 3:
+            print("usage: boss-pulse.py why <track>", file=sys.stderr)
+            return 2
+        print(silence_log.why(sys.argv[2]))
+        return 0
     try:
         payload = json.load(sys.stdin)
     except (ValueError, OSError):
         return 0
     if payload.get("hook_event_name") != "Stop":
         return 0
-    if payload.get("stop_hook_active"):
-        return 0                                  # never stack on another block
 
     sid = payload.get("session_id") or ""
     if not boss_store.is_boss(sid):
-        return 0                                  # not a boss
+        return 0                                  # not a boss: nothing of ours to log
     track = boss_store.track_of(sid)
+
+    def held(gate, **details):
+        silence_log.record(sid, track, gate, **details)
+        return 0
+
+    if payload.get("stop_hook_active"):
+        return held("stop-hook-active")           # never stack on another block
     if not track:
-        return 0                                  # no track claimed yet, or not a plain name
+        return held("no-track")                   # no track claimed yet, or not a plain name
 
     body = read_goal(track)
     if body is None:
-        return 0                                  # opt-in: no objective, no pulse
+        return held("no-goal")                    # opt-in: no objective, no pulse
     if not objective.is_open(body):
-        return 0                                  # paused, or met
+        return held("objective-closed")           # paused, or met
 
     # "Session is done" vs "session is paused waiting for background work" — the
     # runtime hands us the difference, so use it instead of guessing.
     for t in payload.get("background_tasks") or []:
         if (t.get("status") or "").lower() in ("running", "pending"):
-            return 0
+            return held("background-tasks")
 
     now, st = gate(sid)
     if now is None:
-        return 0
+        return held("rate-gate")
 
     # Already asking? Then the boss is visibly waiting and needs no push. This
     # is also what stops the check looping: a pending question ends the turn
     # differently, and the registry says so.
     if question_pending(sid):
-        return 0
+        return held("open-question")
 
-    idle, size = team(sid)
+    idle, size, names = team(sid)
     fired = dict(st.get("rungs") or {})
     tracker_text = boss_store.read_tracker(track)  # once per Stop, both consumers share it
     rungs = due_rungs(track, fired, tracker_text)
@@ -429,21 +443,26 @@ def main():
     source = objective.tickets_source(body)
     ready, done, broken = read_graph(source, track) if source else ([], [], None)
     idle, woken = woken_parks(sid, track, idle, done, tracker_text)
+    cap, cap_reason = objective.workers_cap(body) or (None, "")
     facts = pulse.Facts(
         track=track, idle=idle, size=size, rungs=rungs, fired=fired,
         blockers=blockers, decided=decided, source=source, ready=ready, broken=broken,
         outcome=objective.section(body, "Outcome"), unmet=objective.unmet(body),
-        next_items=objective.next_items(body), parks=woken)
+        next_items=objective.next_items(body), parks=woken,
+        workers=None if names is None else tuple(names), cap=cap, cap_reason=cap_reason)
     decision = pulse.decide(facts)
+    unassigned = len(ready) if source else len(facts.next_items)
     if decision is None:
-        return 0                                  # team busy, nothing overdue
+        # team busy, nothing overdue
+        return held("nothing-to-say", idle=len(idle), unassigned=unassigned)
 
     print(json.dumps({"hookSpecificOutput": {
         "hookEventName": "Stop",
         "additionalContext": pulse.render(facts, decision),
     }}))
     commit(sid, now, decision.fired)
-    return 0
+    return held("fired", idle=len(idle), unassigned=unassigned,
+                actions=",".join(a.kind for a in decision.actions))
 
 
 if __name__ == "__main__":

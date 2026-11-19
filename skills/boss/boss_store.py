@@ -38,7 +38,7 @@ UUID = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}"
 
 # Per-session state under pm/.pulse/: kind -> file name suffix. The names are the
 # ones the hooks have always written, so a state file survives the upgrade.
-STATE_KINDS = {"guard": ".guard.json", "pulse": ".json"}
+STATE_KINDS = {"guard": ".guard.json", "pulse": ".json", "silence": ".silence.log"}
 LOCK_NAME = ".state.lock"
 
 

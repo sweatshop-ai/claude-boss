@@ -382,18 +382,23 @@ your one-task rule and the 150k split fire first.
 broadcast is the most expensive thing you can do; it should be rare and
 deliberate.
 
-### 3. Span of control. Up to 12 workers.
+### 3. Span of control. No limit, an 8 GB memory floor.
 
-**Run as many workers as there is ready work, up to 12** (the owner, 2026-10-21:
-finishing sooner is worth spending the week's budget sooner). The limit the owner
-actually hits is the weekly usage cap, not the five-hour one and not the machine;
-more workers spend that budget faster, they do not add to it. Every worker's
-report still lands in your context, so keep reports short and let workers
-coordinate peer-to-peer through `/team` while you handle dispatch, review and
-escalation.
+**Run as many workers as there is ready work** (the owner, 2026-11-19: a cap only
+spends slower). The pulse asks for one spawn per ready ticket beyond the idle
+workers, however many that is. What stops a team is memory: `boss-lifecycle.sh
+spawn` refuses when less than 8 GB of `MemAvailable` would remain after the new
+worker, and says so with the numbers (free memory, the worker's estimated cost,
+the floor). It estimates the worker from your current workers' resident
+size, at least 0.5 GB. A refused spawn is not an error to work around: dispatch
+to the idle workers you have and spawn again when memory frees up.
 
-If the owner wants more than 12 running, split them across two bosses on separate
-tracks rather than one boss holding all of it.
+A track may cap itself with a line `Workers: N - <reason>` in its goal file. The
+pulse honours N only when a reason is written, and shows it ("team 3 of 3: one
+change at a time on the plans-live box"). Without a reason the field is ignored
+and the pulse says so. Every worker's report still lands in your context, so keep
+reports short and let workers coordinate peer-to-peer through `/team` while you
+handle dispatch, review and escalation.
 
 ---
 
@@ -437,7 +442,7 @@ boss-goal status <track> open|paused|met "<note>"
 | **Constraints** | what this track must not do |
 | **Pause when** | what genuinely needs the owner |
 | **Tickets** | optional: the ticket graph this track works, a folder (`/abs/path/issues`) or `gh:owner/repo#N`; when set, its frontier replaces Next |
-| **Next, in priority order** | what an idle worker gets, without anyone being asked |
+| **Next, in priority order** | what an idle worker gets, without anyone being asked. On a track without a ticket graph, mark each item a worker is on with `(→ Name)`: the pulse counts the items without a mark as unassigned, tells idle workers to take them, asks for one more worker per item left over, and names a mark whose worker no longer exists (that item counts as unassigned too). With a ticket graph the marks are ignored |
 
 **Write it at session start from what the owner asked for.** They give an outcome in
 a sentence; deriving the fields is your job.
@@ -608,9 +613,9 @@ just finished a related task gets the follow-up. Otherwise pick an idle worker a
 
 **With a ticket graph, dispatch the whole frontier.** When the objective names
 `## Tickets`, the pulse lists every ready ticket. Give one to each idle worker in
-the same turn, not one per turn; when ready tickets outnumber idle workers and the
-team is under 12, spawn for the rest. Claim each ticket before its dispatch goes
-out: `python3 ${CLAUDE_PLUGIN_ROOT}/skills/hand-to-boss/frontier.py claim <source>
+the same turn, not one per turn; when ready tickets outnumber idle workers,
+spawn for the rest (no limit but the memory floor). Claim each ticket before its dispatch
+goes out: `python3 ${CLAUDE_PLUGIN_ROOT}/skills/hand-to-boss/frontier.py claim <source>
 <NN> <worker>` (a folder gets a `**Claimed by:**` line, committed by path; a
 `gh:` source gets a `worker:<name>` label). When a ticket closes, run
 `boss-goal check <track>`: it re-reads the graph, so the tickets it unblocked are
@@ -1092,7 +1097,7 @@ Parse `$ARGUMENTS`: empty or `status` → **A** · `dispatch <task> [worker]` �
 1. **Validate the task.** Issue ref → `gh api repos/<owner>/<repo>/issues/<N>`
    (never `gh issue view`, broken here). Doesn't resolve → report and stop.
 2. **Pick the worker** per P6. None suitable → `spawn`, wait for it in
-   `list --mine` (spawn stamps it, so it appears there). Wrong project → `move`. Already 12 workers → see Span of control.
+   `list --mine` (spawn stamps it, so it appears there). Wrong project → `move`. Spawn refused for memory → see Span of control.
 3. **Preview the first dispatch** (skip once the owner grants autonomy): task,
    target, project, rationale.
 4. **Send a self-contained prompt** — task and issue number, how to read it, the
@@ -1193,6 +1198,15 @@ Three sources. Turn all three on.
    rate-limited (once a minute, twelve an hour), it never fires while background
    work of yours is still running, and it goes silent the moment the objective is
    `met` or `paused`. `boss-goal check` reports whether it is armed.
+
+   Every Stop of a boss session leaves one line in `pm/.pulse/<sid>.silence.log`
+   (rotated at 1 MB): the time, the track, and the gate that held the pulse back
+   (`stop-hook-active`, `no-track`, `no-goal`, `objective-closed`,
+   `background-tasks`, `rate-gate`, `open-question`, `nothing-to-say`) or
+   `fired` with its actions, plus the idle workers and unassigned items when
+   known. A session that is not a boss is not logged. `boss-pulse.py why <track>`
+   counts the last day's Stops per gate and gives the last firing, so a silence
+   can be explained afterwards instead of argued.
 
    When it fires, **act — do not acknowledge it.** Dispatch the top item, or park
    the idle worker with a condition the pulse can check, and stop. "Parked on

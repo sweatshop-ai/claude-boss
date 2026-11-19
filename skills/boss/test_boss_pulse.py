@@ -35,11 +35,11 @@ class PulseCase(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
-    def goal(self, open_=True):
+    def goal(self, open_=True, next_="- do a thing"):
         (self.tmp / "pm" / (TRACK + ".goal.md")).write_text(
             "# Objective\n\n_Status: %s_\n\n## Outcome\nShip the thing.\n\n"
-            "## Done when\n- [ ] it ships\n\n## Next, in priority order\n- do a thing\n"
-            % ("OPEN" if open_ else "MET"), encoding="utf-8")
+            "## Done when\n- [ ] it ships\n\n## Next, in priority order\n%s\n"
+            % ("OPEN" if open_ else "MET", next_), encoding="utf-8")
 
     def tracker(self, blockers=""):
         (self.tmp / "pm" / (TRACK + ".md")).write_text(
@@ -75,6 +75,7 @@ class StuckBoss(PulseCase):
         self.assertIn("pick the org", out)
 
     def test_no_blocker_no_pulse(self):
+        self.goal(next_="- do a thing (→ Ada)")     # all of NEXT is being worked
         self.assertEqual(self.stop(), "",
                          "a boss with nothing open must stay silent")
 
@@ -176,7 +177,7 @@ class Frontier(PulseCase):
         return self.tmp / "pm/.pulse" / ("%s.%s.frontier.json" % (
             TRACK, hashlib.sha1(source.encode()).hexdigest()[:10]))
 
-    def pulse_with_team(self, idle, size, holding=False, statuses=None):
+    def pulse_with_team(self, idle, size, holding=False, names=None, statuses=None):
         """Run main() in-process with a stand-in for the tmux roster."""
         import contextlib
         import importlib.util
@@ -187,7 +188,7 @@ class Frontier(PulseCase):
             spec = importlib.util.spec_from_file_location("pulse_%d" % time.monotonic_ns(), str(PULSE))
             mod = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(mod)
-            mod.team = lambda sid: (idle, size)
+            mod.team = lambda sid: (idle, size, [n for n, _ in idle] if names is None else names)
             mod.concierge_holding = lambda sid: holding
             mod.worker_statuses = lambda sid: dict(statuses or {})
             payload = {"session_id": self.sid, "hook_event_name": "Stop", "stop_hook_active": False}
@@ -313,19 +314,29 @@ class Frontier(PulseCase):
         self.goal_with_tickets(self.issues)
         out = self.pulse_with_team([("Ada", "w:1.0"), ("Bo", "w:1.1")], size=2)
         self.assertIn("one ticket per idle worker until the READY list runs out", out)
-        self.assertIn("Spawn 1 more worker (team 2 of 12)", out)
+        self.assertIn("Spawn 1 more worker (team 2 now, no worker limit", out)
 
-    def test_a_full_team_is_not_asked_to_grow(self):
+    def test_a_large_team_is_still_asked_to_grow(self):
+        # no worker limit (2026-11-19): 12 running and 3 ready with one idle still spawns
         for n in range(1, 4):
             (self.issues / ("%02d-x.md" % n)).write_text(ticket("%02d" % n, "T%d" % n))
         self.goal_with_tickets(self.issues)
         out = self.pulse_with_team([("Ada", "w:1.0")], size=12)
         self.assertIn("Dispatch the READY tickets", out)
-        self.assertNotIn("Spawn", out)
+        self.assertIn("Spawn 2 more workers (team 12 now, no worker limit", out)
 
     def test_without_tickets_each_idle_worker_gets_a_next_item(self):
         out = self.pulse_with_team([("Ada", "w:1.0"), ("Bo", "w:1.1")], size=2)
         self.assertIn("one each, top first", out)
+
+    def test_marks_in_next_tell_the_busy_workers_from_the_unassigned_items(self):
+        (self.tmp / "pm" / (TRACK + ".goal.md")).write_text(
+            "# Objective\n\n_Status: OPEN_\n\n## Outcome\nShip the thing.\n\n"
+            "## Next, in priority order\n- a (→ Ada)\n- b (→ Zed)\n- c\n- d\n",
+            encoding="utf-8")
+        out = self.pulse_with_team([], size=1, names=["Ada"])
+        self.assertIn("UNASSIGNED in NEXT: 3 of 4; marks naming a worker that is gone: Zed", out)
+        self.assertIn("Spawn up to 3 more workers (team 1 now, no worker limit; the spawn refuses below 8 GB free memory) and dispatch the unassigned NEXT items", out)
 
     def test_a_github_graph_is_read_from_its_cache(self):
         """GitHub is too slow for a 5 s Stop hook: the pulse reads the last
@@ -416,7 +427,8 @@ class Frontier(PulseCase):
 
     def test_a_blocker_the_concierge_holds_is_not_asked_again(self):
         self.tracker(blockers="- waiting on the owner to pick the org")
-        self.assertEqual(self.pulse_with_team([], 2, holding=True), "")
+        self.goal(next_="- do a thing (→ Ada)")
+        self.assertEqual(self.pulse_with_team([], 2, holding=True, names=["Ada", "Bo"]), "")
 
     def test_idle_workers_still_get_work_while_the_concierge_holds_a_question(self):
         self.tracker(blockers="- waiting on the owner to pick the org")
@@ -440,7 +452,7 @@ class Frontier(PulseCase):
         from unittest import mock
         with mock.patch.object(mod.fleet, "Tmux", lambda timeout=3: tmux), \
                 mock.patch.object(mod.registry, "live", lambda cfg=None: rows):
-            self.assertEqual(mod.team("boss"), ([("Wanda", "b:0.1")], 1))
+            self.assertEqual(mod.team("boss"), ([("Wanda", "b:0.1")], 1, ["Wanda"]))
 
     def test_more_idle_workers_than_tickets_stops_at_the_frontier(self):
         (self.issues / "01-x.md").write_text(ticket("01", "API"))
@@ -448,7 +460,26 @@ class Frontier(PulseCase):
         out = self.pulse_with_team([("Ada", "w:1.0"), ("Bo", "w:1.1")], size=2)
         self.assertIn("one ticket per idle worker until the READY list runs out", out)
 
-    def test_every_idle_worker_up_to_the_span_is_named(self):
+    def test_a_workers_line_with_a_reason_caps_the_spawn_in_the_pulse_text(self):
+        for n in range(1, 6):
+            (self.issues / ("%02d-x.md" % n)).write_text(ticket("%02d" % n, "T%d" % n))
+        self.goal_with_tickets(self.issues)
+        path = self.tmp / "pm" / (TRACK + ".goal.md")
+        path.write_text(path.read_text() + "\nWorkers: 3 - one at a time on the plans-live box\n")
+        out = self.pulse_with_team([], size=1)
+        self.assertIn("Spawn 2 more workers (team 3 of 3: one at a time on the plans-live box)", out)
+
+    def test_a_workers_line_without_a_reason_is_ignored_and_says_so(self):
+        for n in range(1, 6):
+            (self.issues / ("%02d-x.md" % n)).write_text(ticket("%02d" % n, "T%d" % n))
+        self.goal_with_tickets(self.issues)
+        path = self.tmp / "pm" / (TRACK + ".goal.md")
+        path.write_text(path.read_text() + "\nWorkers: 3\n")
+        out = self.pulse_with_team([], size=1)
+        self.assertIn("Spawn 5 more workers", out)
+        self.assertIn("`Workers: 3` in the goal file is ignored", out)
+
+    def test_every_idle_worker_up_to_the_list_limit_is_named(self):
         idle = [("W%d" % i, "w:1.%d" % i) for i in range(12)]
         out = self.pulse_with_team(idle, size=12)
         self.assertIn("W11 (w:1.11)", out)

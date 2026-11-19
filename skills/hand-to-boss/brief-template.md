@@ -53,8 +53,9 @@ every ready ticket each time a worker goes idle.
   `--model` lands there too.
 - One git worktree per worker, on its own branch, under `{{worktree root}}`.
   Two workers never share a branch or a worktree.
-- At most {{N}} workers at once (12 is the span of control): as many as the
-  frontier has ready tickets.
+- At most {{N}} workers at once (no limit but 8 GB of free memory): as many as the
+  frontier has ready tickets. When N is a real limit, write it in the goal file as
+  `Workers: {{N}} - <reason>` (the pulse ignores a number without a reason).
 
 ## Claiming a ticket
 
