@@ -131,6 +131,8 @@ class Precision(GuardCase):
                     "${CLAUDE_PLUGIN_ROOT}/skills/boss/bin/boss-goal status demo",
                     "boss-start demo",
                     "boss-unask list demo",
+                    "boss-park demo Ada --until ticket:12",
+                    "${CLAUDE_PLUGIN_ROOT}/skills/boss/bin/boss-park demo --list",
                     "printf '%s\\n' x | ${CLAUDE_PLUGIN_ROOT}/skills/boss/bin/boss-unask record demo k",
                     "/opt/whatever/claude-team/hooks/team-line abc --did x --n 0"):
             self.assertEqual(self.fire(cmd), "", "scolded for `%s`" % cmd)
@@ -624,6 +626,45 @@ class AskedCommandsNeedAPaste(GuardCase):
 
     def test_a_session_that_is_no_boss_is_left_alone(self):
         self.assertEqual(self.go("SendMessage", {"to": "x", "message": "ASK q1: $ ls"}, sid="other"), {})
+
+
+class DispatchClearsPark(GuardCase):
+    """A message from the boss to a parked worker is a dispatch: its park is dropped (ticket pulse-park/03)."""
+
+    def setUp(self):
+        super().setUp()
+        import park
+        self.park = park
+        park.set_park("demo", "Ada", "ticket:12", cfg=self.cfg)
+        park.set_park("demo", "Bea", "ticket:13", cfg=self.cfg)
+
+    def send(self, to, message, tool="SendMessage"):
+        payload = {"session_id": self.sid, "hook_event_name": "PreToolUse", "tool_name": tool,
+                   "tool_input": {"to": to, "message": message}}
+        env = dict(os.environ, CLAUDE_CONFIG_DIR=str(self.cfg), HOME=str(self.cfg))
+        res = subprocess.run([sys.executable, str(GUARD)], input=json.dumps(payload),
+                             capture_output=True, text=True, env=env, timeout=15)
+        self.assertEqual(res.returncode, 0, res.stderr)
+        return res.stdout.strip()
+
+    def parked(self):
+        return sorted(self.park.read_parks("demo", self.cfg))
+
+    def test_a_message_to_the_parked_worker_drops_its_park_only(self):
+        self.assertEqual(self.send("Ada", "Boss dispatch: ticket 12 is yours"), "")
+        self.assertEqual(self.parked(), ["Bea"])
+
+    def test_an_ask_to_the_concierge_drops_nothing(self):
+        self.send("Ada", "ASK q7: Petra, boss of demo: which org?")
+        self.assertEqual(self.parked(), ["Ada", "Bea"])
+
+    def test_a_session_that_is_no_boss_drops_nothing(self):
+        payload = {"session_id": "other", "hook_event_name": "PreToolUse", "tool_name": "SendMessage",
+                   "tool_input": {"to": "Ada", "message": "go"}}
+        env = dict(os.environ, CLAUDE_CONFIG_DIR=str(self.cfg), HOME=str(self.cfg))
+        subprocess.run([sys.executable, str(GUARD)], input=json.dumps(payload), env=env,
+                       capture_output=True, text=True, timeout=15)
+        self.assertEqual(self.parked(), ["Ada", "Bea"])
 
 
 if __name__ == "__main__":
