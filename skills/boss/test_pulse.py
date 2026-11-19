@@ -64,7 +64,15 @@ class Decide(unittest.TestCase):
     def test_next_with_five_items_two_marked_has_three_unassigned(self):
         items = ["1. a (→ Ada)", "2. b", "3. c (→ Bo)", "4. d", "   wrapped line of d", "5. e"]
         self.assertEqual(pulse.unassigned(items, ["Ada", "Bo"]),
-                         (["2. b", "4. d", "5. e"], []))
+                         (["2. b", "4. d wrapped line of d", "5. e"], []))
+
+    def test_a_mark_on_a_wrapped_line_belongs_to_its_item(self):
+        items = ["1. a long item", "   that wraps (→ Ada)", "2. b"]
+        self.assertEqual(pulse.unassigned(items, ["Ada"]), (["2. b"], []))
+
+    def test_a_typed_arrow_and_a_list_of_workers_are_read(self):
+        items = ["1. a (-> Ada)", "2. b (→ Ada, Bo)", "3. c (→ Ada, Zed)"]
+        self.assertEqual(pulse.unassigned(items, ["Ada", "Bo"]), (["3. c (→ Ada, Zed)"], ["Zed"]))
 
     def test_a_mark_naming_a_retired_worker_is_unassigned_and_named(self):
         items = ["1. a (→ Ada)", "2. b (→ Zed)"]
@@ -89,6 +97,19 @@ class Decide(unittest.TestCase):
         d = pulse.decide(pulse.Facts(track="demo", size=2, idle=[("Ada", "w:1.0")],
                                      workers=("Ada", "Bo"), next_items=["- a", "- b (→ Bo)"]))
         self.assertEqual(kinds(d), ["dispatch-next"])
+
+    def test_stale_marks_alone_do_not_silence_the_refill(self):
+        d = pulse.decide(pulse.Facts(track="demo", size=1, idle=[("Ada", "w:1.0")],
+                                     workers=("Ada",), next_items=["- a (→ Zed)"]))
+        self.assertEqual(kinds(d), ["dispatch-next", "refill-next"])
+
+    def test_a_next_of_plain_prose_still_goes_to_an_idle_worker(self):
+        d = pulse.decide(pulse.Facts(track="demo", size=1, idle=[("Ada", "w:1.0")],
+                                     workers=("Ada",), next_items=["Fix the reopen bug"]))
+        self.assertEqual(kinds(d), ["dispatch-next", "refill-next"])
+
+    def test_an_unreadable_roster_does_not_ask_for_spawns(self):
+        self.assertIsNone(pulse.decide(pulse.Facts(track="demo", next_items=["- a", "- b"])))
 
     def test_with_a_graph_the_marks_are_ignored(self):
         d = pulse.decide(pulse.Facts(track="demo", source="issues", size=1, workers=("Ada",),
