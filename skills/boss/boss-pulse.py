@@ -141,6 +141,7 @@ def woken_parks(sid, track, idle, done, tracker_text):
         if (p.retired and not (p.event.startswith("owner:") and tracker_text is None)
                 and park.state(p, now, world) != "waiting"):
             woken.append(pulse.Woken(p.worker, p.event, "retired", int((now - p.since) / 60)))
+    kept = {p.worker for p in parks.values() if p.retired}    # `--retire` would refuse these names
     just_retired = any(p.retired and now - p.retired < park.RETIRE_GAP_S for p in parks.values())
     for name, coord in idle:
         p = parks.get(name)
@@ -149,7 +150,8 @@ def woken_parks(sid, track, idle, done, tracker_text):
         else:
             st = park.state(p, now, world) if p else None
         if st == "waiting":
-            waiting.append(pulse.Woken(name, p.event, st, int((now - p.since) / 60)))
+            if name not in kept:
+                waiting.append(pulse.Woken(name, p.event, st, int((now - p.since) / 60)))
             continue
         free.append((name, coord))
         if st:

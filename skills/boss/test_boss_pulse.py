@@ -338,6 +338,15 @@ class Frontier(PulseCase):
         out = self.pulse_with_team([("Bea", "w:1.1")], 2)
         self.assertIn("Bea was retired for memory and its wait on ticket:12 has ended", out)
 
+    def test_a_worker_whose_name_has_a_kept_retired_park_is_not_offered_to_retire(self):
+        import park
+        self.one_ready_one_busy()
+        self.park("Bea", "ticket:12", age_s=95 * 60)
+        park.retire(TRACK, "Bea", self.tmp, now=time.time() - 3600)      # past the 15 min gap
+        self.park("Bea", "ticket:12", age_s=30 * 60)                     # a new Bea, parked
+        out = self.pulse_with_team([("Bea", "w:1.1")], 2, memshort=self.SHORT)
+        self.assertNotIn("Retire Bea", out)
+
     def test_right_after_a_retire_nobody_else_is_offered_to_be_retired(self):
         import park
         self.one_ready_one_busy()
