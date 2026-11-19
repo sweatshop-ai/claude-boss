@@ -18,6 +18,10 @@ GitHub graph from the pulse's cache, read again when older than two minutes) and
 block between the `ticket-graph` markers when, the read time aside, it changed. Nothing outside
 the markers is touched, and an unchanged graph writes nothing, so an open page does not reload.
 
+Each claimed ticket also carries its worker's sign (🔨 🧪 🔍, goal-graph ticket 02) when
+`pm/goal-graph.signs-url` names an activity feed; a sign that changes is a changed graph, so the
+sweep is what brings a worker starting or ending a turn onto the page, within a minute.
+
 Silent when nothing changed. A track that cannot be read is one line on stderr, in the journal
 (`journalctl --user -u boss-goal-graph`); a broken ticket source is named on the graph's own
 summary line, under the last diagram that could be drawn.

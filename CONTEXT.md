@@ -103,6 +103,8 @@ source, where a leading section goes — lives in `skills/boss/objective.py`;
 `## Tickets` source, a mermaid flowchart between two marker comments.
 `skills/boss/goal_graph.py` alone writes between the markers, and only when the
 graph changed; the pulse, `frontier.py claim` and `boss-goal-graph.timer` call it.
+A claimed ticket carries its worker's sign from the activity feed named in
+`pm/goal-graph.signs-url`, when there is one.
 
 **Reviewer chain**: the order in which a second model is asked for an answer:
 Codex first, then an optional fallback model through `claude`, otherwise

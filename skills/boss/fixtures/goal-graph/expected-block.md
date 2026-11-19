@@ -1,11 +1,11 @@
 <!-- ticket-graph:start (written by claude-boss from the Tickets source; edits here are overwritten) -->
 ```mermaid
 flowchart TD
-  t01["01 · Paths come from the track store<br/>done"]
-  t02["02 · The pulse reads the graph frontier.py gives,…<br/>Farid"]
-  t03["03 · A claim updates the graph<br/>ready"]
-  t04["04 · The sweep runs every minute<br/>waiting"]
-  t05["05 · Checked on a live goal page<br/>waiting"]
+  t01["01 · Paths come from the track store<br/>✅ done"]
+  t02["02 · The pulse reads the graph frontier.py gives,…<br/>🔨 Farid"]
+  t03["03 · A claim updates the graph<br/>○ ready"]
+  t04["04 · The sweep runs every minute<br/>⏸ waiting"]
+  t05["05 · Checked on a live goal page<br/>⏸ waiting"]
   x1["the owner opens the page in sheaf<br/>external"]
   t01 --> t02
   t01 --> t03
