@@ -598,12 +598,17 @@ _RESET_AT = re.compile(r"try again at (?:(?P<mon>[A-Z][a-z]{2}) (?P<day>\d{1,2})
                        r"(?P<hour>\d{1,2}):(?P<minute>\d{2}) (?P<half>[AP]M)")
 
 
+class Limit(NamedTuple):
+    until: datetime       # aware
+    parsed: bool          # False: Codex named no usable time and `until` is an hour from when it was read
+
+
 def _aware_now() -> datetime:
     """Now with its UTC offset. Tests patch this to fix the clock."""
     return datetime.now(timezone.utc)
 
 
-def limit_reset(stderr: str, now: datetime) -> tuple[datetime, bool] | None:
+def limit_reset(stderr: str, now: datetime) -> Limit | None:
     """None unless `stderr` holds Codex's usage-limit error line; else (the time the skip ends, whether the message
     named it). Codex writes the time on the machine's clock without a zone ("Nov 20th, 2026 2:10 PM", or "7:10 PM",
     the next such time): it is read as local time and kept as an aware datetime, so every comparison is between aware
@@ -611,14 +616,14 @@ def limit_reset(stderr: str, now: datetime) -> tuple[datetime, bool] | None:
     lines = [line for line in stderr.split("\n") if _LIMIT_LINE.match(line)]
     if not lines:
         return None
-    unparsed = (now + LIMIT_UNPARSED, False)
+    unparsed = Limit(now + LIMIT_UNPARSED, False)
     found = _RESET_AT.search(lines[-1])
     if found is None:
         return unparsed
     try:
-        hour = int(found["hour"]) % 12 + (12 if found["half"] == "PM" else 0)
         if not 1 <= int(found["hour"]) <= 12:
             return unparsed
+        hour = int(found["hour"]) % 12 + (12 if found["half"] == "PM" else 0)
         if found["year"]:
             month = time.strptime(found["mon"], "%b").tm_mon
             until = datetime(int(found["year"]), month, int(found["day"]), hour, int(found["minute"])).astimezone()
@@ -631,24 +636,24 @@ def limit_reset(stderr: str, now: datetime) -> tuple[datetime, bool] | None:
         return unparsed
     if until - now > LIMIT_LONGEST:
         return unparsed
-    return until, True
+    return Limit(until, True)
 
 
-def write_limit(reviews: Path, until: datetime, parsed: bool, seen: datetime) -> None:
-    """The state file: `until` as an aware time with its offset (UTC), written private, then renamed."""
+def write_limit(reviews: Path, limit: Limit, failed_at: datetime) -> None:
+    """The state file: `until` as an aware time with its offset (UTC), and when Codex failed, written private, then renamed."""
     _private_dir(reviews)
     fd, tmp = tempfile.mkstemp(dir=reviews, prefix=".limit-")
     try:
         with os.fdopen(fd, "wb") as f:
-            f.write((json.dumps({"until": until.astimezone(timezone.utc).isoformat(), "parsed": parsed,
-                                 "seen": seen.astimezone(timezone.utc).isoformat()}, indent=2) + "\n").encode("utf-8"))
+            f.write((json.dumps({"until": limit.until.astimezone(timezone.utc).isoformat(), "parsed": limit.parsed,
+                                 "failed_at": failed_at.astimezone(timezone.utc).isoformat()}, indent=2) + "\n").encode("utf-8"))
         os.replace(tmp, reviews / LIMIT_FILE)
     except BaseException:
         Path(tmp).unlink(missing_ok=True)
         raise
 
 
-def read_limit(reviews: Path, now: datetime) -> tuple[datetime, bool] | None:
+def read_limit(reviews: Path, now: datetime) -> Limit | None:
     """(until, parsed) while the limit holds, else None. A file that is past its time, unreadable, without an offset
     or further off than `LIMIT_LONGEST` is no limit and is removed: it must never skip Codex on a guess."""
     path = reviews / LIMIT_FILE
@@ -665,16 +670,17 @@ def read_limit(reviews: Path, now: datetime) -> tuple[datetime, bool] | None:
     if until is None or until <= now:
         path.unlink(missing_ok=True)
         return None
-    return until, parsed
+    return Limit(until, parsed)
 
 
 def _utc_text(moment: datetime) -> str:
     return moment.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def skip_words(until: datetime, parsed: bool) -> str:
+def skip_words(limit: Limit) -> str:
     """What the comment says: `usage limit until <UTC time>`, and for a time Codex did not give, that the hour is ours."""
-    return "usage limit until %s%s" % (_utc_text(until), "" if parsed else " (no reset time in the message: skipped for one hour)")
+    return "usage limit until %s%s" % (_utc_text(limit.until),
+                                       "" if limit.parsed else " (no reset time in the message: skipped for one hour)")
 
 
 def _note_limit(chain: dict, reviews: Path) -> None:
@@ -684,15 +690,15 @@ def _note_limit(chain: dict, reviews: Path) -> None:
     if codex["reviewer"] != "codex" or codex["reason"] != "error":
         return
     now = _aware_now()
-    got = limit_reset(codex["stderr_tail"], now)
-    if got is None:
+    limit = limit_reset(codex["stderr_tail"], now)
+    if limit is None:
         return
     try:
-        write_limit(reviews, got[0], got[1], now)
+        write_limit(reviews, limit, now)
     except OSError as exc:
         _say("the Codex usage limit could not be kept for the next review: %s" % exc)
     else:
-        _say("Codex is at its %s: the next reviews skip it until then" % skip_words(*got))
+        _say("Codex is at its %s: the next reviews skip it until then" % skip_words(limit))
 
 
 # ------------------------------------------------------------------- writing rounds ----
@@ -1429,7 +1435,7 @@ def _sync_health(track: str | None, tracker_path: Path | None) -> None:
 def _keep_and_post(job: _Job, seen: _Pr, chain: dict, findings: str,
                    label: FallbackLabel | None = None, *, tracker_path: Path | None = None,
                    direct: bool = False, files: list[str] | None = None,
-                   skipped: tuple[datetime, bool] | None = None) -> ReviewResult:
+                   skipped: Limit | None = None) -> ReviewResult:
     """Under the PR's lock: look at the PR and the checkout again, claim the next round, keep what
     the review said, post, and make the claimed file the full record. A provisional GO is listed in
     `tracker_path` first (`_list_and_post`); the PR's lock is taken before the tracker's, never after.
@@ -1489,8 +1495,8 @@ def _keep_and_post(job: _Job, seen: _Pr, chain: dict, findings: str,
                 "status": status, "author": job.author, "ts": ts, "attempts": attempts,
                 "files": files, "findings": finding_count(chain.get("output") or ""),
                 **({"review": "opus-direct"} if direct else {}), **({"since": job.since} if job.since else {}),
-                **({"codex_skipped": {"reason": "usage limit", "until": skipped[0].astimezone(timezone.utc).isoformat(),
-                                      "parsed": skipped[1]}} if skipped else {})})
+                **({"codex_skipped": {"reason": "usage limit", "until": skipped.until.astimezone(timezone.utc).isoformat(),
+                                      "parsed": skipped.parsed}} if skipped else {})})
         except OSError as exc:
             _say("round %d is left empty: %s" % (number, exc))
             return ReviewResult(EXIT_INFRA, number, None, verdict, path, kind)
@@ -1633,6 +1639,7 @@ def review(repo: str, pr: int, checkout: str, author: str, *,
             skipped = read_limit(_reviews_dir(), _aware_now())
         except OSError as exc:
             _say("the Codex usage-limit file cannot be read: %s: Codex is asked" % exc)
+    asked_codex = not (opus_direct or skipped)      # a direct pass or a skip never starts Codex
     seen = _prepare(job)
     if isinstance(seen, ReviewResult):
         return seen
@@ -1666,11 +1673,11 @@ def review(repo: str, pr: int, checkout: str, author: str, *,
         spec = fallback_spec(timeout=fallback_timeout) if allow_fallback or opus_direct else None
         chain = _ask_codex(checkout, build_brief(seen.head, seen.base, seen.title, seen.body, diff,
                                                  since=since, answered=answered),
-                           codex_timeout, spec, direct=opus_direct or skipped is not None)
-        if not (opus_direct or skipped):
+                           codex_timeout, spec, direct=not asked_codex)
+        if asked_codex:
             _note_limit(chain, _reviews_dir())
     except _Infra as exc:
-        if isinstance(exc, _Refused) and not (opus_direct or skipped):     # no Codex outage to count in a pass Codex was not asked for
+        if isinstance(exc, _Refused) and asked_codex:     # no Codex outage to count in a pass Codex was not asked for
             _log_refused(job, exc.attempts)
             _sync_health(track, tracker_path)
         return _failed(str(exc))
@@ -1679,21 +1686,21 @@ def review(repo: str, pr: int, checkout: str, author: str, *,
         try:
             findings = findings_block(chain["output"])
             if skipped:
-                label = FallbackLabel(chain["attempts"][0]["model"], "usage limit", skipped=skip_words(*skipped))
+                label = FallbackLabel(chain["attempts"][0]["model"], "usage limit", skipped=skip_words(skipped))
             elif not opus_direct and len(chain["attempts"]) == 2 and chain["reviewer"] == spec.name:
                 codex = chain["attempts"][0]
                 label = FallbackLabel(chain["attempts"][1]["model"], codex["reason"])
                 if codex["reason"] == "error":
                     label = label._replace(exit_code=codex["exit_code"], stderr=stderr_block(codex["stderr_tail"]))
         except OSError as exc:
-            if not (opus_direct or skipped):
+            if asked_codex:
                 _log_refused(job, [{k: a[k] for k in ("reviewer", "reason", "exit_code")} for a in chain["attempts"]],
                              "the attempts of the answer whose findings could not be made safe")
                 _sync_health(track, tracker_path)
             return _failed("the findings cannot be made safe to publish: %s" % exc)
     result = _keep_and_post(job, seen, chain, findings, label, tracker_path=tracker_path, direct=opus_direct,
                             files=files, skipped=skipped)
-    if not (opus_direct or skipped):
+    if asked_codex:
         _sync_health(track, tracker_path)      # outside the PR's lock, which _keep_and_post has let go
     return result
 

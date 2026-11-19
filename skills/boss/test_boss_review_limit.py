@@ -86,14 +86,14 @@ class State(Zone):
         self.path = self.dir / "codex-limit.json"
 
     def test_it_is_written_with_an_explicit_offset_and_private(self):
-        br.write_limit(self.dir, UNTIL, True, NOW)
+        br.write_limit(self.dir, br.Limit(UNTIL, True), NOW)
         record = json.loads(self.path.read_text(encoding="utf-8"))
         self.assertEqual(record["until"], "2026-11-20T13:10:00+00:00")
         self.assertEqual(record["parsed"], True)
         self.assertEqual(oct(self.path.stat().st_mode & 0o777), "0o600")
 
     def test_active_before_the_reset_time_and_gone_at_it(self):
-        br.write_limit(self.dir, UNTIL, True, NOW)
+        br.write_limit(self.dir, br.Limit(UNTIL, True), NOW)
         self.assertEqual(br.read_limit(self.dir, UNTIL - timedelta(seconds=1)), (UNTIL, True))
         self.assertIsNone(br.read_limit(self.dir, UNTIL))
         self.assertFalse(self.path.exists(), "a file past its reset time is cleaned")
@@ -244,7 +244,7 @@ class Skip(Zone, Base):
         self.assertFalse(self.limit_path.exists())
 
     def test_without_a_fallback_codex_is_asked_whatever_the_file_says(self):
-        br.write_limit(self.reviews, UNTIL, True, NOW)
+        br.write_limit(self.reviews, br.Limit(UNTIL, True), NOW)
         self.codex(answer="VERDICT: GO")
         result = self.review()
         self.assertEqual((result.exit_code, result.kind), (0, "codex"))
@@ -252,7 +252,7 @@ class Skip(Zone, Base):
         self.assertTrue(self.limit_path.exists())
 
     def test_a_file_past_its_reset_time_is_ignored_and_cleaned_by_the_next_review(self):
-        br.write_limit(self.reviews, NOW - timedelta(minutes=1), True, NOW - timedelta(hours=5))
+        br.write_limit(self.reviews, br.Limit(NOW - timedelta(minutes=1), True), NOW - timedelta(hours=5))
         self.codex(answer="VERDICT: GO")
         result = self.fallback_review()
         self.assertEqual(result.kind, "codex")
