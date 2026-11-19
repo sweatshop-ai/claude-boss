@@ -21,7 +21,12 @@ actions, in the order the boss is told to take them:
     spawn-next n    no ticket graph: n more workers for the NEXT items no
                     worker is marked `(→ Name)` on, left over
     refill-next     ... and refill NEXT if it is empty or stale
+    retire          idle workers with no park and nothing to dispatch: end them
     run-rung n      post the due rung n (the first overdue one)
+
+A Decision also says whether the boss's turn may end (`block`): not while an idle worker
+without a valid park sits beside unassigned work. The hook turns that into a Stop block and
+counts it (BLOCK_LIMIT in a row for the same idle set, then it lets go).
 """
 import re
 from collections import namedtuple
@@ -53,7 +58,8 @@ Woken = namedtuple("Woken", "worker event state minutes")
 # A blocker line whose rung has come due: key into `fired`, the rung, minutes
 # since its T+0, the line.
 Rung = namedtuple("Rung", "key rung minutes line")
-Decision = namedtuple("Decision", "actions overdue fired")
+Decision = namedtuple("Decision", "actions overdue fired block", defaults=(False,))
+BLOCK_LIMIT = 3         # blocks in a row for the same idle set, then the pulse lets go
 Action = namedtuple("Action", "kind n", defaults=(None,))
 
 
@@ -117,6 +123,14 @@ def _team(facts, n):
             % (facts.size, policy.MEMORY_FLOOR_GB))
 
 
+def open_work(facts):
+    """The unassigned work: the READY tickets of a sound graph, else the NEXT items no live
+    worker is on. A broken graph hands out only NEXT."""
+    if facts.source and not facts.broken and facts.ready:
+        return list(facts.ready)
+    return unassigned(facts.next_items, facts.workers, _idle_names(facts))[0]
+
+
 def decide(facts):
     # More ready tickets than idle workers: one new worker for each.
     spawn = _more_workers(len(facts.ready), facts) if not facts.broken else 0
@@ -155,9 +169,18 @@ def decide(facts):
                 actions.append(Action("spawn-next", spawn_next))
             if facts.idle and len(free) == len(entries):   # no item is being worked
                 actions.append(Action("refill-next"))
+    work = open_work(facts)
+    woken = {w.worker for w in facts.parks}
+    resting = [n for n in _idle_names(facts) if n not in woken]
+    # Prose in NEXT, not a list, may still be work, and a ticket graph may hold open tickets
+    # that wait on others: retire only on a NEXT list whose items are all marked busy,
+    # or, beside a refill, as the fallback when the refill finds nothing.
+    if resting and not work and not facts.broken and not facts.source and (
+            _entries(facts.next_items) or not facts.next_items):
+        actions.append(Action("retire"))
     if facts.rungs:
         actions.append(Action("run-rung", facts.rungs[0].rung))
-    return Decision(actions, overdue, fired)
+    return Decision(actions, overdue, fired, block=bool(facts.idle and work and not facts.broken))
 
 
 def _ask(facts, action):
@@ -222,13 +245,37 @@ def _refill_next(facts, action):
             "tracker (`boss-goal next %s`), then dispatch." % facts.track)
 
 
+def _retire(facts, action):
+    woken = {w.worker for w in facts.parks}
+    names = [n for n in _idle_names(facts) if n not in woken]
+    return ("Nothing is left to hand out%s and no park holds %s: retire %s "
+            "(`boss-lifecycle.sh retire <pane> --require-idle --kill`)." % (
+                " (after the refill, if it finds nothing)"
+                if not _entries(facts.next_items) else "",
+                ", ".join(names[:policy.LIST_MAX]), "it" if len(names) == 1 else "them"))
+
+
 def _run_rung(facts, action):
     return 'Run the due rung: `boss-alert %d "<one action, where, what it costs>"`.' % action.n
 
 
 SAY = {"ask": _ask, "fix-graph": _fix_graph, "wake": _wake, "dispatch-ready": _dispatch_ready,
        "spawn": _spawn, "dispatch-next": _dispatch_next, "spawn-next": _spawn_next,
-       "refill-next": _refill_next, "run-rung": _run_rung}
+       "refill-next": _refill_next, "retire": _retire, "run-rung": _run_rung}
+
+
+def block_reason(facts, decision):
+    """Why the turn may not end: each idle worker and the unassigned items, the ways out,
+    then the pulse's own instructions."""
+    work = open_work(facts)
+    names = _idle_names(facts)[:policy.LIST_MAX]
+    return ("[boss pulse - BLOCK] You may not end this turn: %s idle without a park while work "
+            "is unassigned.\nIDLE: %s\nUNASSIGNED: %s\n"
+            "The only ways out: dispatch each idle worker, or park it with `boss-park %s <worker> "
+            "--until <event>` (%s; 2 h at most).\n\n%s" % (
+                ", ".join(names), ", ".join("%s (%s)" % (n, c) for n, c in facts.idle[:policy.LIST_MAX]),
+                "; ".join(w[:80] for w in work[:policy.LIST_MAX]), facts.track, park.allowed(),
+                render(facts, decision)))
 
 
 def render(facts, decision):

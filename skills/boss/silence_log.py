@@ -15,6 +15,7 @@ import boss_store
 
 MAX_BYTES = 1024 * 1024
 DAY_S = 86400
+SPOKE = ("fired", "blocked", "block-let-go")    # the gates on which the pulse said something
 
 
 def record(sid, track, gate, now=None, cfg=None, **details):
@@ -59,7 +60,7 @@ def summary(track, now=None, cfg=None, window=DAY_S):
                 t = time.mktime(time.strptime(f[0], "%Y-%m-%dT%H:%M:%S"))
             except ValueError:
                 continue
-            if f[2] == "fired" and (last is None or t > last):
+            if f[2] in SPOKE and (last is None or t > last):
                 last = t                      # the last firing, whatever its age
             if now - t <= window:
                 counts[f[2]] = counts.get(f[2], 0) + 1

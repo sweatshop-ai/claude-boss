@@ -148,5 +148,15 @@ class Why(PulseCase):
         self.assertEqual(self.why().returncode, 2)
 
 
+class SpokeGates(unittest.TestCase):
+    def test_a_block_counts_as_the_last_firing(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            import pathlib
+            cfg = pathlib.Path(d)
+            silence_log.record("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "t", "blocked", cfg=cfg)
+            self.assertIsNotNone(silence_log.summary("t", cfg=cfg)[1])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
