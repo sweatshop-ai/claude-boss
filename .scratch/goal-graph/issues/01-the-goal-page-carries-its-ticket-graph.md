@@ -22,14 +22,14 @@ file changes on disk, merging a save from the page paragraph by paragraph (SPEC 
    holds that.
 2. **Ownership.** Only the generator writes between the markers. The start marker says so in one line;
    anything typed there is overwritten at the next write. Nothing outside the markers is ever touched.
-3. **Form.** ```` ```mermaid ```` `flowchart LR`. One node per ticket, id `t<num>`, in ticket order; label
+3. **Form.** ```` ```mermaid ```` `flowchart TD` (top to bottom, Thierry 2026-11-19). One node per ticket, id `t<num>`, in ticket order; label
    `<num> · <title>` with the title cut at 48 characters (backticks and quotes taken out), and on a second
    line the state word: `ready`, `<worker>` for claimed (the name from `claimed_by`, no date), `waiting`,
    `done`.
 4. **Edges.** One edge `t<blocker> --> t<ticket>` per entry of `blocked_by` within the source. An external
    blocker is a node of its own, `x<n>`, dashed, labelled with the blocker's text, with an edge to the ticket.
 5. **Colours, by state, never anything else:** done green, claimed blue, ready amber, waiting grey,
-   external red dashed. Given as four `classDef` lines and one `class` line per state, the same in every
+   external red dashed. Given as five `classDef` lines (one per state and the external blocker) and one `class` line per state, the same in every
    goal, readable in sheaf's light and dark theme.
 6. **Under the diagram, one line:** `n tickets: d done, c in progress, r ready, w waiting` and the time of
    the frontier read (`HH:MM`). A broken source (exit 2) leaves the last graph standing and puts the
@@ -47,8 +47,9 @@ file changes on disk, merging a save from the page paragraph by paragraph (SPEC 
 
 ## How it writes
 
-The write replaces only the text between the markers, through the track store (`boss_store`, read, swap
-the block, write via a sibling file and rename, under the store's `flock`), checks that the file still
+The write replaces only the text between the markers (read, swap the block, write via a sibling file and
+rename, under a `flock` of its own, `pm/.pulse/.goal-graph.lock`: the store's state lock is held for
+milliseconds by every hook, and a goal write must not make them wait), checks that the file still
 holds the text it read just before the rename, and retries once if not. Never a whole-file rewrite from a
 template: Thierry edits the goal page, and sheaf merges his save with this write by paragraph.
 

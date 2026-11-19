@@ -49,7 +49,8 @@ check_units() {
   tdir="$(readlink -f -- "$link")/systemd"
   [[ -d $units && -d $tdir ]] || return 0
   for u in boss-ladder.service boss-ladder.timer boss-workers-watch.service \
-           boss-workers-watch.timer boss-efficiency.service boss-efficiency.timer; do
+           boss-workers-watch.timer boss-efficiency.service boss-efficiency.timer \
+           boss-goal-graph.service boss-goal-graph.timer; do
     [[ -f $tdir/$u.in ]] || continue
     [[ -L $units/$u ]] && continue      # masked (a link to /dev/null) or linked on purpose: the owner's choice
     if [[ ! -f $units/$u ]]; then absent="$absent $u"; continue; fi

@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.29.0
+
+- **The goal page carries its ticket graph, kept up to date (the owner, 2026-11-19, goal-graph ticket 01).** A goal with a `## Tickets` source gets a section `## Ticket graph` at the top, after the `# Objective` heading and its `_Status:` line, before `## Outcome`: a mermaid `flowchart TD` (top to bottom) that sheaf renders, drawn from `frontier.py`'s classification by fixed rules. One node per ticket (`<num> · <title>` cut at 48 characters, and the state: `ready`, the worker's name, `waiting`, `done`), one edge per Blocked by, an external blocker as a dashed red node, colours by state only (done green, claimed blue, ready amber, waiting grey), and one line `n tickets: d done, c in progress, r ready, w waiting · read HH:MM`. The new `skills/boss/goal_graph.py` writes only between the `ticket-graph` marker comments and only when the block changed (the read time aside), so an unchanged frontier never reloads the page; it swaps the block in the text it read, checks the file still holds that text just before the rename, and retries once, so an edit the owner makes in sheaf is never overwritten. A broken source keeps the last diagram and names the error on the summary line. Three callers: the pulse on every Stop of an open track (cache only for a GitHub graph), `frontier.py claim` after a claim it made, and the new `boss-goal-graph.timer` every minute (`goal_graph.py sweep`, silent). Run `install.sh` once to render and enable the timer; `bin/boss-link` names it as missing until then. The pulse and the graph share one reader and one writer of the GitHub frontier cache (`boss_store.cached_frontier`, `boss_store.refresh_frontier`).
 
 ## 0.28.0
 

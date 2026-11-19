@@ -27,7 +27,9 @@ import json
 import os
 import re
 import stat
+import subprocess
 import sys
+import time
 import tempfile
 from pathlib import Path
 
@@ -74,6 +76,45 @@ def frontier_cache(track, source, cfg=None):
     """
     key = hashlib.sha1(source.encode("utf-8")).hexdigest()[:10]
     return state_dir(cfg) / ("%s.%s.frontier.json" % (track, key))
+
+
+def cached_frontier(track, source, cfg=None):
+    """(frontier output, error, age in seconds) from this graph's cache.
+
+    (None, None, None) when nothing was read yet; (None, its text, age) when the
+    cache holds an error instead of a frontier."""
+    cache = frontier_cache(track, source, cfg)
+    try:
+        age = time.time() - cache.stat().st_mtime
+        text = cache.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None, None, None
+    try:
+        out = json.loads(text)
+        out["tickets"]
+        return out, None, age
+    except (ValueError, KeyError, TypeError):
+        return None, text.strip()[:300] or "empty frontier cache", age
+
+
+def refresh_frontier(track, source, frontier_py, timeout, cfg=None):
+    """Read a GitHub graph again into its cache; None, or the error of a failed read.
+
+    A failed read never replaces a good frontier: GitHub down for a minute must
+    not turn the graph "broken". With no cache at all, the error is written: it
+    is what the boss needs to see. A read slower than `timeout` raises
+    subprocess.TimeoutExpired and writes nothing."""
+    cache = frontier_cache(track, source, cfg)
+    r = subprocess.run([sys.executable, str(frontier_py), "--json", source],
+                       capture_output=True, text=True, timeout=timeout)
+    if r.returncode == 0 or not cache.exists():
+        state_dir(cfg).mkdir(parents=True, exist_ok=True)
+        tmp = cache.with_suffix(".tmp%d" % os.getpid())
+        tmp.write_text(r.stdout if r.returncode == 0 else r.stderr, encoding="utf-8")
+        os.replace(tmp, cache)
+    if r.returncode == 0:
+        return None
+    return (r.stderr or r.stdout).strip()[:300] or "frontier.py exit %d" % r.returncode
 
 
 def parks_path(track, cfg=None):

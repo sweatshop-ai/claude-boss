@@ -48,6 +48,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import boss_store  # noqa: E402
 import codex_blocker  # noqa: E402
 import fleet  # noqa: E402
+import goal_graph  # noqa: E402
 import memfloor  # noqa: E402
 import objective  # noqa: E402
 import park  # noqa: E402
@@ -210,27 +211,14 @@ def read_graph(source, track):
     background and by `boss-goal check`, which saves the same cache; a failed
     read keeps the last good frontier."""
     if source.startswith("gh:"):
-        cache = boss_store.frontier_cache(track, source)
-        try:
-            age = time.time() - cache.stat().st_mtime
-        except OSError:
-            age = None
+        _, _, age = boss_store.cached_frontier(track, source)
         if age is None or age > GH_CACHE_S:
             try:
-                r = subprocess.run([sys.executable, str(FRONTIER_PY), "--json", source],
-                                   capture_output=True, text=True, timeout=GH_FIRST_S)
-                # A failed read never replaces a good frontier: GitHub down for a
-                # minute must not turn the graph "broken". With no cache at all,
-                # the error is what the boss needs to see.
-                if r.returncode == 0 or age is None:
-                    boss_store.state_dir().mkdir(parents=True, exist_ok=True)
-                    tmp = cache.with_suffix(".tmp%d" % os.getpid())
-                    tmp.write_text(r.stdout if r.returncode == 0 else r.stderr, encoding="utf-8")
-                    os.replace(tmp, cache)
-                    age = 0
+                boss_store.refresh_frontier(track, source, FRONTIER_PY, GH_FIRST_S)
             except (subprocess.SubprocessError, OSError):
                 # Too slow for this hook: finish in the background, success only.
                 try:
+                    cache = boss_store.frontier_cache(track, source)
                     subprocess.Popen(
                         ["sh", "-c", '"$0" "$1" --json "$2" > "$3.$$" 2>/dev/null '
                          '&& mv "$3.$$" "$3" || rm -f "$3.$$"',
@@ -239,14 +227,12 @@ def read_graph(source, track):
                         stderr=subprocess.DEVNULL, start_new_session=True)
                 except OSError:
                     pass
+        out, error, age = boss_store.cached_frontier(track, source)
         if age is None:
             return [], [], None
-        text = cache.read_text(encoding="utf-8", errors="replace")
-        try:
-            out = json.loads(text)
-            return ready_of(out), done_of(out), None
-        except (ValueError, KeyError, TypeError):
-            return [], [], text.strip()[:300] or "empty frontier cache"
+        if out is None:
+            return [], [], error
+        return ready_of(out), done_of(out), None
     import importlib.util
     spec = importlib.util.spec_from_file_location("frontier", str(FRONTIER_PY))
     fr = importlib.util.module_from_spec(spec)
@@ -256,6 +242,19 @@ def read_graph(source, track):
         return [], [], "; ".join(errors)[:300]
     out = fr.classify(tickets)
     return ready_of(out), done_of(out), None
+
+
+def draw_graph(track):
+    """The ticket graph at the top of the goal page, from what read_graph just read.
+    Never in the pulse's way: a failure is one line in pm/goal-graph.log."""
+    try:
+        goal_graph.update(track, fetch=False)
+    except Exception as exc:
+        try:
+            with open(boss_store.pm_dir() / "goal-graph.log", "a", encoding="utf-8") as f:
+                f.write("%s pulse %s: %r\n" % (time.strftime("%Y-%m-%d %H:%M:%S"), track, exc))
+        except OSError:
+            pass
 
 
 def open_blockers(body):
@@ -495,6 +494,8 @@ def main():
     decided = decided_blockers(tracker_text)
     source = objective.tickets_source(body)
     ready, done, broken = read_graph(source, track) if source else ([], [], None)
+    if source:
+        draw_graph(track)
     idle, woken, parked = woken_parks(sid, track, idle, done, tracker_text)
     cap, cap_reason = objective.workers_cap(body) or (None, "")
     facts = pulse.Facts(

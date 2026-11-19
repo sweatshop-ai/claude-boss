@@ -66,12 +66,14 @@ if [[ -z ${NO_TIMERS:-} ]]; then
     mkdir -p "$UNITS"
     for u in boss-ladder.service boss-ladder.timer \
              boss-workers-watch.service boss-workers-watch.timer \
-             boss-efficiency.service boss-efficiency.timer; do
+             boss-efficiency.service boss-efficiency.timer \
+             boss-goal-graph.service boss-goal-graph.timer; do
       install_unit "$u"
     done
     systemctl --user daemon-reload
-    systemctl --user enable --now boss-ladder.timer boss-workers-watch.timer boss-efficiency.timer
-    echo "timers enabled: boss-ladder (every 5 min), boss-workers-watch (every min), boss-efficiency (weekly)"
+    systemctl --user enable --now boss-ladder.timer boss-workers-watch.timer boss-efficiency.timer \
+      boss-goal-graph.timer
+    echo "timers enabled: boss-ladder (every 5 min), boss-workers-watch (every min), boss-efficiency (weekly), boss-goal-graph (every min)"
     echo "  they run $LINK/routines/, and the link follows a plugin upgrade by itself"
   fi
 fi

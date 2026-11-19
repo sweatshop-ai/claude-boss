@@ -380,12 +380,34 @@ def claim(folder, num, name):
         os.close(lock)
 
 
+GOAL_GRAPH_PY = Path(__file__).resolve().parent.parent / "boss" / "goal_graph.py"
+
+
+def redraw(source):
+    """Redraw the ticket graph of every open goal on this source, so the claim shows at once.
+    Best effort: a claim made is never undone by a graph that could not be drawn. A
+    folder is drawn before the claim returns; a GitHub graph takes a read of every
+    ticket, so it is drawn in the background and the claim does not wait for it."""
+    argv = [sys.executable, str(GOAL_GRAPH_PY), "source", source]
+    quiet = dict(stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        if GH_SOURCE.match(source):
+            subprocess.Popen(argv, start_new_session=True, **quiet)
+        else:
+            subprocess.run(argv, timeout=20, **quiet)
+    except (subprocess.SubprocessError, OSError):
+        pass
+
+
 def main(argv):
     if argv[:1] == ["claim"]:
         if len(argv) != 4:
             print("usage: frontier.py claim <issues-dir> <NN> <name>", file=sys.stderr)
             return 1
-        return claim(*argv[1:])
+        rc = claim(*argv[1:])
+        if rc == 0:
+            redraw(argv[1])
+        return rc
     as_json = "--json" in argv
     args = [a for a in argv if a != "--json"]
     if len(args) != 1:

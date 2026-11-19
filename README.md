@@ -76,7 +76,8 @@ ordinary session pays a process spawn and nothing else.
 ```
 
 Then, from the checkout, for the parts a plugin cannot do — state directories
-and the two systemd timers:
+and the four systemd timers (the escalation ladder, the worker watchdog, the
+weekly efficiency report, and the ticket graph on each goal page):
 
 ```bash
 ./install.sh          # BIN=1 also puts boss-start on your PATH
