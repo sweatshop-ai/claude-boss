@@ -11,8 +11,9 @@ A Stop hook's `additionalContext` is delivered to the model and the conversation
 continues (Claude Code 2.1.266: hookSpecificOutput for Stop accepts exactly that
 one field, "non-error feedback delivered to the model; the conversation
 continues so the model can act on it"). So the pulse does not argue with the
-boss and does not block it. It hands it the objective and the list of idle
-workers at the moment it was about to go quiet.
+boss. It hands it the objective and the list of idle workers at the moment it
+was about to go quiet. One case blocks the Stop: an idle worker with no park beside
+unassigned work, at most 3 times in a row for the same idle set, then the pulse lets go.
 
 Silence stays the default. The pulse fires ONLY when all of these hold:
 
@@ -369,7 +370,19 @@ def gate(sid):
     return now, st
 
 
-def commit(sid, now, fired):
+def blocks_so_far(sid, idle_key):
+    """Blocks in a row already given for this exact idle set; a different set starts again."""
+    b = boss_store.read_state(sid, "pulse").get("blocks") or {}
+    return b.get("n", 0) if b.get("set") == idle_key else 0
+
+
+def reset_blocks(sid):
+    """Nobody is idle beside open work any more: the count of blocks starts over."""
+    if boss_store.read_state(sid, "pulse").get("blocks"):
+        boss_store.update_state(sid, "pulse", lambda st: st.pop("blocks", None))
+
+
+def commit(sid, now, fired, blocks=None):
     """Record that the pulse spoke. Under the store's lock, so the hour's count
     is the sum of every Stop hook that spoke, not the last writer's."""
     def spoke(st):
@@ -379,6 +392,8 @@ def commit(sid, now, fired):
         st["count"] = st.get("count", 0) + 1
         st.setdefault("hour_start", now)
         st["rungs"] = fired
+        if blocks is not None:
+            st["blocks"] = blocks
     boss_store.update_state(sid, "pulse", spoke)
 
 
@@ -453,13 +468,22 @@ def main():
     unassigned = len(ready) if source else len(facts.next_items)
     if decision is None:
         # team busy, nothing overdue
+        reset_blocks(sid)
         return held("nothing-to-say", idle=len(idle), unassigned=unassigned)
 
+    if decision.block:
+        idle_key = ",".join(sorted(n for n, _ in idle))
+        blocked = blocks_so_far(sid, idle_key)
+        if blocked >= pulse.BLOCK_LIMIT:
+            return held("block-let-go", idle=len(idle), unassigned=unassigned, blocks=blocked)
+        commit(sid, now, decision.fired, blocks={"set": idle_key, "n": blocked + 1})
+        print(json.dumps({"decision": "block", "reason": pulse.block_reason(facts, decision)}))
+        return held("blocked", idle=len(idle), unassigned=unassigned, blocks=blocked + 1)
     print(json.dumps({"hookSpecificOutput": {
         "hookEventName": "Stop",
         "additionalContext": pulse.render(facts, decision),
     }}))
-    commit(sid, now, decision.fired)
+    commit(sid, now, decision.fired, blocks={})
     return held("fired", idle=len(idle), unassigned=unassigned,
                 actions=",".join(a.kind for a in decision.actions))
 

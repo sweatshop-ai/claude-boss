@@ -1191,8 +1191,8 @@ Three sources. Turn all three on.
    Every Stop of a boss session leaves one line in `pm/.pulse/<sid>.silence.log`
    (rotated at 1 MB): the time, the track, and the gate that held the pulse back
    (`stop-hook-active`, `no-track`, `no-goal`, `objective-closed`,
-   `background-tasks`, `rate-gate`, `open-question`, `nothing-to-say`) or
-   `fired` with its actions, plus the idle workers and unassigned items when
+   `background-tasks`, `rate-gate`, `open-question`, `nothing-to-say`,
+   `block-let-go`) or `blocked` or `fired` with its actions, plus the idle workers and unassigned items when
    known. A session that is not a boss is not logged. `boss-pulse.py why <track>`
    counts the last day's Stops per gate and gives the last firing, so a silence
    can be explained afterwards instead of argued.
@@ -1203,6 +1203,17 @@ Three sources. Turn all three on.
    times while four side tickets sat unstaffed, because its ticket graph showed
    READY none and it never looked past it. READY none is not an empty backlog —
    check NEXT, the tracker and the open side tickets before parking anyone.
+
+   **You cannot end your turn while work lies around.** When a worker of yours is idle
+   without a valid park and unassigned work exists (a READY ticket, or a NEXT item without
+   `(→ Name)`), the pulse does not hand you context: it **blocks the Stop**, and the reason
+   names each idle worker and the unassigned items. The only ways out are to dispatch the
+   worker or to park it with a checked event. After 3 blocks in a row for the same set of
+   idle workers the pulse lets go and logs `block-let-go`; a dispatch or a park (a different
+   idle set, or none) starts the count again. Nothing reaches the owner: you fix it. A worker
+   that is idle with nothing left to hand out and no park gets "retire X", with no block. The
+   concierge is never an idle worker. The hook still never stacks on its own block
+   (`stop_hook_active`).
 
    **Park a worker: `boss-park <track> <worker> --until <event>`.** The event is one of
    five (the two GitHub ones arrive with ticket 04; today three work):

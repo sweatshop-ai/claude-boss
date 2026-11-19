@@ -21,6 +21,14 @@ PULSE = Path(__file__).resolve().parent / "boss-pulse.py"
 TRACK = "demo"
 
 
+def spoken(text):
+    """What the boss reads: the context of a pulse, or the reason of a Stop block."""
+    if not text:
+        return ""
+    out = json.loads(text)
+    return out["reason"] if out.get("decision") == "block" else out["hookSpecificOutput"]["additionalContext"]
+
+
 class PulseCase(unittest.TestCase):
 
     def setUp(self):
@@ -62,7 +70,7 @@ class PulseCase(unittest.TestCase):
                              capture_output=True, text=True, env=env, timeout=20)
         self.assertEqual(res.returncode, 0, res.stderr)
         out = res.stdout.strip()
-        return json.loads(out)["hookSpecificOutput"]["additionalContext"] if out else ""
+        return spoken(out)
 
 
 class StuckBoss(PulseCase):
@@ -205,7 +213,7 @@ class Frontier(PulseCase):
             else:
                 os.environ["CLAUDE_CONFIG_DIR"] = old
         text = out.getvalue().strip()
-        return json.loads(text)["hookSpecificOutput"]["additionalContext"] if text else ""
+        return spoken(text)
 
     def park(self, worker, event, age_s=60):
         import park

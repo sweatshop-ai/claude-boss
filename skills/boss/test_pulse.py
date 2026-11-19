@@ -23,7 +23,7 @@ class Decide(unittest.TestCase):
     def test_an_open_blocker_comes_first_as_a_question(self):
         d = pulse.decide(pulse.Facts(track="demo", blockers=["- waiting on the org"],
                                      idle=[("Ada", "w:1.0")]))
-        self.assertEqual(kinds(d), ["ask", "dispatch-next", "refill-next"])
+        self.assertEqual(kinds(d), ["ask", "dispatch-next", "refill-next", "retire"])
 
     def test_ready_tickets_beyond_the_idle_workers_ask_for_that_many_more(self):
         d = pulse.decide(pulse.Facts(track="demo", source="issues", idle=[("Ada", "w:1.0")],
@@ -46,7 +46,7 @@ class Decide(unittest.TestCase):
     def test_with_a_ticket_graph_and_no_next_nothing_is_handed_out(self):
         d = pulse.decide(pulse.Facts(track="demo", source="issues", idle=[("Ada", "w:1.0")],
                                      size=1))
-        self.assertEqual(kinds(d), [])
+        self.assertEqual(kinds(d), ["retire"])
 
     def test_ready_tickets_go_out_before_next(self):
         d = pulse.decide(pulse.Facts(track="demo", source="issues", idle=[("Ada", "w:1.0")],
