@@ -118,11 +118,15 @@ def clear(track, worker, cfg=None, retired=False):
 def retire(track, worker, cfg=None, now=None):
     """Move the worker's park under `retired:<worker>`: its event stays recorded, so the pulse
     can say when its work may be picked up, but a new session that gets the same name neither
-    inherits it nor wipes it. True when there was a park."""
+    inherits it nor wipes it. True when there was a park. A kept park of an earlier worker of
+    that name is never overwritten: ValueError says to hand its work on and clear it first."""
     had = []
 
     def move(st):
         if isinstance(st.get(worker), dict):
+            if RETIRED + worker in st:
+                raise ValueError("a retired park of %s is still kept: hand its work on and "
+                                 "`boss-park %s %s --clear --retired` first" % (worker, track, worker))
             st[RETIRED + worker] = dict(st.pop(worker), retired=time.time() if now is None else now)
             had.append(True)
     _update(track, move, cfg)

@@ -119,6 +119,15 @@ class Store(unittest.TestCase):
         self.assertEqual((got.worker, got.event, got.since), ("Ada", "ticket:12", NOW))
         self.assertTrue(got.retired)
 
+    def test_a_second_retire_under_the_same_name_refuses_and_keeps_the_first(self):
+        park.set_park("demo", "Ada", "ticket:12", now=NOW, cfg=self.cfg)
+        park.retire("demo", "Ada", self.cfg)
+        park.set_park("demo", "Ada", "ticket:13", now=NOW + 1, cfg=self.cfg)
+        with self.assertRaises(ValueError):
+            park.retire("demo", "Ada", self.cfg)
+        parks = park.read_parks("demo", self.cfg)
+        self.assertEqual((parks["retired:Ada"].event, parks["Ada"].event), ("ticket:12", "ticket:13"))
+
     def test_a_new_session_with_a_retired_workers_name_leaves_the_kept_park_alone(self):
         park.set_park("demo", "Ada", "ticket:12", now=NOW, cfg=self.cfg)
         park.retire("demo", "Ada", self.cfg)
