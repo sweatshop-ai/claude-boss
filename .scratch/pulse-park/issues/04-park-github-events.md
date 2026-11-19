@@ -13,7 +13,7 @@ record to the worker's report path.
 
 **Claimed by:** Talia 2026-11-19 18:03
 
-**Status:** in-progress
+**Status:** done
 
 - [x] A park on a merged PR wakes; on an open PR it holds — test_park.py::GithubEvents::test_a_park_on_a_merged_pr_wakes_and_on_an_open_pr_holds + test_boss_pulse park-on-merge test pass
 - [x] A park on CI wakes when all check runs of the PR head have concluded — GithubEvents::test_a_park_on_ci_wakes_when_every_check_run_of_the_head_has_concluded passes (queued/in-progress/no runs hold)
@@ -21,4 +21,4 @@ record to the worker's report path.
 - [x] A `gh` failure keeps the park and writes a log line, never a crash — GithubEvents gh-failure, bad-output and timeout tests pass; log in pm/park-gh.log
 - [x] A worker reporting "PR #N open, CI running" is auto-parked on `ci:` for that PR — worker parks itself via the reporting contract; test_boss_pulse ready-work-beside-a-parked-worker test shows Spawn, no IDLE NOW
 
-PR not opened yet: waits for PR 164 to merge and a rebase on main. Status stays in-progress until then (commit 168d55a on pulse-park/04-park-github, 747 related tests pass).
+PR 165, head ee6f0c7, CI green (pytest success), review GO (round 1 Opus fallback, 4 MINOR fixed in the same push).
