@@ -6,12 +6,18 @@ A goal with a `## Tickets` source gets a section `## Ticket graph` right under i
 a mermaid flowchart drawn from `frontier.py`'s classification, by fixed rules:
 
   - one node per ticket, in ticket order, id `t<num>`, label `<num> · <title>` (title
-    cut at 48 characters) and on a second line the state: `ready`, the worker's name
-    for a claimed ticket, `waiting`, `done`
+    cut at 48 characters) and on a second line the state with its sign: `○ ready`,
+    the worker's name for a claimed ticket, `⏸ waiting`, `✅ done`; a claimed ticket's
+    worker carries 🔨 (a turn in flight), 🧪 (a job of its own open) or 🔍 (a review
+    running) when the activity feed says so, and nothing at rest
   - one edge per Blocked by within the source; an external blocker is a dashed node
     of its own, `x<n>`, with a dashed edge to the ticket
   - colours by state only, the same five classes in every goal
   - one summary line under the diagram, with the time of the read
+
+The activity feed is optional: a URL in `<pm>/goal-graph.signs-url` that answers
+`{"signs": {track: {name: "busy"|"watching"|"reviewing"}}}` (agentview's
+`/api/signs`). No file, or no answer within SIGNS_S, draws the names without signs.
 
 Only this module writes between the markers; nothing outside them is touched. The
 same frontier gives the same bytes, and the file is written only when the block
@@ -41,11 +47,14 @@ Command line (exit 0, also when a track cannot be read, which goes to stderr;
 """
 import fcntl
 import importlib.util
+import json
 import os
 import re
 import subprocess
 import sys
+import threading
 import time
+import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -64,6 +73,11 @@ SUMMARY_RE = re.compile(r"^(\d+ tickets: .*?) · read \d{2}:\d{2}$|^(Ticket sour
 TITLE_MAX = 48
 GH_STALE_S = 120        # the sweep reads a GitHub graph again when its cache is older
 GH_READ_S = 30
+SIGNS_FILE = "goal-graph.signs-url"
+SIGNS_S = 1             # the pulse has 5 s in all; a feed slower than this draws no signs
+WORKER_SIGNS = {"busy": "🔨", "watching": "🧪", "reviewing": "🔍"}
+STATE_SIGNS = {"ready": "○", "waiting": "⏸", "done": "✅"}
+_FEED = {}              # url -> the feed's signs, read once per process (the sweep draws every track)
 LOCK_NAME = ".goal-graph.lock"   # its own: the pulse's state lock is held for milliseconds, a goal write may wait on a slow disk
 
 # Light fills with dark text: readable on sheaf's light and dark theme alike.
@@ -92,8 +106,49 @@ def _worker(claimed_by):
     return words[0] if words else "claimed"
 
 
-def diagram(out):
-    """The mermaid block for one `frontier.py --json` output, as lines."""
+def activity(track, cfg=None):
+    """`{name casefolded: sign glyph}` of the track's workers doing something now, from
+    the feed named in SIGNS_FILE; empty when there is none or it does not answer. The
+    feed gives one sign per worker, already ordered (review beats a turn, which beats a job)."""
+    try:
+        url = (boss_store.pm_dir(cfg) / SIGNS_FILE).read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeDecodeError):
+        return {}
+    if not re.match(r"https?://", url):
+        return {}
+    if url not in _FEED:
+        got = {}
+
+        def fetch():
+            try:
+                with urllib.request.urlopen(url, timeout=SIGNS_S) as r:
+                    got["signs"] = json.loads(r.read(1 << 20)).get("signs")
+            except Exception:        # http.client's errors are no OSError; a feed never fails a write
+                pass
+        # The timeout bounds each socket operation; the join bounds the whole read.
+        reader = threading.Thread(target=fetch, daemon=True)
+        reader.start()
+        reader.join(SIGNS_S)
+        signs = got.get("signs")
+        _FEED[url] = signs if isinstance(signs, dict) else {}
+    mine = _FEED[url].get(track)
+    return {str(n).casefold(): WORKER_SIGNS[s] for n, s in mine.items()
+            if isinstance(s, str) and s in WORKER_SIGNS} if isinstance(mine, dict) else {}
+
+
+def _second_line(t, signs):
+    """`🔨 Farid` for a claimed ticket (no sign at rest), `✅ done` and the like for the rest."""
+    if t["state"] == "claimed":
+        name = _worker(t["claimed_by"])
+        sign = signs.get(name.casefold())
+        return "%s %s" % (sign, name) if sign else name
+    sign = STATE_SIGNS.get(t["state"])
+    return "%s %s" % (sign, t["state"]) if sign else t["state"]
+
+
+def diagram(out, signs=None):
+    """The mermaid block for one `frontier.py --json` output, as lines. `signs` is
+    `activity`'s answer."""
     tickets = out["tickets"]
     nums = {t["num"] for t in tickets}
     lines = ["```mermaid", "flowchart TD"]
@@ -101,7 +156,7 @@ def diagram(out):
     externals = {}
     for t in tickets:
         state = t["state"]
-        word = _worker(t["claimed_by"]) if state == "claimed" else state
+        word = _second_line(t, signs or {})
         lines.append('  t%s["%s · %s<br/>%s"]' % (t["num"], t["num"], _label(_cut(t["title"])), _label(word)))
         by_class[state if state in by_class else "waiting"].append("t" + t["num"])
         for e in t["external"]:
@@ -133,13 +188,13 @@ def summary(out, now):
         time.strftime("%H:%M", time.localtime(now)))
 
 
-def block(out, now, error=None, old=None):
+def block(out, now, error=None, old=None, signs=None):
     """The whole block between and including the markers, as lines.
 
     With `error`, the diagram of `old` (the block there now) is kept and the summary
     line names the error; with no old diagram the block is that line alone."""
     if error is None:
-        body = diagram(out) + ["", summary(out, now)]
+        body = diagram(out, signs) + ["", summary(out, now)]
     else:
         kept = _old_diagram(old or [])
         line = "Ticket source unreadable at %s: %s" % (
@@ -282,6 +337,7 @@ def update(track, fetch=True, now=None, cfg=None, stale=GH_STALE_S):
     if out is None and error is None:
         return "none"
     at = time.time() if now is None else now
+    signs = activity(track, cfg)
     lock_dir = boss_store.state_dir(cfg)
     lock = None
     try:
@@ -300,7 +356,7 @@ def update(track, fetch=True, now=None, cfg=None, stale=GH_STALE_S):
                 return "none"
             if objective.tickets_source(text) != source:
                 return "deferred"            # the source moved meanwhile: the next run draws it
-            new = place(text, lambda old: block(out, at, error, old))
+            new = place(text, lambda old: block(out, at, error, old, signs))
             if new == text:
                 return "unchanged"
             if _write_if_same(path, text, new):

@@ -3,6 +3,7 @@
 
 Run: python3 skills/boss/test_goal_graph.py
 """
+import http.client
 import json
 import os
 import shutil
@@ -74,8 +75,14 @@ class Form(GoalCase):
         """All four states, one external blocker, one ticket blocked by two."""
         out, error = goal_graph.read(str(self.issues), TRACK)
         self.assertIsNone(error)
-        got = "\n".join(goal_graph.block(out, NOW)) + "\n"
+        got = "\n".join(goal_graph.block(out, NOW, signs={"farid": "🔨"})) + "\n"
         self.assertEqual(got, (FIXTURE / "expected-block.md").read_text(encoding="utf-8"))
+
+    def test_a_worker_at_rest_has_no_sign_and_states_keep_theirs(self):
+        out, _ = goal_graph.read(str(self.issues), TRACK)
+        got = "\n".join(goal_graph.diagram(out))
+        self.assertIn("<br/>Farid\"", got)
+        self.assertIn("<br/>✅ done\"", got)
 
     def test_no_linkstyle_or_init_line(self):
         out, _ = goal_graph.read(str(self.issues), TRACK)
@@ -91,6 +98,62 @@ class Form(GoalCase):
             self.assertNotIn(bad, label.replace("<br/>", ""))
         self.assertIn("…", label)
         self.assertTrue(label.endswith("<br/>Farid"))
+
+
+class Activity(GoalCase):
+    def setUp(self):
+        super().setUp()
+        goal_graph._FEED.clear()
+        self.addCleanup(goal_graph._FEED.clear)
+
+    def feed(self, answer):
+        (self.cfg / "pm" / goal_graph.SIGNS_FILE).write_text("http://127.0.0.1:1/api/signs\n", encoding="utf-8")
+        body = mock.MagicMock()
+        body.__enter__.return_value.read.return_value = json.dumps(answer).encode()
+        return mock.patch.object(goal_graph.urllib.request, "urlopen", return_value=body)
+
+    def test_the_feed_gives_each_worker_of_the_track_its_sign_and_is_read_once(self):
+        with self.feed({"signs": {TRACK: {"Farid": "watching", "Lea": "reviewing", "Mo": "asleep"},
+                                  "other": {"Kai": "busy"}}}) as got:
+            self.assertEqual(goal_graph.activity(TRACK, self.cfg), {"farid": "🧪", "lea": "🔍"})
+            self.assertEqual(goal_graph.activity("other", self.cfg), {"kai": "🔨"})
+        self.assertEqual(got.call_count, 1)
+
+    def test_no_feed_or_a_dead_one_draws_no_signs(self):
+        self.assertEqual(goal_graph.activity(TRACK, self.cfg), {})
+        with self.feed({}) as got:
+            got.side_effect = OSError("refused")
+            self.assertEqual(goal_graph.activity(TRACK, self.cfg), {})
+        goal_graph._FEED.clear()
+        with self.feed({}) as got:
+            got.side_effect = http.client.IncompleteRead(b"")
+            self.assertEqual(goal_graph.activity(TRACK, self.cfg), {})
+
+    def test_a_feed_of_another_shape_draws_no_signs(self):
+        for answer in ([], {"signs": []}, {"signs": {TRACK: ["Farid"]}}, {"signs": {TRACK: {"Farid": ["busy"]}}}):
+            with self.subTest(answer=answer):
+                goal_graph._FEED.clear()
+                with self.feed(answer):
+                    self.assertEqual(goal_graph.activity(TRACK, self.cfg), {})
+
+    def test_a_feed_slower_than_the_budget_draws_no_signs(self):
+        def slow(*_, **__):
+            time.sleep(goal_graph.SIGNS_S * 3)
+        with self.feed({}) as got:
+            got.side_effect = slow
+            began = time.monotonic()
+            self.assertEqual(goal_graph.activity(TRACK, self.cfg), {})
+        self.assertLess(time.monotonic() - began, goal_graph.SIGNS_S * 2)
+
+    def test_the_update_puts_the_sign_on_the_claimed_ticket_and_a_change_rewrites(self):
+        self.write_goal(goal(str(self.issues)))
+        with self.feed({"signs": {TRACK: {"Farid": "busy"}}}):
+            self.assertEqual(self.update(), "written")
+        self.assertIn("<br/>🔨 Farid\"", self.text())
+        goal_graph._FEED.clear()
+        with self.feed({"signs": {}}):
+            self.assertEqual(self.update(NOW + 60), "written")
+        self.assertIn("<br/>Farid\"", self.text())
 
 
 class Place(GoalCase):
@@ -140,7 +203,7 @@ class OnlyTheBlock(GoalCase):
         self.assertEqual(self.update(now=NOW + 60), "written")
         text = self.text()
         self.assertIn("Thierry typed this.", text)
-        self.assertIn('t03["03 · A claim updates the graph<br/>done"]', text)
+        self.assertIn('t03["03 · A claim updates the graph<br/>✅ done"]', text)
         self.assertIn("· read 11:01", text)
         a, b = goal_graph._span(text.split("\n")), goal_graph._span(typed.split("\n"))
         self.assertEqual(text.split("\n")[:a[0]], typed.split("\n")[:b[0]])
@@ -158,7 +221,7 @@ class OnlyTheBlock(GoalCase):
         self.assertIn("owner text", text)
         self.assertIn("Ship the thing.", text)
         self.assertEqual(text.count(goal_graph.START), before.count(goal_graph.START))
-        self.assertIn('t03["03 · A claim updates the graph<br/>done"]', text)
+        self.assertIn('t03["03 · A claim updates the graph<br/>✅ done"]', text)
 
     def test_a_write_against_a_changed_file_is_not_made(self):
         self.write_goal(goal(self.issues))
@@ -172,7 +235,7 @@ class OnlyTheBlock(GoalCase):
         t.write_text(t.read_text().replace("**Blocked by:** None", "**Blocked by:** 04"))
         self.assertEqual(self.update(now=NOW + 120), "written")
         text = self.text()
-        self.assertIn('t01["01 · Paths come from the track store<br/>done"]', text)
+        self.assertIn('t01["01 · Paths come from the track store<br/>✅ done"]', text)
         line = next(ln for ln in text.split("\n") if ln.startswith("Ticket source unreadable"))
         self.assertIn("at 11:02", line)
         self.assertIn("cycle", line)
@@ -200,7 +263,7 @@ class GitHub(GoalCase):
             self.assertEqual(goal_graph.update(TRACK, now=NOW + 60, cfg=self.cfg), "written")
             self.assertEqual(r.call_count, 1)
         text = self.text()
-        self.assertIn('t03["03 · A claim updates the graph<br/>ready"]', text)
+        self.assertIn('t03["03 · A claim updates the graph<br/>○ ready"]', text)
         self.assertIn("Ticket source unreadable at 11:01: gh: HTTP 502", text)
         with mock.patch.object(boss_store, "refresh_frontier", return_value="gh: HTTP 502"):
             self.assertEqual(goal_graph.update(TRACK, now=NOW + 120, cfg=self.cfg), "unchanged")
@@ -239,7 +302,7 @@ class Callers(GoalCase):
                            env=dict(self.env(), BOSS_MEMINFO=str(meminfo)),
                            capture_output=True, text=True, timeout=20)
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn('t03["03 · A claim updates the graph<br/>ready"]', self.text())
+        self.assertIn('t03["03 · A claim updates the graph<br/>○ ready"]', self.text())
 
     def test_a_bad_call_prints_the_usage(self):
         r = subprocess.run([sys.executable, str(GOAL_GRAPH), "bogus"], env=self.env(),

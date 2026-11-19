@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.30.0
+
+- **The ticket graph shows what each worker is doing (the owner, 2026-11-19, goal-graph ticket 02).** A claimed ticket's worker carries the sign the session dashboard shows for it: 🔨 a turn in flight, 🧪 a job of its own open, 🔍 a review running; a worker at rest has none. The other states carry theirs too: `✅ done`, `○ ready`, `⏸ waiting`. The signs come from an optional activity feed: a URL in `pm/goal-graph.signs-url` that answers `{"signs": {track: {name: "busy"|"watching"|"reviewing"}}}` (agentview's `/api/signs`), read once per run with a 1 s timeout. No file, or no answer, draws the names without signs, as before. A change of sign is a change of the block, so the sweep redraws it within a minute and an open page reloads.
+
 ## 0.29.1
 
 - **The ticket graph drops its `linkStyle default` line.** It was removed while a goal page with the graph would not finish loading in sheaf. A later check showed it was not the cause: in a clean headless Chrome the page loads with and without the line, and the earlier "frozen renderer" readings came from the browser extension used to test, which timed out on every page. Edges keep mermaid's own colour; the test that keeps `linkStyle` and `%%{init}%%` lines out stays.
