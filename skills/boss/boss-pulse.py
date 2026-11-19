@@ -119,9 +119,10 @@ def woken_parks(sid, track, idle, done, tracker_text):
     A worker whose park still holds is not idle for the pulse; it is one of the parked, as
     Woken with state `waiting`, which the boss may retire when memory is short. A park of a
     worker that is busy or gone is left alone: only an idle worker is the boss's to dispatch.
-    A park marked retired (`boss-park --retire`) is no idle worker's park: when its event
-    has happened or its time ran out, it is a Woken with state `retired`, for the boss to
-    hand that work on."""
+    A retired worker's park (`boss-park --retire`) is no idle worker's: when its event has
+    happened or its time ran out, it is a Woken with state `retired`, for the boss to hand that
+    work on. For `park.RETIRE_GAP_S` after a retire nobody is offered to retire (the memory the
+    retire freed is not back yet), so retires do not cascade."""
     parks = park.read_parks(track)
     if not parks:
         return idle, (), ()
@@ -135,15 +136,13 @@ def woken_parks(sid, track, idle, done, tracker_text):
                        blockers=tuple(tracker.blocker_lines(tracker_text)) if tracker_text else ())
     now = time.time()
     free, woken, waiting = [], [], []
-    names = {n for n, _ in idle}
-    for name, p in parks.items():
-        if (p.retired and name not in names and not (p.event.startswith("owner:") and tracker_text is None)
+    for p in parks.values():
+        if (p.retired and not (p.event.startswith("owner:") and tracker_text is None)
                 and park.state(p, now, world) != "waiting"):
-            woken.append(pulse.Woken(name, p.event, "retired", int((now - p.since) / 60)))
+            woken.append(pulse.Woken(p.worker, p.event, "retired", int((now - p.since) / 60)))
+    just_retired = any(p.retired and now - p.retired < park.RETIRE_GAP_S for p in parks.values())
     for name, coord in idle:
         p = parks.get(name)
-        if p and p.retired:
-            p = None                        # the old worker's park, not this session's
         if p and tracker_text is None and p.event.startswith("owner:"):
             st = "waiting"                  # tracker unread: no blocker line proves nothing
         else:
@@ -154,7 +153,7 @@ def woken_parks(sid, track, idle, done, tracker_text):
         free.append((name, coord))
         if st:
             woken.append(pulse.Woken(name, p.event, st, int((now - p.since) / 60)))
-    return free, tuple(woken), tuple(waiting)
+    return free, tuple(woken), () if just_retired else tuple(waiting)
 
 
 def memory_short(sid):

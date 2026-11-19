@@ -212,7 +212,15 @@ class Decide(unittest.TestCase):
         lines = pulse.render(*(lambda f: (f, pulse.decide(f)))(pulse.Facts(
             track="demo", parks=[W("Bea", "ticket:9", "retired", 30)]))).splitlines()
         self.assertTrue([x for x in lines if x.startswith("Bea was retired for memory")
-                         and "`boss-park demo Bea --clear`" in x])
+                         and "`boss-park demo Bea --clear --retired`" in x])
+
+    def test_a_refused_spawn_that_speaks_for_another_reason_says_why_nobody_is_started(self):
+        f = pulse.Facts(track="demo", source="issues", size=3, memshort=SHORT,
+                        ready=["01 API", "02 UI"], idle=[("Ada", "w:1.0")])
+        text = pulse.render(f, pulse.decide(f))
+        self.assertIn("MEMORY: " + SHORT, text)
+        self.assertIn("start nobody", text)
+        self.assertNotIn("Spawn", text)
 
     def test_a_refused_spawn_with_nobody_parked_starts_nobody_and_does_not_speak(self):
         f = pulse.Facts(track="demo", source="issues", size=3, memshort=SHORT, ready=["01 API"])

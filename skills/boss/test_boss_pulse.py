@@ -269,6 +269,11 @@ class Frontier(PulseCase):
         (self.issues / "13-docs.md").write_text(ticket("13", "Docs"))
         self.goal_with_tickets(self.issues)
 
+    def reopen_gate(self):
+        """Let the next pulse speak: forget the last one (the 60 s rate gate)."""
+        import boss_store
+        boss_store.state_path(self.sid, "pulse", self.tmp).unlink(missing_ok=True)
+
     def silence_lines(self):
         return (self.tmp / "pm/.pulse" / (self.sid + ".silence.log")).read_text().splitlines()
 
@@ -306,7 +311,7 @@ class Frontier(PulseCase):
         # Bea is gone from the roster and her park holds: recorded, silent
         out = self.pulse_with_team([], 1, memshort=self.SHORT)
         self.assertEqual(out, "")
-        self.assertEqual(park.read_parks(TRACK, self.tmp)["Bea"].event, "ticket:12")
+        self.assertEqual(park.read_parks(TRACK, self.tmp)["retired:Bea"].event, "ticket:12")
         # the ticket she waited on is done: the pulse says to hand her work on
         (self.issues / "12-ui.md").write_text(ticket("12", "UI", status="done"))
         out = self.pulse_with_team([], 1)
@@ -319,6 +324,24 @@ class Frontier(PulseCase):
         park.retire(TRACK, "Bea", self.tmp)
         out = self.pulse_with_team([("Bea", "w:1.1")], 2)
         self.assertIn("IDLE NOW, yours: Bea", out)
+        # her event happens while a new Bea is idle: the retired park is still reported
+        self.reopen_gate()
+        (self.issues / "12-ui.md").write_text(ticket("12", "UI", status="done"))
+        out = self.pulse_with_team([("Bea", "w:1.1")], 2)
+        self.assertIn("Bea was retired for memory and its wait on ticket:12 has ended", out)
+
+    def test_right_after_a_retire_nobody_else_is_offered_to_be_retired(self):
+        import park
+        self.one_ready_one_busy()
+        self.park("Ada", "ticket:12", age_s=20 * 60)
+        self.park("Bea", "ticket:12", age_s=95 * 60)
+        out = self.pulse_with_team([("Ada", "w:1.0"), ("Bea", "w:1.1")], 3, memshort=self.SHORT)
+        self.assertIn("Retire Bea", out)
+        park.retire(TRACK, "Bea", self.tmp)
+        self.reopen_gate()
+        out = self.pulse_with_team([("Ada", "w:1.0")], 2, memshort=self.SHORT)
+        self.assertEqual(out, "")                        # silent: nobody is offered to retire
+        self.assertEqual(self.silence_lines()[-1].split("\t")[2], "memory-short")
 
     def test_an_expired_park_is_dispatched_not_retired_when_memory_is_short(self):
         self.one_ready_one_busy()

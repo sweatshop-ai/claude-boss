@@ -5,6 +5,7 @@
     boss-park <track> --list                     the parks, each with what the pulse sees now
     boss-park <track> <worker> --clear           drop the park
     boss-park <track> <worker> --retire          the worker was retired for memory: keep the park
+    boss-park <track> <worker> --clear --retired drop a retired worker's kept park
 
 The events, in `WAKE`: `ticket:<id>` (the ticket graph reports it done), `worker:<name>` (that
 worker's session is idle or gone) and `owner:<question id>` (no open blocker of the tracker
@@ -12,7 +13,9 @@ names the question any more: the boss clears it when the concierge's `ANSWER` co
 time is no event. A park lasts `TTL_S`, then the pulse asks the boss again; a message from the
 boss to the worker (boss-guard.py) or `--clear` drops it sooner.
 
-A park is `{worker: {"event": ..., "since": epoch}}` in `pm/.pulse/<track>.parks.json`.
+A park is `{worker: {"event": ..., "since": epoch}}` in `pm/.pulse/<track>.parks.json`. A
+retired worker's park moves to the key `retired:<worker>` with `"retired": epoch` (when), so a
+new session that gets the name neither inherits it nor wipes it.
 """
 import os
 import re
@@ -27,6 +30,9 @@ import tracker
 TTL_S = 2 * 3600
 TARGET_RE = re.compile(r"[\w.-]{1,40}\Z")
 
+RETIRED = "retired:"
+RETIRE_GAP_S = 15 * 60          # after a retire for memory, the pulse retires no other for this long
+# `retired`: when the worker was retired (epoch), False for a live park; `worker` is the bare name.
 Park = namedtuple("Park", "worker event since retired", defaults=(False,))
 # What the pulse sees: ticket numbers the frontier reports done, {worker name: status} of the
 # boss's live workers, the lines under Open blockers.
@@ -74,10 +80,13 @@ def read_parks(track, cfg=None):
     if path is None:
         return {}
     out = {}
-    for worker, rec in boss_store.read_json(path).items():
+    for key, rec in boss_store.read_json(path).items():
         if (isinstance(rec, dict) and isinstance(rec.get("event"), str)
                 and isinstance(rec.get("since"), (int, float))):
-            out[worker] = Park(worker, rec["event"], rec["since"], rec.get("retired") is True)
+            at = rec.get("retired")
+            retired = at if isinstance(at, (int, float)) and not isinstance(at, bool) else False
+            worker = key[len(RETIRED):] if key.startswith(RETIRED) else key
+            out[key] = Park(worker, rec["event"], rec["since"], retired)
     return out
 
 
@@ -96,26 +105,27 @@ def set_park(track, worker, event, now=None, cfg=None):
     _update(track, lambda st: st.update({worker: {"event": event, "since": since}}), cfg)
 
 
-def clear(track, worker, cfg=None):
-    """Drop the worker's park; True when there was one."""
-    if worker not in boss_store.read_json(boss_store.parks_path(track, cfg) or Path(os.devnull)):
+def clear(track, worker, cfg=None, retired=False):
+    """Drop the worker's park (its kept retired park with `retired`); True when there was one."""
+    key = RETIRED + worker if retired else worker
+    if key not in boss_store.read_json(boss_store.parks_path(track, cfg) or Path(os.devnull)):
         return False                        # nothing to drop: no lock, no file written
     had = []
-    _update(track, lambda st: had.append(st.pop(worker, None)), cfg)
+    _update(track, lambda st: had.append(st.pop(key, None)), cfg)
     return had[0] is not None
 
 
-def retire(track, worker, cfg=None):
-    """Mark the worker's park as that of a retired worker: its event stays recorded, so the
-    pulse can say when its work may be picked up, but a new session that gets the same name
-    does not inherit it. True when there was a park."""
+def retire(track, worker, cfg=None, now=None):
+    """Move the worker's park under `retired:<worker>`: its event stays recorded, so the pulse
+    can say when its work may be picked up, but a new session that gets the same name neither
+    inherits it nor wipes it. True when there was a park."""
     had = []
 
-    def mark(st):
+    def move(st):
         if isinstance(st.get(worker), dict):
-            st[worker]["retired"] = True
+            st[RETIRED + worker] = dict(st.pop(worker), retired=time.time() if now is None else now)
             had.append(True)
-    _update(track, mark, cfg)
+    _update(track, move, cfg)
     return bool(had)
 
 
@@ -147,7 +157,8 @@ def main(argv):
             parks = read_parks(track)
             world = World(blockers=open_blocker_lines(track))
             now = time.time()
-            for w, p in sorted(parks.items()):
+            for _, p in sorted(parks.items()):
+                w = p.worker
                 # ticket and worker events need the graph and the fleet, which only the pulse
                 # reads: the list judges expiry and the owner's answer, and says "waiting" else.
                 st = state(p, now, world) if p.event.startswith("owner:") else (
@@ -159,6 +170,10 @@ def main(argv):
             return 0
         if len(rest) == 2 and rest[1] == "--retire":
             print("retired park kept" if retire(track, rest[0]) else "no park for %s" % rest[0])
+            return 0
+        if len(rest) == 3 and rest[1:] == ["--clear", "--retired"]:
+            print("cleared" if clear(track, rest[0], retired=True)
+                  else "no retired park for %s" % rest[0])
             return 0
         if len(rest) == 2 and rest[1] == "--clear":
             print("cleared" if clear(track, rest[0]) else "no park for %s" % rest[0])

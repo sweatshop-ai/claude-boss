@@ -401,7 +401,9 @@ worker parked longest (`retire <pane> --require-idle --kill`), then mark its par
 `boss-park <track> <worker> --retire`, keeping its park recorded without letting a new
 session of the same name inherit it, and write on its Tracker line that it was retired for
 memory and waits on that event. When the event has happened (or 2 hours passed) the pulse
-says so: hand that work to a worker and `--clear` the park. Then retry the spawn once.
+says so: hand that work to a worker and `boss-park <track> <worker> --clear --retired`. Then retry the
+spawn once. For 15 minutes after a retire the pulse offers no other worker to retire, so a team is not
+emptied one pulse at a time.
 With nobody parked, or memory still short after the retire, start nobody: the pulse does
 not block you over it, and logs a `memory-short` line (`boss-pulse why <track>`) with the
 free memory and the floor.

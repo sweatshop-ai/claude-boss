@@ -218,7 +218,8 @@ def _woken_line(w, track):
     kind, _, target = w.event.partition(":")
     if w.state == "retired":
         return ("%s was retired for memory and its wait on %s has ended: hand its work (see its "
-                "Tracker line) to a worker, then `boss-park %s %s --clear`" % (w.worker, w.event, track, w.worker))
+                "Tracker line) to a worker, then `boss-park %s %s --clear --retired`"
+                % (w.worker, w.event, track, w.worker))
     if w.state == "over":
         what = {"ticket": "ticket %s done", "worker": "%s finished",
                 "owner": "%s answered"}.get(kind, "%s happened") % target
@@ -312,6 +313,10 @@ def render(facts, decision):
                 lines.append("UNASSIGNED in NEXT: %d of %d%s" % (len(free), total, tail))
     lines.append("")
 
+    short = shortfall(facts)
+    if short:
+        lines.append("MEMORY: %s. No worker is parked to retire, so start nobody; dispatch to the "
+                     "idle ones. This is not a blocker." % short)
     if facts.idle:
         lines.append("IDLE NOW, yours: "
                      + ", ".join("%s (%s)" % (n, c) for n, c in facts.idle[:policy.LIST_MAX]))
