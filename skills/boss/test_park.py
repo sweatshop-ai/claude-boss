@@ -87,6 +87,134 @@ class Wake(unittest.TestCase):
                          "over")
 
 
+def gh_json(state="OPEN", runs=()):
+    """What `gh pr view --json state,statusCheckRollup` prints: `runs` are CheckRun statuses."""
+    return json.dumps({"state": state, "statusCheckRollup": [
+        {"__typename": "CheckRun", "status": r, "conclusion": "SUCCESS" if r == "COMPLETED" else ""}
+        for r in runs]})
+
+
+class FakeGh:
+    """A stand-in for park.gh_run: one canned answer per call, every call counted."""
+    def __init__(self, *answers):
+        self.answers, self.calls = list(answers), []
+
+    def __call__(self, args, timeout):
+        self.calls.append(args)
+        ans = self.answers.pop(0) if len(self.answers) > 1 else self.answers[0]
+        if isinstance(ans, Exception):
+            raise ans
+        return ans
+
+
+class GithubEvents(unittest.TestCase):
+    def setUp(self):
+        self.cfg = Path(tempfile.mkdtemp(prefix="park-gh-"))
+        self.addCleanup(shutil.rmtree, self.cfg, True)
+
+    def lookup(self, gh, now=NOW):
+        return park.pr_lookup("demo", now=now, cfg=self.cfg, run=gh)
+
+    def p(self, event):
+        return park.Park("Ada", event, NOW - 60)
+
+    def test_the_two_github_events_parse(self):
+        self.assertEqual(park.parse_event("pr:acme/app#5-merged"), ("pr", "acme/app#5-merged"))
+        self.assertEqual(park.parse_event("ci:acme/app#5"), ("ci", "acme/app#5"))
+
+    def test_a_github_event_needs_its_exact_form(self):
+        for text in ("pr:acme/app#5", "pr:5-merged", "pr:acme/app#-merged", "ci:acme/app",
+                     "ci:acme/app#5-merged", "ci:5", "ci:acme/app#x", "ci:-x/app#5", "ci:acme/--upload-pack#5"):
+            with self.assertRaises(ValueError, msg=text) as cm:
+                park.parse_event(text)
+            self.assertIn("ci:<owner/repo#N>", str(cm.exception))
+
+    def test_a_park_on_a_merged_pr_wakes_and_on_an_open_pr_holds(self):
+        ev = self.p("pr:acme/app#5-merged")
+        open_ = park.World(prs=self.lookup(FakeGh(gh_json("OPEN", ["COMPLETED"]))))
+        self.assertEqual(park.state(ev, NOW, open_), "waiting")
+        merged = park.World(prs=self.lookup(FakeGh(gh_json("MERGED", ["COMPLETED"])), now=NOW + 90))
+        self.assertEqual(park.state(ev, NOW, merged), "over")
+
+    def test_a_closed_unmerged_pr_wakes_too_since_it_will_not_merge(self):
+        w = park.World(prs=self.lookup(FakeGh(gh_json("CLOSED"))))
+        self.assertEqual(park.state(self.p("pr:acme/app#5-merged"), NOW, w), "over")
+
+    def test_a_park_on_ci_wakes_when_every_check_run_of_the_head_has_concluded(self):
+        ev = self.p("ci:acme/app#5")
+        running = park.World(prs=self.lookup(FakeGh(gh_json("OPEN", ["COMPLETED", "IN_PROGRESS"]))))
+        self.assertEqual(park.state(ev, NOW, running), "waiting")
+        queued = park.World(prs=self.lookup(FakeGh(gh_json("OPEN", ["QUEUED"])), now=NOW + 90))
+        self.assertEqual(park.state(ev, NOW, queued), "waiting")
+        done = park.World(prs=self.lookup(FakeGh(gh_json("OPEN", ["COMPLETED", "COMPLETED"])),
+                                          now=NOW + 200))
+        self.assertEqual(park.state(ev, NOW, done), "over")
+
+    def test_no_check_run_yet_is_not_finished_ci(self):
+        w = park.World(prs=self.lookup(FakeGh(gh_json("OPEN", []))))
+        self.assertEqual(park.state(self.p("ci:acme/app#5"), NOW, w), "waiting")
+
+    def test_a_pending_commit_status_is_not_finished_ci(self):
+        out = json.dumps({"state": "OPEN", "statusCheckRollup": [
+            {"__typename": "StatusContext", "state": "PENDING"}]})
+        w = park.World(prs=self.lookup(FakeGh(out)))
+        self.assertEqual(park.state(self.p("ci:acme/app#5"), NOW, w), "waiting")
+
+    def test_a_pr_merged_under_a_ci_park_wakes_it(self):
+        w = park.World(prs=self.lookup(FakeGh(gh_json("MERGED", ["IN_PROGRESS"]))))
+        self.assertEqual(park.state(self.p("ci:acme/app#5"), NOW, w), "over")
+
+    def test_stops_within_a_minute_make_no_new_gh_call_for_the_same_pr(self):
+        gh = FakeGh(gh_json("OPEN", ["IN_PROGRESS"]))
+        for dt in (0, 10, 59):
+            self.assertEqual(self.lookup(gh, NOW + dt)("acme/app", 5)["state"], "OPEN")
+        self.assertEqual(len(gh.calls), 1)
+        self.lookup(gh, NOW + 61)("acme/app", 5)
+        self.assertEqual(len(gh.calls), 2)
+        self.lookup(gh, NOW + 61)("acme/app", 6)                # another PR: its own call
+        self.assertEqual(len(gh.calls), 3)
+
+    def test_the_cache_belongs_to_one_track(self):
+        gh = FakeGh(gh_json("OPEN"))
+        self.lookup(gh)("acme/app", 5)
+        park.pr_lookup("other", now=NOW, cfg=self.cfg, run=gh)("acme/app", 5)
+        self.assertEqual(len(gh.calls), 2)
+
+    def test_a_gh_failure_keeps_the_park_and_logs_it(self):
+        gh = FakeGh(OSError("no network"))
+        w = park.World(prs=self.lookup(gh))
+        self.assertEqual(park.state(self.p("ci:acme/app#5"), NOW, w), "waiting")
+        self.assertEqual(park.state(self.p("pr:acme/app#5-merged"), NOW, w), "waiting")
+        log = (self.cfg / "pm" / "park-gh.log").read_text()
+        self.assertIn("acme/app#5", log)
+        self.assertIn("no network", log)
+
+    def test_a_failed_call_is_not_repeated_within_the_minute(self):
+        gh = FakeGh(OSError("offline"))
+        for dt in (0, 5, 30):
+            self.assertIsNone(self.lookup(gh, NOW + dt)("acme/app", 5))
+        self.assertEqual(len(gh.calls), 1)
+
+    def test_output_gh_could_not_have_written_is_a_failure_not_a_crash(self):
+        for i, bad in enumerate(("", "not json", "[]", json.dumps({"state": 7}), json.dumps({"nostate": 1}))):
+            gh = FakeGh(bad)
+            self.assertIsNone(self.lookup(gh, now=NOW + 100 * i)("acme/app", 5), bad)
+            self.assertEqual(len(gh.calls), 1, bad)         # each one really was parsed
+
+    def test_a_call_that_times_out_is_a_failure_too(self):
+        gh = FakeGh(subprocess.TimeoutExpired("gh", 3))
+        self.assertIsNone(self.lookup(gh)("acme/app", 5))
+
+    def test_without_a_lookup_a_github_park_holds(self):
+        self.assertEqual(park.state(self.p("ci:acme/app#5"), NOW, park.World()), "waiting")
+
+    def test_the_gh_call_names_the_repo_and_asks_only_for_state_and_checks(self):
+        gh = FakeGh(gh_json("OPEN"))
+        self.lookup(gh)("acme/app", 5)
+        self.assertEqual(gh.calls[0], ["pr", "view", "5", "--repo", "acme/app",
+                                       "--json", "state,statusCheckRollup"])
+
+
 class Store(unittest.TestCase):
     def setUp(self):
         self.cfg = Path(tempfile.mkdtemp(prefix="park-test-"))
@@ -163,6 +291,12 @@ class Cli(unittest.TestCase):
         r = self.run_cli("demo", "Ada", "--until", "owner:q9")
         self.assertEqual(r.returncode, 2)
         self.assertIn("q9", r.stderr)
+
+    def test_a_github_park_is_made_from_the_command_line(self):
+        r = self.run_cli("demo", "Ada", "--until", "ci:acme/app#5")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("ci:acme/app#5", self.run_cli("demo", "--list").stdout)
+        self.assertEqual(self.run_cli("demo", "Ada", "--until", "pr:acme/app#5-merged").returncode, 0)
 
     def test_a_track_that_is_no_plain_name_is_refused(self):
         self.assertEqual(self.run_cli("../x", "Ada", "--until", "ticket:1").returncode, 2)

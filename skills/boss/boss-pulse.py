@@ -127,7 +127,7 @@ def woken_parks(sid, track, idle, done, tracker_text):
         for p in parks.values():
             if p.event.startswith("worker:"):
                 workers[p.event.partition(":")[2]] = "busy"
-    world = park.World(done=frozenset(done), workers=workers,
+    world = park.World(done=frozenset(done), workers=workers, prs=park.pr_lookup(track),
                        blockers=tuple(tracker.blocker_lines(tracker_text)) if tracker_text else ())
     now = time.time()
     free, woken = [], []
