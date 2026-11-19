@@ -4,6 +4,8 @@
     boss-park <track> <worker> --until <event>   park the worker (a new park replaces the old one)
     boss-park <track> --list                     the parks, each with what the pulse sees now
     boss-park <track> <worker> --clear           drop the park
+    boss-park <track> <worker> --retire          the worker was retired for memory: keep the park
+    boss-park <track> <worker> --clear --retired drop a retired worker's kept park
 
 The events, in `WAKE`: `ticket:<id>` (the ticket graph reports it done), `worker:<name>` (that
 worker's session is idle or gone), `owner:<question id>` (no open blocker of the tracker
@@ -16,7 +18,9 @@ that ends its turn waiting on CI or review of its own PR parks itself on `ci:` (
 time is no event. A park lasts `TTL_S`, then the pulse asks the boss again; a message from the
 boss to the worker (boss-guard.py) or `--clear` drops it sooner.
 
-A park is `{worker: {"event": ..., "since": epoch}}` in `pm/.pulse/<track>.parks.json`.
+A park is `{worker: {"event": ..., "since": epoch}}` in `pm/.pulse/<track>.parks.json`. A
+retired worker's park moves to the key `retired:<worker>` with `"retired": epoch` (when), so a
+new session that gets the name neither inherits it nor wipes it.
 """
 import json
 import os
@@ -38,7 +42,10 @@ GH_CACHE_S = 60         # one `gh` call per PR per minute, a failed one included
 GH_CALL_S = 3           # one call's timeout; the Stop hook has 5 s in all
 GH_BUDGET_S = 3.5       # all the calls of one pulse
 
-Park = namedtuple("Park", "worker event since")
+RETIRED = "retired:"
+RETIRE_GAP_S = 15 * 60          # after a retire for memory, the pulse retires no other for this long
+# `retired`: when the worker was retired (epoch), False for a live park; `worker` is the bare name.
+Park = namedtuple("Park", "worker event since retired", defaults=(False,))
 # What the pulse sees: ticket numbers the frontier reports done, {worker name: status} of the
 # boss's live workers, the lines under Open blockers.
 # `prs(repo, number)` is the GitHub lookup (pr_lookup): {"state", "ci_done"} or None when unknown.
@@ -172,10 +179,13 @@ def read_parks(track, cfg=None):
     if path is None:
         return {}
     out = {}
-    for worker, rec in boss_store.read_json(path).items():
+    for key, rec in boss_store.read_json(path).items():
         if (isinstance(rec, dict) and isinstance(rec.get("event"), str)
                 and isinstance(rec.get("since"), (int, float))):
-            out[worker] = Park(worker, rec["event"], rec["since"])
+            at = rec.get("retired")
+            retired = at if isinstance(at, (int, float)) and not isinstance(at, bool) else False
+            worker = key[len(RETIRED):] if key.startswith(RETIRED) else key
+            out[key] = Park(worker, rec["event"], rec["since"], retired)
     return out
 
 
@@ -194,13 +204,32 @@ def set_park(track, worker, event, now=None, cfg=None):
     _update(track, lambda st: st.update({worker: {"event": event, "since": since}}), cfg)
 
 
-def clear(track, worker, cfg=None):
-    """Drop the worker's park; True when there was one."""
-    if worker not in boss_store.read_json(boss_store.parks_path(track, cfg) or Path(os.devnull)):
+def clear(track, worker, cfg=None, retired=False):
+    """Drop the worker's park (its kept retired park with `retired`); True when there was one."""
+    key = RETIRED + worker if retired else worker
+    if key not in boss_store.read_json(boss_store.parks_path(track, cfg) or Path(os.devnull)):
         return False                        # nothing to drop: no lock, no file written
     had = []
-    _update(track, lambda st: had.append(st.pop(worker, None)), cfg)
+    _update(track, lambda st: had.append(st.pop(key, None)), cfg)
     return had[0] is not None
+
+
+def retire(track, worker, cfg=None, now=None):
+    """Move the worker's park under `retired:<worker>`: its event stays recorded, so the pulse
+    can say when its work may be picked up, but a new session that gets the same name neither
+    inherits it nor wipes it. True when there was a park. A kept park of an earlier worker of
+    that name is never overwritten: ValueError says to hand its work on and clear it first."""
+    had = []
+
+    def move(st):
+        if isinstance(st.get(worker), dict):
+            if RETIRED + worker in st:
+                raise ValueError("a retired park of %s is still kept: hand its work on and "
+                                 "`boss-park %s %s --clear --retired` first" % (worker, track, worker))
+            st[RETIRED + worker] = dict(st.pop(worker), retired=time.time() if now is None else now)
+            had.append(True)
+    _update(track, move, cfg)
+    return bool(had)
 
 
 def state(p, now, world):
@@ -231,14 +260,23 @@ def main(argv):
             parks = read_parks(track)
             world = World(blockers=open_blocker_lines(track))
             now = time.time()
-            for w, p in sorted(parks.items()):
+            for _, p in sorted(parks.items()):
+                w = p.worker
                 # ticket and worker events need the graph and the fleet, which only the pulse
                 # reads: the list judges expiry and the owner's answer, and says "waiting" else.
                 st = state(p, now, world) if p.event.startswith("owner:") else (
                     "expired" if now - p.since >= TTL_S else "waiting")
-                print("%s\t%s\t%s\t%d min" % (w, p.event, st, (now - p.since) // 60))
+                print("%s\t%s\t%s\t%d min" % (w, p.event, "retired, " + st if p.retired else st,
+                                               (now - p.since) // 60))
             if not parks:
                 print("no parks")
+            return 0
+        if len(rest) == 2 and rest[1] == "--retire":
+            print("retired park kept" if retire(track, rest[0]) else "no park for %s" % rest[0])
+            return 0
+        if len(rest) == 3 and rest[1:] == ["--clear", "--retired"]:
+            print("cleared" if clear(track, rest[0], retired=True)
+                  else "no retired park for %s" % rest[0])
             return 0
         if len(rest) == 2 and rest[1] == "--clear":
             print("cleared" if clear(track, rest[0]) else "no park for %s" % rest[0])

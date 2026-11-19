@@ -16,6 +16,7 @@ actions, in the order the boss is told to take them:
     wake            an idle worker's park is over or expired: dispatch, re-park or retire it
     dispatch-ready  one READY ticket per idle worker
     spawn n         n more workers for the READY tickets left over
+    retire-parked   memory is short for that spawn: retire the longest-parked worker, retry once
     dispatch-next   no ticket graph, or one with nothing READY: one NEXT item
                     per idle worker
     spawn-next n    no ticket graph: n more workers for the NEXT items no
@@ -45,14 +46,16 @@ FRONTIER_PY = Path(__file__).resolve().parent.parent / "hand-to-boss" / "frontie
 # decided: blockers the owner has answered; shown, never asked again.
 # workers: the names of all its live workers, to tell a NEXT mark from a stale one;
 # None when the roster could not be read, and no mark is called stale then.
-# parks: the Woken parks of idle workers (a park still waiting keeps its worker out of `idle`).
 # cap, cap_reason: the goal file's `Workers: N - <reason>` (cap None without the line);
 # N holds only with a reason.
+# parks: the Woken parks of idle workers (a park still waiting keeps its worker out of `idle`).
+# parked: the idle workers whose park still holds, as Woken with state `waiting`.
+# memshort: why a spawn would be refused now (memfloor.refusal), "" when it would fit.
 Facts = namedtuple(
     "Facts",
     "track idle size rungs fired blockers source ready broken outcome unmet next_items decided"
-    " parks workers cap cap_reason",
-    defaults=((), 0, (), {}, (), "", (), None, "", (), (), (), (), None, None, ""))
+    " parks workers cap cap_reason parked memshort",
+    defaults=((), 0, (), {}, (), "", (), None, "", (), (), (), (), None, None, "", (), ""))
 # An idle worker's park that no longer holds: state `over` (its event happened) or `expired`.
 Woken = namedtuple("Woken", "worker event state minutes")
 # A blocker line whose rung has come due: key into `fired`, the rung, minutes
@@ -131,14 +134,45 @@ def open_work(facts):
     return unassigned(facts.next_items, facts.workers, _idle_names(facts))[0]
 
 
-def decide(facts):
+def _spawn_wanted(facts):
+    """(workers the ready tickets ask for, workers the unassigned NEXT items ask for); memory
+    not yet counted."""
     # More ready tickets than idle workers: one new worker for each.
     spawn = _more_workers(len(facts.ready), facts) if not facts.broken else 0
     free = [] if facts.source else unassigned(facts.next_items, facts.workers, _idle_names(facts))[0]
     spawn_next = (_more_workers(len(free), facts)
                   if not facts.source and facts.workers is not None else 0)
+    return spawn, spawn_next, free
+
+
+def spawn_wanted(facts):
+    spawn, spawn_next, _ = _spawn_wanted(facts)
+    return max(spawn, 0) + max(spawn_next, 0)
+
+
+def longest_parked(facts):
+    """The Woken of the parked worker that has waited longest, or None. Only a park that still
+    holds counts: a worker whose park is over or expired is idle already, and is dispatched."""
+    return max(facts.parked, key=lambda w: w.minutes) if facts.parked else None
+
+
+def shortfall(facts):
+    """The memory refusal when a spawn is wanted, memory is short and nobody is parked to
+    retire: the pulse starts nobody and logs this. None otherwise."""
+    if facts.memshort and spawn_wanted(facts) > 0 and not longest_parked(facts):
+        return facts.memshort
+    return None
+
+
+def decide(facts):
+    spawn, spawn_next, free = _spawn_wanted(facts)
+    retire = 0
+    if facts.memshort and spawn_wanted(facts) > 0:
+        # memory is short: no spawn; retire the longest-parked worker if there is one
+        retire = spawn_wanted(facts) if longest_parked(facts) else 0
+        spawn = spawn_next = 0
     if (not facts.idle and not facts.rungs and not facts.blockers and not facts.broken
-            and spawn <= 0 and spawn_next <= 0):
+            and not facts.parks and spawn <= 0 and spawn_next <= 0 and not retire):
         return None                               # team busy, nothing overdue
     overdue = list(facts.rungs[:3])
     fired = dict(facts.fired)
@@ -157,6 +191,8 @@ def decide(facts):
                 actions.append(Action("dispatch-ready"))
             if spawn > 0:
                 actions.append(Action("spawn", spawn))
+            if retire:
+                actions.append(Action("retire-parked", retire))
             # A graph whose open tickets all wait on someone is not an empty
             # backlog: the side work lives in NEXT, so hand that out instead.
             if facts.idle and not facts.ready and facts.next_items:
@@ -167,6 +203,8 @@ def decide(facts):
                 actions.append(Action("dispatch-next"))
             if spawn_next > 0:
                 actions.append(Action("spawn-next", spawn_next))
+            if retire:
+                actions.append(Action("retire-parked", retire))
             if facts.idle and len(free) == len(entries):   # no item is being worked
                 actions.append(Action("refill-next"))
     work = open_work(facts)
@@ -199,8 +237,12 @@ def _fix_graph(facts, action):
             "`python3 %s %s` names what is wrong." % (FRONTIER_PY, facts.source))
 
 
-def _woken_line(w):
+def _woken_line(w, track):
     kind, _, target = w.event.partition(":")
+    if w.state == "retired":
+        return ("%s was retired for memory and its wait on %s has ended: hand its work (see its "
+                "Tracker line) to a worker, then `boss-park %s %s --clear --retired`"
+                % (w.worker, w.event, track, w.worker))
     if w.state == "over":
         what = {"ticket": "ticket %s done", "worker": "%s finished", "owner": "%s answered",
                 "pr": "%s merged or closed", "ci": "CI of %s finished, or the PR is no longer open"}.get(
@@ -212,7 +254,7 @@ def _woken_line(w):
 
 def _wake(facts, action):
     return "Wake the workers whose park no longer holds: " + "; ".join(
-        _woken_line(w) for w in facts.parks[:policy.LIST_MAX]) + "."
+        _woken_line(w, facts.track) for w in facts.parks[:policy.LIST_MAX]) + "."
 
 
 def _dispatch_ready(facts, action):
@@ -231,6 +273,20 @@ def _spawn_next(facts, action):
     return ("Spawn up to %d more worker%s (%s) and dispatch the unassigned "
             "NEXT items to them; none for an item that waits on work in progress." % (
                 action.n, "s" if action.n > 1 else "", _team(facts, action.n)))
+
+
+def _retire_parked(facts, action):
+    w = longest_parked(facts)
+    waited = "%d h %d min" % divmod(w.minutes, 60) if w.minutes >= 60 else "%d min" % w.minutes
+    return ("Memory is short for the %d more worker%s your open work asks for (%s). Retire "
+            "%s (parked %s on %s), the longest-parked: `boss-lifecycle.sh retire <pane> "
+            "--require-idle --kill`, its pane from `boss-lifecycle.sh list --mine`. Then mark its "
+            "park `boss-park %s %s --retire` (the event stays recorded, and the pulse tells you "
+            "when it has happened) and write on its Tracker line that it was retired for memory "
+            "and waits on %s, so its work is picked up then. Retry the spawn once; if it is "
+            "refused again, start nobody and carry on: this is not a blocker."
+            % (action.n, "s" if action.n > 1 else "", facts.memshort, w.worker, waited,
+               w.event, facts.track, w.worker, w.event))
 
 
 def _dispatch_next(facts, action):
@@ -260,8 +316,9 @@ def _run_rung(facts, action):
 
 
 SAY = {"ask": _ask, "fix-graph": _fix_graph, "wake": _wake, "dispatch-ready": _dispatch_ready,
-       "spawn": _spawn, "dispatch-next": _dispatch_next, "spawn-next": _spawn_next,
-       "refill-next": _refill_next, "retire": _retire, "run-rung": _run_rung}
+       "spawn": _spawn, "retire-parked": _retire_parked, "dispatch-next": _dispatch_next,
+       "spawn-next": _spawn_next, "refill-next": _refill_next, "retire": _retire,
+       "run-rung": _run_rung}
 
 
 def block_reason(facts, decision):
@@ -305,10 +362,14 @@ def render(facts, decision):
                 lines.append("UNASSIGNED in NEXT: %d of %d%s" % (len(free), total, tail))
     lines.append("")
 
+    short = shortfall(facts)
+    if short:
+        lines.append("MEMORY: %s. No worker is parked to retire, so start nobody; dispatch to the "
+                     "idle ones. This is not a blocker." % short)
     if facts.idle:
         lines.append("IDLE NOW, yours: "
                      + ", ".join("%s (%s)" % (n, c) for n, c in facts.idle[:policy.LIST_MAX]))
-    lines += [_woken_line(w) for w in facts.parks[:policy.LIST_MAX]]
+    lines += [_woken_line(w, facts.track) for w in facts.parks[:policy.LIST_MAX]]
     for r in decision.overdue:
         lines.append("OVERDUE: blocker open %d min, rung %d due - %s" % (r.minutes, r.rung, r.line))
     if facts.decided:

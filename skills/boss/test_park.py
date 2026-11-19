@@ -238,6 +238,33 @@ class Store(unittest.TestCase):
         self.assertFalse(park.clear("demo", "Ada", self.cfg))
         self.assertEqual(list(park.read_parks("demo", self.cfg)), ["Bea"])
 
+    def test_retire_keeps_the_event_and_marks_the_park(self):
+        park.set_park("demo", "Ada", "ticket:12", now=NOW, cfg=self.cfg)
+        self.assertTrue(park.retire("demo", "Ada", self.cfg))
+        self.assertFalse(park.retire("demo", "Bea", self.cfg))
+        self.assertNotIn("Ada", park.read_parks("demo", self.cfg))
+        got = park.read_parks("demo", self.cfg)["retired:Ada"]
+        self.assertEqual((got.worker, got.event, got.since), ("Ada", "ticket:12", NOW))
+        self.assertTrue(got.retired)
+
+    def test_a_second_retire_under_the_same_name_refuses_and_keeps_the_first(self):
+        park.set_park("demo", "Ada", "ticket:12", now=NOW, cfg=self.cfg)
+        park.retire("demo", "Ada", self.cfg)
+        park.set_park("demo", "Ada", "ticket:13", now=NOW + 1, cfg=self.cfg)
+        with self.assertRaises(ValueError):
+            park.retire("demo", "Ada", self.cfg)
+        parks = park.read_parks("demo", self.cfg)
+        self.assertEqual((parks["retired:Ada"].event, parks["Ada"].event), ("ticket:12", "ticket:13"))
+
+    def test_a_new_session_with_a_retired_workers_name_leaves_the_kept_park_alone(self):
+        park.set_park("demo", "Ada", "ticket:12", now=NOW, cfg=self.cfg)
+        park.retire("demo", "Ada", self.cfg)
+        park.set_park("demo", "Ada", "ticket:13", now=NOW + 1, cfg=self.cfg)
+        self.assertTrue(park.clear("demo", "Ada", self.cfg))          # a dispatch to the new Ada
+        self.assertEqual(park.read_parks("demo", self.cfg)["retired:Ada"].event, "ticket:12")
+        self.assertTrue(park.clear("demo", "Ada", self.cfg, retired=True))
+        self.assertEqual(park.read_parks("demo", self.cfg), {})
+
     def test_a_torn_or_foreign_file_reads_as_no_parks(self):
         f = park.boss_store.parks_path("demo", self.cfg)
         f.parent.mkdir(parents=True)
