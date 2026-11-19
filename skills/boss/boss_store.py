@@ -81,6 +81,11 @@ def parks_path(track, cfg=None):
     return state_dir(cfg) / (track + ".parks.json") if valid_track(track) else None
 
 
+def gh_cache_path(track, cfg=None):
+    """Where park.py keeps the last `gh pr view` of each PR a park waits on."""
+    return state_dir(cfg) / (track + ".gh.json") if valid_track(track) else None
+
+
 def version_gap_cache(cfg=None):
     """Where version_gap.py keeps the released version it last read from GitHub."""
     return state_dir(cfg) / "version-gap.json"

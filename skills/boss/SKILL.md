@@ -818,6 +818,11 @@ concerned — invisibly.
 > never end a turn on a report only printed in your pane. Wait with `Monitor` or
 > `run_in_background`, not a `pgrep` loop; a task you started and no longer need
 > is stopped before you report, and one you still wait on (CI) is named in it.
+>
+> When you report a PR of yours that is open and you are waiting on its CI or its review,
+> park yourself on it first: `boss-park <track> <your name> --until ci:<owner/repo>#<N>`.
+> It costs nothing and keeps the boss from counting you idle; it ends on its own when CI is
+> done, the PR is merged or closed, or after 2 hours.
 
 Workers are started with `--disallowedTools AskUserQuestion` (`launch_claude` in
 `boss-lifecycle.sh`), so only your concierge, or you if you have none, asks the owner. A worker's question rang
@@ -1196,11 +1201,18 @@ Three sources. Turn all three on.
    check NEXT, the tracker and the open side tickets before parking anyone.
 
    **Park a worker: `boss-park <track> <worker> --until <event>`.** The event is one of
-   five (the two GitHub ones arrive with ticket 04; today three work):
-   `ticket:<id>` (the ticket graph reports it done), `worker:<name>` (that worker's session
-   is idle or has ended), `owner:<question id>` (the concierge's `ANSWER` came and you cleared
-   the question's blocker: the id, `q7`, must stand on an Open blockers line when you park, and the
-   park wakes when no such line is left). Anything else is refused with this list; a clock time is
+   five: `ticket:<id>` (the ticket graph reports it done), `worker:<name>` (that worker's
+   session is idle or has ended), `owner:<question id>` (the concierge's `ANSWER` came and you
+   cleared the question's blocker: the id, `q7`, must stand on an Open blockers line when you
+   park, and the park wakes when no such line is left), `pr:<owner/repo#N>-merged` (the PR is
+   merged, or closed so it never will be) and `ci:<owner/repo#N>` (every check run of the PR's
+   head has concluded, or the PR is no longer open; a PR with no check run yet holds). The pulse
+   reads the two GitHub ones with one `gh pr view` per PR, at most once a minute; when `gh`
+   fails the park holds and the failure goes to `pm/park-gh.log`. **A worker waiting on its own
+   PR's CI or review parks itself on `ci:`**: that is the last paragraph of the reporting contract
+   (P8), so you do nothing, it stays out of IDLE NOW, keeps its PR, and READY tickets beside it
+   are spawned for, not given to it; when CI ends the pulse says so and you dispatch the fixes or
+   the next task. Anything else is refused with this list; a clock time is
    not an event. A park starts when you make it and ends after 2 hours at most. While its event
    has not happened the pulse leaves the worker out of the idle list; when it has, the pulse says
    "X's wait is over (ticket 12 done): dispatch it", and when the 2 hours ran out first, "X has
