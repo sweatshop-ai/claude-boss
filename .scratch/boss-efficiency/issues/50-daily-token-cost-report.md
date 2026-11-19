@@ -8,8 +8,11 @@ Calibration, part of A: for one week the owner notes the `/usage` percentage twi
 
 **Claimed by:** Saskia 2026-11-19 16:19
 
-**Status:** in-progress
+**Status:** done
 
-- [ ] Test first: the script's counts on a small fixture of transcript lines match a hand count
-- [ ] Timer installed and enabled; one run posts to #claude-ops (message permalink in the report)
-- [ ] Nothing from transcripts beyond counts and session names leaves the machine
+- [x] Test first: the script's counts on a small fixture of transcript lines match a hand count
+  Evidence: `python3 -m pytest /home/tiroir/.claude/routines/test_token_cost.py -q` → `12 passed`; red first (collection error, script absent). Real run for 2026-11-18 totals $484, equal to the analysis figure for that day.
+- [x] Timer installed and enabled; one run posts to #claude-ops (message permalink in the report)
+  Evidence: `systemctl --user start token-cost.service` → exit 0, journal `posted: https://thinkingtoo.slack.com/archives/C0B9T1CE6CT/p1795102013673999`, `Finished token-cost.service`; `list-timers`: NEXT Fri 2026-11-20 08:00:00 CET. Units committed in ~/.claude/routines (commits 8e6bf61, 2160fa0, 4b1a421; `git log origin/main..HEAD` empty).
+- [x] Nothing from transcripts beyond counts and session names leaves the machine
+  Evidence: tests `test_post_carries_only_counts_names_and_models` and `test_odd_model_string_never_reaches_the_post`; names only from the agent-names pool, model ids only if `[A-Za-z0-9.-]{1,40}`; format checked by Aisha before the post.
