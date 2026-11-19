@@ -8,7 +8,9 @@ nobody, the pulse does not block over it, and it logs the shortfall.
 
 **Blocked by:** 02, 03
 
-**Status:** ready-for-agent
+**Claimed by:** Nilufar 2026-11-19 18:16
+
+**Status:** in-progress
 
 - [ ] Refused spawn with two parked workers: the pulse names the one parked longest
 - [ ] Refused spawn with no parked worker: no block, one log line with free memory and floor
