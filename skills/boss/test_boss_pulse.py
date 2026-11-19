@@ -177,7 +177,7 @@ class Frontier(PulseCase):
         return self.tmp / "pm/.pulse" / ("%s.%s.frontier.json" % (
             TRACK, hashlib.sha1(source.encode()).hexdigest()[:10]))
 
-    def pulse_with_team(self, idle, size, holding=False, names=None):
+    def pulse_with_team(self, idle, size, holding=False, names=None, statuses=None):
         """Run main() in-process with a stand-in for the tmux roster."""
         import contextlib
         import importlib.util
@@ -190,6 +190,7 @@ class Frontier(PulseCase):
             spec.loader.exec_module(mod)
             mod.team = lambda sid: (idle, size, [n for n, _ in idle] if names is None else names)
             mod.concierge_holding = lambda sid: holding
+            mod.worker_statuses = lambda sid: dict(statuses or {})
             payload = {"session_id": self.sid, "hook_event_name": "Stop", "stop_hook_active": False}
             out, stdin = io.StringIO(), sys.stdin
             sys.stdin = io.StringIO(json.dumps(payload))
@@ -205,6 +206,63 @@ class Frontier(PulseCase):
                 os.environ["CLAUDE_CONFIG_DIR"] = old
         text = out.getvalue().strip()
         return json.loads(text)["hookSpecificOutput"]["additionalContext"] if text else ""
+
+    def park(self, worker, event, age_s=60):
+        import park
+        park.set_park(TRACK, worker, event, now=time.time() - age_s, cfg=self.tmp)
+
+    def graph_one_done_one_open(self):
+        (self.issues / "11-api.md").write_text(ticket("11", "API", status="done"))
+        (self.issues / "12-ui.md").write_text(ticket("12", "UI", claimed="Bea 2026-11-19 10:00",
+                                                      status="in-progress"))
+        self.goal_with_tickets(self.issues)
+
+    def test_a_worker_parked_on_an_open_ticket_is_not_idle(self):
+        self.graph_one_done_one_open()
+        self.park("Ada", "ticket:12")
+        self.assertEqual(self.pulse_with_team([("Ada", "w:1.0")], 2), "")
+
+    def test_a_park_on_a_ticket_wakes_when_the_frontier_reports_it_done(self):
+        self.graph_one_done_one_open()
+        self.park("Ada", "ticket:11")
+        out = self.pulse_with_team([("Ada", "w:1.0")], 2)
+        self.assertIn("Ada's wait is over (ticket 11 done): dispatch it", out)
+
+    def test_a_park_on_a_worker_wakes_when_that_worker_goes_idle(self):
+        self.graph_one_done_one_open()
+        self.park("Ada", "worker:Bea")
+        self.assertEqual(self.pulse_with_team([("Ada", "w:1.0")], 2, statuses={"Bea": "busy"}), "")
+        out = self.pulse_with_team([("Ada", "w:1.0"), ("Bea", "w:1.1")], 2,
+                                   statuses={"Bea": "idle", "Ada": "idle"})
+        self.assertIn("Ada's wait is over (Bea finished)", out)
+
+    def test_a_park_on_the_owner_wakes_when_the_blocker_is_cleared(self):
+        self.graph_one_done_one_open()
+        self.tracker(blockers="- the org name q7")
+        self.park("Ada", "owner:q7")
+        self.assertEqual(self.pulse_with_team([("Ada", "w:1.0")], 2, holding=True), "")
+        self.tracker(blockers="")
+        out = self.pulse_with_team([("Ada", "w:1.0")], 2)
+        self.assertIn("Ada's wait is over (q7 answered)", out)
+
+    def test_an_unreadable_tracker_does_not_wake_an_owner_park(self):
+        self.graph_one_done_one_open()
+        self.park("Ada", "owner:q7")
+        (self.tmp / "pm" / (TRACK + ".md")).unlink()
+        self.assertEqual(self.pulse_with_team([("Ada", "w:1.0")], 2), "")
+
+    def test_a_park_older_than_two_hours_is_reported_expired(self):
+        self.graph_one_done_one_open()
+        self.park("Ada", "ticket:12", age_s=2 * 3600 + 60)
+        out = self.pulse_with_team([("Ada", "w:1.0")], 2)
+        self.assertIn("Ada has waited 2 h on ticket:12: dispatch, re-park or retire", out)
+
+    def test_an_idle_worker_without_a_park_is_still_named_beside_a_parked_one(self):
+        self.graph_one_done_one_open()
+        self.park("Ada", "ticket:12")
+        out = self.pulse_with_team([("Ada", "w:1.0"), ("Cy", "w:1.2")], 3)
+        self.assertIn("IDLE NOW, yours: Cy (w:1.2)", out)
+        self.assertNotIn("Ada", out.split("IDLE NOW")[1].splitlines()[0])
 
     def test_every_idle_worker_gets_a_ready_ticket(self):
         for n, name in (("01", "API"), ("02", "UI"), ("03", "Docs")):
