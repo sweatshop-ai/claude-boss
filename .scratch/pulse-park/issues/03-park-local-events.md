@@ -14,7 +14,9 @@ arrive in ticket 04).
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Claimed by:** Talia 2026-11-19 17:46
+
+**Status:** in-progress
 
 - [ ] An unknown event kind or a missing target is refused with the list of allowed events
 - [ ] A clock time is not an allowed event

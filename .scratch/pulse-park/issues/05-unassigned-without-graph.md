@@ -11,7 +11,9 @@ boss SKILL.md where it describes NEXT.
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Claimed by:** Anahita 2026-11-19 17:46
+
+**Status:** in-progress
 
 - [ ] NEXT with 5 items, 2 marked, gives 3 unassigned
 - [ ] A mark naming a retired worker counts as unassigned and is named

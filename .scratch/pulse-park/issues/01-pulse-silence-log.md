@@ -10,7 +10,9 @@ this ticket. Update the pulse section of the boss SKILL.md.
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Claimed by:** Nilufar 2026-11-19 17:46
+
+**Status:** in-progress
 
 - [ ] Each early return in the Stop hook writes exactly one log line naming its gate
 - [ ] A pulse that fires writes its decision (actions, idle count) to the same log

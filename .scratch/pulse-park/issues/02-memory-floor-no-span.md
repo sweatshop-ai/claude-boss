@@ -11,7 +11,9 @@ ignored with a one-line note. Update the boss SKILL.md where it speaks of the sp
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Claimed by:** Zainab 2026-11-19 17:46
+
+**Status:** in-progress
 
 - [ ] With 20 ready tickets and 2 idle workers the pulse asks for 18 spawns, not a capped number
 - [ ] A spawn that would leave under 8 GB free is refused with free memory and the floor named
