@@ -490,7 +490,7 @@ def main():
         "hookEventName": "Stop",
         "additionalContext": pulse.render(facts, decision),
     }}))
-    commit(sid, now, decision.fired, blocks=None if let_go else {})
+    commit(sid, now, decision.fired, blocks={"set": idle_key, "n": let_go, "at": now} if let_go else {})
     if let_go:
         return held("block-let-go", idle=len(idle), unassigned=unassigned, blocks=let_go,
                     actions=",".join(a.kind for a in decision.actions))

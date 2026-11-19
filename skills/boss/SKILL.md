@@ -1207,13 +1207,15 @@ Three sources. Turn all three on.
    **You cannot end your turn while work lies around.** When a worker of yours is idle
    without a valid park and unassigned work exists (a READY ticket, or a NEXT item without
    `(→ Name)`), the pulse does not hand you context: it **blocks the Stop**, and the reason
-   names each idle worker and the unassigned items. The only ways out are to dispatch the
-   worker or to park it with a checked event. After 3 blocks in a row for the same set of
-   idle workers the pulse lets go and logs `block-let-go`; a dispatch or a park (a different
-   idle set, or none) starts the count again. Nothing reaches the owner: you fix it. A worker
-   that is idle with nothing left to hand out and no park gets "retire X", with no block. The
-   concierge is never an idle worker. The hook still never stacks on its own block
-   (`stop_hook_active`).
+   names each idle worker and the unassigned items. Dispatch the worker or park it with a
+   checked event before you stop again. The runtime marks the Stop that follows a block
+   `stop_hook_active`, and the hook never stacks on its own block, so a block holds one turn; the
+   next turn's Stop blocks again. After 3 blocks in a row for the same set of
+   idle workers the pulse lets go: you get the ordinary pulse text, no block, and the log says
+   `block-let-go`. A dispatch or a park (a different idle set, or none) starts the count again,
+   as does an hour without a block. Nothing reaches the owner: you fix it. A worker idle with
+   nothing left to hand out (a NEXT list all marked, no ticket graph) and no park gets "retire X",
+   with no block. The concierge is never an idle worker.
 
    **Park a worker: `boss-park <track> <worker> --until <event>`.** The event is one of
    five (the two GitHub ones arrive with ticket 04; today three work):
