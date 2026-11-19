@@ -175,7 +175,7 @@ def _spawn_next(facts, action):
 
 def _dispatch_next(facts, action):
     return ("Dispatch NEXT items to the idle workers, one each, top first, "
-            "never one marked `(→ Name)` for a live worker; mark each item you hand "
+            "never one marked `(→ Name)` for a busy worker; mark each item you hand "
             "out; skip an item that waits on work still in progress (P6: match "
             "the project; move or spawn only if none fits).")
 
