@@ -106,9 +106,28 @@ class Blocks(BlockCase):
         gates = []
         for _ in range(5):
             out = self.stop(ADA)
-            gates.append(out["decision"] if out else None)
-        self.assertEqual(gates, ["block", "block", "block", None, None])
+            gates.append(out.get("decision", "context") if out else None)
+        self.assertEqual(gates, ["block", "block", "block", "context", "context"])
         self.assertEqual(self.gates(), ["blocked"] * 3 + ["block-let-go"] * 2)
+
+    def test_after_the_let_go_the_boss_still_gets_the_pulse_text(self):
+        for _ in range(3):
+            self.stop(ADA)
+        out = self.stop(ADA)
+        self.assertIn("Act, in this order", out["hookSpecificOutput"]["additionalContext"])
+
+    def test_a_graph_with_open_tickets_but_none_ready_is_not_retired(self):
+        d = pulse.decide(pulse.Facts(track="t", source="g", idle=ADA, size=1))
+        self.assertNotIn("retire", [a.kind for a in d.actions] if d else [])
+
+    def test_a_count_from_long_ago_starts_again(self):
+        for _ in range(3):
+            self.stop(ADA)
+        p = self.tmp / "pm/.pulse" / (SID + ".json")
+        st = json.loads(p.read_text())
+        st["blocks"]["at"] -= 7200
+        p.write_text(json.dumps(st))
+        self.assertEqual(self.stop(ADA)["decision"], "block")
 
     def test_a_different_idle_set_starts_the_count_again(self):
         for _ in range(3):

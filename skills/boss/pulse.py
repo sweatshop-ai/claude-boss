@@ -159,8 +159,11 @@ def decide(facts):
     work = open_work(facts)
     woken = {w.worker for w in facts.parks}
     resting = [n for n in _idle_names(facts) if n not in woken]
-    # Prose in NEXT, not a list, may still be work: only a plainly empty or fully marked one retires.
-    if resting and not work and not facts.broken and (_entries(facts.next_items) or not facts.next_items):
+    # Prose in NEXT, not a list, may still be work, and a ticket graph may hold open tickets
+    # that wait on others: retire only on a NEXT list whose items are all marked busy,
+    # or, beside a refill, as the fallback when the refill finds nothing.
+    if resting and not work and not facts.broken and not facts.source and (
+            _entries(facts.next_items) or not facts.next_items):
         actions.append(Action("retire"))
     if facts.rungs:
         actions.append(Action("run-rung", facts.rungs[0].rung))
@@ -231,8 +234,10 @@ def _refill_next(facts, action):
 def _retire(facts, action):
     woken = {w.worker for w in facts.parks}
     names = [n for n in _idle_names(facts) if n not in woken]
-    return ("Nothing is left to hand out and no park holds %s: retire %s "
+    return ("Nothing is left to hand out%s and no park holds %s: retire %s "
             "(`boss-lifecycle.sh retire <pane> --require-idle --kill`)." % (
+                " (after the refill, if it finds nothing)"
+                if not _entries(facts.next_items) else "",
                 ", ".join(names[:policy.BOSS_SPAN]), "it" if len(names) == 1 else "them"))
 
 

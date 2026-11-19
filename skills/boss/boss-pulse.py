@@ -370,10 +370,16 @@ def gate(sid):
     return now, st
 
 
-def blocks_so_far(sid, idle_key):
-    """Blocks in a row already given for this exact idle set; a different set starts again."""
+BLOCKS_STALE_S = 3600   # a count older than this is from another spell of idleness
+
+
+def blocks_so_far(sid, idle_key, now):
+    """Blocks in a row already given for this exact idle set; a different set, or one
+    long ago, starts again."""
     b = boss_store.read_state(sid, "pulse").get("blocks") or {}
-    return b.get("n", 0) if b.get("set") == idle_key else 0
+    if b.get("set") != idle_key or now - b.get("at", 0) > BLOCKS_STALE_S:
+        return 0
+    return b.get("n", 0)
 
 
 def reset_blocks(sid):
@@ -471,19 +477,23 @@ def main():
         reset_blocks(sid)
         return held("nothing-to-say", idle=len(idle), unassigned=unassigned)
 
+    let_go = 0
     if decision.block:
         idle_key = ",".join(sorted(n for n, _ in idle))
-        blocked = blocks_so_far(sid, idle_key)
-        if blocked >= pulse.BLOCK_LIMIT:
-            return held("block-let-go", idle=len(idle), unassigned=unassigned, blocks=blocked)
-        commit(sid, now, decision.fired, blocks={"set": idle_key, "n": blocked + 1})
-        print(json.dumps({"decision": "block", "reason": pulse.block_reason(facts, decision)}))
-        return held("blocked", idle=len(idle), unassigned=unassigned, blocks=blocked + 1)
+        blocked = blocks_so_far(sid, idle_key, now)
+        if blocked < pulse.BLOCK_LIMIT:
+            commit(sid, now, decision.fired, blocks={"set": idle_key, "n": blocked + 1, "at": now})
+            print(json.dumps({"decision": "block", "reason": pulse.block_reason(facts, decision)}))
+            return held("blocked", idle=len(idle), unassigned=unassigned, blocks=blocked + 1)
+        let_go = blocked           # the ordinary pulse below still speaks: only the block is let go
     print(json.dumps({"hookSpecificOutput": {
         "hookEventName": "Stop",
         "additionalContext": pulse.render(facts, decision),
     }}))
-    commit(sid, now, decision.fired, blocks={})
+    commit(sid, now, decision.fired, blocks=None if let_go else {})
+    if let_go:
+        return held("block-let-go", idle=len(idle), unassigned=unassigned, blocks=let_go,
+                    actions=",".join(a.kind for a in decision.actions))
     return held("fired", idle=len(idle), unassigned=unassigned,
                 actions=",".join(a.kind for a in decision.actions))
 
