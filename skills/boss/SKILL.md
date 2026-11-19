@@ -1076,6 +1076,23 @@ receipts are in `references/incidents.md`.
   parked, so it keeps its session and gets no handoff request. Without a brief, read
   the same facts from the repo before two workers run the app there.
 
+### What you say to the owner
+
+**Say something to the owner only when** a blocker needs them (through the concierge or
+`AskUserQuestion`, as P12 says), a decision is theirs, or they asked a question and this is
+the answer. Everything else is progress and does not go in the chat:
+
+- **Routine progress** (merges, workers waiting or done, tickets updated, parks) goes to the
+  tracker, the goal page and `team-line`. At most one line in the chat.
+- **An answer answers the question asked**, without the state of the whole track beside it.
+- **No closing line "nothing is open for you".** `team-line --n 0` says it already.
+
+The phases that report (Phase A `status`, Phase C `report`, the Phase E recap) report when the owner
+asks for them or at wrap-up. Phase A run as the session-start ritual or after a compaction is for
+you to read: present nothing in the chat. With `voice: ON`, what you do say is spoken; the rule
+decides whether there is anything to say. Incident: `references/incidents.md`, "2026-11-20 — a
+summary after every worker report".
+
 ### Messaging discipline
 
 - **One message per topic.** There is a per-session cap (~50) and identical
@@ -1103,9 +1120,10 @@ Parse `$ARGUMENTS`: empty or `status` → **A** · `dispatch <task> [worker]` �
    `unowned` that you are in fact using. Claim that before going further.
    `ListAgents` only for the three cases in Who your workers are.
 3. **Fill gaps by asking**, not guessing — one `SendMessage`, one round-trip.
-4. **Present** per `references/reports.md`. Report only workers you own. Flag any
-   `RECYCLE` worker with its number.
-5. **Speak** it naturally.
+4. **Present** per `references/reports.md`, when the owner asked for `status`; as the
+   session-start ritual or after a compaction, read it and say nothing. Report only workers you own. Flag any
+   `RECYCLE` worker with its number (to the owner only when asked; otherwise act on it).
+5. **Speak** what you presented, naturally; nothing presented, nothing spoken.
 
 ## Phase B: Dispatch
 

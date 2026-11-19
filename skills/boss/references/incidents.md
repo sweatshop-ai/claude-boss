@@ -207,3 +207,22 @@ those back. Measured before shipping on 87 of them, a second Sonnet sent back 14
 of the owner's and let through 23 of 37 of the rest. One of the wrongly returned ones
 asked to delete a key irreversibly. Either both readings are unreliable or the classes
 are; either way it does not decide for the owner.
+
+## 2026-11-20 — a summary after every worker report
+
+A boss answered each worker message with 6 to 15 lines to the
+owner: every merge with its sha, what each worker had done, what still waited, and "nothing is
+open for you". There was no blocker, no decision and no question from the owner. All of it was
+already on the FleetView card (`team-line`), the goal page and the ticket graph. In one case the
+owner asked nothing, a worker reported six merges, and the boss wrote two paragraphs and a list.
+The owner: "you should not explain everything every time, that is not efficient."
+
+**What it bought:** the rule "What you say to the owner" in SKILL.md: a blocker, a decision or an
+answer, and nothing else; routine progress goes to the tracker, the goal page and `team-line`.
+
+**What it did not buy:** enforcement. The rule is prose in SKILL.md; no hook measures the length of a boss's messages to the owner. The 6 to 15 lines are from the owner's account of that session, not from a measured log.
+
+**What was checked and needed no change:** the pulse text (`pulse.py`) and the compaction restore
+(`boss-compact.py`) never ask the boss for a summary in the chat. What to check next: the length of
+a boss's messages to the owner on a track that ran after this version.
+
