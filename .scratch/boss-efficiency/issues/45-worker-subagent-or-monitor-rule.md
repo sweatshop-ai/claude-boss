@@ -16,7 +16,9 @@ Guard: an `Agent` call whose `subagent_type` is `Explore` or `Plan` and that car
 
 **Claimed by:** Yasmin 2026-11-19 15:34
 
-**Status:** in-progress
+**Status:** done
 
-- [ ] Test first: `test_boss_guard` gets an Explore call with no name (no message, logged as read-only-subagent), a general-purpose call (warned as now), an Explore call with a name (teammate message as now)
-- [ ] SKILL.md section written, Cardinal Rule's allowed list names read-only subagents and Monitor
+- [x] Test first: `test_boss_guard` gets an Explore call with no name (no message, logged as read-only-subagent), a general-purpose call (warned as now), an Explore call with a name (teammate message as now)
+- [x] SKILL.md section written, Cardinal Rule's allowed list names read-only subagents and Monitor
+
+**Evidence (Yasmin, 2026-11-19):** PR 157 merged on d3ea039 (round 2, provisional: Codex out of usage until 2026-11-20 14:10, Opus fallback ran; Codex re-reviews before any deploy). Resolved path of what ran: `/home/tiroir/Projects/boss-plugin-wt/yasmin/skills/boss/boss_store.py` and `boss-guard.py` (`python3 -m pytest test_boss_guard.py` from that dir): `66 passed`. Tests: class `ReadOnlySubagent` (Explore/Plan unnamed: silent, logged `read-only-subagent`, no budget spent; general-purpose and untyped: warned; named Explore: teammate message). Round 1 found that a subagent's own calls (parent session_id + agent_id) were counted and warned into the subagent; fixed in the same PR (`kind: subagent-call`). CI: 1 check, success.
