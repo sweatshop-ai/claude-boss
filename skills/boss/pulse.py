@@ -13,6 +13,7 @@ actions, in the order the boss is told to take them:
 
     ask             put the open blocker to the owner
     fix-graph       the ticket graph is broken; nothing is dispatched from it
+    wake            an idle worker's park is over or expired: dispatch, re-park or retire it
     dispatch-ready  one READY ticket per idle worker
     spawn n         n more workers for the READY tickets left over
     dispatch-next   no ticket graph, or one with nothing READY: one NEXT item
@@ -23,6 +24,7 @@ actions, in the order the boss is told to take them:
 from collections import namedtuple
 from pathlib import Path
 
+import park
 import policy
 
 FRONTIER_PY = Path(__file__).resolve().parent.parent / "hand-to-boss" / "frontier.py"
@@ -34,11 +36,14 @@ FRONTIER_PY = Path(__file__).resolve().parent.parent / "hand-to-boss" / "frontie
 # decided: blockers the owner has answered; shown, never asked again.
 # cap, cap_reason: the goal file's `Workers: N - <reason>` (cap None without the line);
 # N holds only with a reason.
+# parks: the Woken parks of idle workers (a park still waiting keeps its worker out of `idle`).
 Facts = namedtuple(
     "Facts",
     "track idle size rungs fired blockers source ready broken outcome unmet next_items decided"
-    " cap cap_reason",
-    defaults=((), 0, (), {}, (), "", (), None, "", (), (), (), None, ""))
+    " cap cap_reason parks",
+    defaults=((), 0, (), {}, (), "", (), None, "", (), (), (), None, "", ()))
+# An idle worker's park that no longer holds: state `over` (its event happened) or `expired`.
+Woken = namedtuple("Woken", "worker event state minutes")
 # A blocker line whose rung has come due: key into `fired`, the rung, minutes
 # since its T+0, the line.
 Rung = namedtuple("Rung", "key rung minutes line")
@@ -64,17 +69,20 @@ def decide(facts):
         actions.append(Action("ask"))
     if facts.broken:
         actions.append(Action("fix-graph"))
-    elif facts.source:
-        if facts.idle and facts.ready:
-            actions.append(Action("dispatch-ready"))
-        if spawn > 0:
-            actions.append(Action("spawn", spawn))
-        # A graph whose open tickets all wait on someone is not an empty
-        # backlog: the side work lives in NEXT, so hand that out instead.
-        if facts.idle and not facts.ready and facts.next_items:
+    else:
+        if facts.parks:
+            actions.append(Action("wake"))
+        if facts.source:
+            if facts.idle and facts.ready:
+                actions.append(Action("dispatch-ready"))
+            if spawn > 0:
+                actions.append(Action("spawn", spawn))
+            # A graph whose open tickets all wait on someone is not an empty
+            # backlog: the side work lives in NEXT, so hand that out instead.
+            if facts.idle and not facts.ready and facts.next_items:
+                actions += [Action("dispatch-next"), Action("refill-next")]
+        elif facts.idle:
             actions += [Action("dispatch-next"), Action("refill-next")]
-    elif facts.idle:
-        actions += [Action("dispatch-next"), Action("refill-next")]
     if facts.rungs:
         actions.append(Action("run-rung", facts.rungs[0].rung))
     return Decision(actions, overdue, fired)
@@ -94,6 +102,21 @@ def _ask(facts, action):
 def _fix_graph(facts, action):
     return ("Fix the ticket graph before dispatching from it: "
             "`python3 %s %s` names what is wrong." % (FRONTIER_PY, facts.source))
+
+
+def _woken_line(w):
+    kind, _, target = w.event.partition(":")
+    if w.state == "over":
+        what = {"ticket": "ticket %s done", "worker": "%s finished",
+                "owner": "%s answered"}.get(kind, "%s happened") % target
+        return "%s's wait is over (%s): dispatch it" % (w.worker, what)
+    return "%s has waited %d h on %s: dispatch, re-park or retire" % (
+        w.worker, park.TTL_S // 3600, w.event)
+
+
+def _wake(facts, action):
+    return "Wake the workers whose park no longer holds: " + "; ".join(
+        _woken_line(w) for w in facts.parks[:policy.LIST_MAX]) + "."
 
 
 def _dispatch_ready(facts, action):
@@ -127,7 +150,7 @@ def _run_rung(facts, action):
     return 'Run the due rung: `boss-alert %d "<one action, where, what it costs>"`.' % action.n
 
 
-SAY = {"ask": _ask, "fix-graph": _fix_graph, "dispatch-ready": _dispatch_ready,
+SAY = {"ask": _ask, "fix-graph": _fix_graph, "wake": _wake, "dispatch-ready": _dispatch_ready,
        "spawn": _spawn, "dispatch-next": _dispatch_next, "refill-next": _refill_next,
        "run-rung": _run_rung}
 
@@ -156,6 +179,7 @@ def render(facts, decision):
     if facts.idle:
         lines.append("IDLE NOW, yours: "
                      + ", ".join("%s (%s)" % (n, c) for n, c in facts.idle[:policy.LIST_MAX]))
+    lines += [_woken_line(w) for w in facts.parks[:policy.LIST_MAX]]
     for r in decision.overdue:
         lines.append("OVERDUE: blocker open %d min, rung %d due - %s" % (r.minutes, r.rung, r.line))
     if facts.decided:
@@ -168,11 +192,10 @@ def render(facts, decision):
     lines += ["%d. %s" % (i, SAY[a.kind](facts, a)) for i, a in enumerate(decision.actions, 1)]
     lines.append("Then update the tracker, and tick off any DONE WHEN criterion "
                  "that has just been met.")
-    lines.append("If none of this applies - the idle worker is deliberately "
-                 "parked, or the objective is finished - say which and stop. "
-                 "Parked means: name, for each idle worker, the ticket or event "
-                 "it waits on; \"parked on purpose\" with no such name is an "
-                 "idle team, so dispatch instead. "
+    lines.append("If none of this applies - the objective is finished - say so and stop. "
+                 "An idle worker is parked only by `boss-park %s <worker> --until <event>` "
+                 "(%s; 2 h at most); \"parked on purpose\" in words is not a park, "
+                 "so dispatch, park or retire it. "
                  '`boss-goal status %s met "<evidence>"` closes it and '
-                 "ends the pulse." % facts.track)
+                 "ends the pulse." % (facts.track, park.allowed(), facts.track))
     return "\n".join(lines)

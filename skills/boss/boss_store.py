@@ -38,7 +38,7 @@ UUID = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}"
 
 # Per-session state under pm/.pulse/: kind -> file name suffix. The names are the
 # ones the hooks have always written, so a state file survives the upgrade.
-STATE_KINDS = {"guard": ".guard.json", "pulse": ".json"}
+STATE_KINDS = {"guard": ".guard.json", "pulse": ".json", "silence": ".silence.log"}
 LOCK_NAME = ".state.lock"
 
 
@@ -74,6 +74,11 @@ def frontier_cache(track, source, cfg=None):
     """
     key = hashlib.sha1(source.encode("utf-8")).hexdigest()[:10]
     return state_dir(cfg) / ("%s.%s.frontier.json" % (track, key))
+
+
+def parks_path(track, cfg=None):
+    """Where this track's parks are kept: `pm/.pulse/<track>.parks.json` (park.py owns the format)."""
+    return state_dir(cfg) / (track + ".parks.json") if valid_track(track) else None
 
 
 def version_gap_cache(cfg=None):
@@ -199,11 +204,7 @@ def state_path(sid, kind, cfg=None):
 
 def read_state(sid, kind, cfg=None):
     """The state as it is now, `{}` when the file is missing, unreadable or not an object."""
-    try:
-        st = json.loads(state_path(sid, kind, cfg).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
-    return st if isinstance(st, dict) else {}
+    return read_json(state_path(sid, kind, cfg))
 
 
 def update_state(sid, kind, fn, cfg=None):
@@ -223,7 +224,20 @@ def update_state(sid, kind, fn, cfg=None):
     Dropping it would freeze the counter for good, which is worse than the rare
     lost count of a race.
     """
-    f = state_path(sid, kind, cfg)
+    return update_json(state_path(sid, kind, cfg), fn)
+
+
+def read_json(f):
+    """The object in this file, `{}` when it is missing, unreadable or not an object."""
+    try:
+        st = json.loads(f.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return st if isinstance(st, dict) else {}
+
+
+def update_json(f, fn):
+    """`update_state`'s round trip on any JSON object file under `pm/.pulse/`: same lock, same atomic write."""
     lock = None
     try:
         f.parent.mkdir(parents=True, exist_ok=True)
@@ -234,7 +248,7 @@ def update_state(sid, kind, fn, cfg=None):
             lock.close()
         lock = None
     try:
-        state = read_state(sid, kind, cfg)
+        state = read_json(f)
         new = fn(state)
         if not isinstance(new, dict):
             new = state

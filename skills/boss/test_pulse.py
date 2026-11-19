@@ -12,6 +12,7 @@ import policy  # noqa: E402
 import pulse  # noqa: E402
 
 R = pulse.Rung
+W = pulse.Woken
 
 
 class Decide(unittest.TestCase):
@@ -88,6 +89,16 @@ class Decide(unittest.TestCase):
         d = pulse.decide(pulse.Facts(track="demo", source="issues", size=3, broken="cycle"))
         self.assertEqual(kinds(d), ["fix-graph"])
 
+    def test_a_woken_worker_is_a_reason_to_speak_and_comes_before_the_dispatch(self):
+        d = pulse.decide(pulse.Facts(track="demo", idle=[("Ada", "w:1.0")],
+                                     parks=[W("Ada", "ticket:12", "over", 30)]))
+        self.assertEqual(kinds(d), ["wake", "dispatch-next", "refill-next"])
+
+    def test_a_woken_worker_with_nothing_to_hand_out_still_speaks(self):
+        d = pulse.decide(pulse.Facts(track="demo", source="issues", idle=[("Ada", "w:1.0")],
+                                     size=1, parks=[W("Ada", "ticket:12", "over", 30)]))
+        self.assertEqual(kinds(d), ["wake"])
+
     def test_a_due_rung_is_run_last_and_marked_fired(self):
         rungs = [R("ka", 60, 100, "- A blocked"), R("kb", 15, 20, "- B blocked")]
         d = pulse.decide(pulse.Facts(track="demo", rungs=rungs, fired={"old": 120},
@@ -155,9 +166,23 @@ class Render(unittest.TestCase):
         self.assertIn("NEXT, in priority order:", lines)
         self.assertIn("  - #188 fix the reopen", lines)
 
-    def test_parked_must_name_what_each_idle_worker_waits_on(self):
+    def test_prose_is_no_park_and_the_command_is_named(self):
         text = "\n".join(self.say(idle=[("Ada", "w:1.0")]))
-        self.assertIn("name, for each idle worker, the ticket or event it waits on", text)
+        self.assertIn("`boss-park demo <worker> --until <event>`", text)
+        self.assertIn("\"parked on purpose\" in words is not a park", text)
+
+    def test_a_woken_worker_is_told_its_wait_is_over(self):
+        lines = self.say(idle=[("Ada", "w:1.0"), ("Bea", "w:1.1"), ("Cy", "w:1.2")],
+                         parks=[W("Ada", "ticket:12", "over", 30),
+                                W("Bea", "worker:Cy", "over", 5),
+                                W("Cy", "owner:q7", "over", 61)])
+        self.assertIn("Ada's wait is over (ticket 12 done): dispatch it", lines)
+        self.assertIn("Bea's wait is over (Cy finished): dispatch it", lines)
+        self.assertIn("Cy's wait is over (q7 answered): dispatch it", lines)
+
+    def test_an_expired_park_says_how_long_and_on_what(self):
+        lines = self.say(idle=[("Ada", "w:1.0")], parks=[W("Ada", "ticket:12", "expired", 125)])
+        self.assertIn("Ada has waited 2 h on ticket:12: dispatch, re-park or retire", lines)
 
 
 def kinds(decision):
