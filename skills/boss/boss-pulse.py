@@ -119,15 +119,20 @@ def woken_parks(sid, track, idle, done, tracker_text):
         return idle, ()
     workers = worker_statuses(sid) if any(p.event.startswith("worker:") for p in parks.values()) else {}
     if workers is None:                     # no fleet to read: a worker park is not woken on a guess
-        workers = {n: "busy" for p in parks.values() if p.event.startswith("worker:")
-                   for n in [p.event.partition(":")[2]]}
+        workers = {}
+        for p in parks.values():
+            if p.event.startswith("worker:"):
+                workers[p.event.partition(":")[2]] = "busy"
     world = park.World(done=frozenset(done), workers=workers,
                        blockers=tuple(tracker.blocker_lines(tracker_text)) if tracker_text else ())
     now = time.time()
     free, woken = [], []
     for name, coord in idle:
         p = parks.get(name)
-        st = park.state(p, now, world) if p else None
+        if p and tracker_text is None and p.event.startswith("owner:"):
+            st = "waiting"                  # tracker unread: no blocker line proves nothing
+        else:
+            st = park.state(p, now, world) if p else None
         if st == "waiting":
             continue
         free.append((name, coord))

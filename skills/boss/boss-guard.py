@@ -450,7 +450,7 @@ def main():
         if isinstance(msg, str) and ASK_MESSAGE.match(msg):
             if needs_paste(msg):
                 deny(PASTE_DENIAL)
-        else:
+        else:                         # any other message to a worker is a dispatch
             drop_park(sid, (payload.get("tool_input") or {}).get("to"))
         return 0
     if tool == "AskUserQuestion":

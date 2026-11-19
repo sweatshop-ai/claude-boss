@@ -244,6 +244,12 @@ class Frontier(PulseCase):
         out = self.pulse_with_team([("Ada", "w:1.0")], 2)
         self.assertIn("Ada's wait is over (q7 answered)", out)
 
+    def test_an_unreadable_tracker_does_not_wake_an_owner_park(self):
+        self.graph_one_done_one_open()
+        self.park("Ada", "owner:q7")
+        (self.tmp / "pm" / (TRACK + ".md")).unlink()
+        self.assertEqual(self.pulse_with_team([("Ada", "w:1.0")], 2), "")
+
     def test_a_park_older_than_two_hours_is_reported_expired(self):
         self.graph_one_done_one_open()
         self.park("Ada", "ticket:12", age_s=2 * 3600 + 60)
