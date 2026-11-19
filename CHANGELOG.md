@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.30.1
+
+- **A boss tells the owner only a blocker, a decision, or the answer to their question (the owner, 2026-11-20).** New section "What you say to the owner" in `SKILL.md`: routine progress (merges, workers waiting or done, tickets updated, parks) goes to the tracker, the goal page and `team-line`, with at most one line in the chat; an answer answers the question asked, without the state of the track; no closing "nothing is open for you", since `team-line --n 0` says it. The pulse text and the compaction restore were read and never asked for a summary, so they are unchanged. Incident: `references/incidents.md`.
+
 ## 0.30.0
 
 - **The ticket graph shows what each worker is doing (the owner, 2026-11-19, goal-graph ticket 02).** A claimed ticket's worker carries the sign the session dashboard shows for it: 🔨 a turn in flight, 🧪 a job of its own open, 🔍 a review running; a worker at rest has none. The other states carry theirs too: `✅ done`, `○ ready`, `⏸ waiting`. The signs come from an optional activity feed: a URL in `pm/goal-graph.signs-url` that answers `{"signs": {track: {name: "busy"|"watching"|"reviewing"}}}` (agentview's `/api/signs`), read once per run with a 1 s timeout. No file, or no answer, draws the names without signs, as before. A change of sign is a change of the block, so the sweep redraws it within a minute and an open page reloads.
