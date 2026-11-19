@@ -13,9 +13,9 @@ Guard: an `Agent` call whose `subagent_type` is `Explore` or `Plan` and that car
 
 **Blocked by:** None (can start immediately)
 
-**Claimed by:** Rafael (2026-11-18)
+**Claimed by:** none
 
-**Status:** open
+**Status:** ready-for-agent
 
 - [ ] Test first: `test_boss_guard` gets an Explore call with no name (no message, logged as read-only-subagent), a general-purpose call (warned as now), an Explore call with a name (teammate message as now)
 - [ ] SKILL.md section written, Cardinal Rule's allowed list names read-only subagents and Monitor

@@ -10,7 +10,7 @@ Updates go to the cross-track boss (`~/.claude/pm/cross-track.md`), not to Rocco
 
 **Blocked by:** None (can start immediately)
 
-**Claimed by:** Rafael (2026-11-18)
+**Claimed by:** Rafael (2026-11-19, inside ticket 48)
 
 **Status:** open
 
