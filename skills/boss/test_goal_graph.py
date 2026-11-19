@@ -129,6 +129,22 @@ class Activity(GoalCase):
             got.side_effect = http.client.IncompleteRead(b"")
             self.assertEqual(goal_graph.activity(TRACK, self.cfg), {})
 
+    def test_a_feed_of_another_shape_draws_no_signs(self):
+        for answer in ([], {"signs": []}, {"signs": {TRACK: ["Farid"]}}, {"signs": {TRACK: {"Farid": ["busy"]}}}):
+            with self.subTest(answer=answer):
+                goal_graph._FEED.clear()
+                with self.feed(answer):
+                    self.assertEqual(goal_graph.activity(TRACK, self.cfg), {})
+
+    def test_a_feed_slower_than_the_budget_draws_no_signs(self):
+        def slow(*_, **__):
+            time.sleep(goal_graph.SIGNS_S * 3)
+        with self.feed({}) as got:
+            got.side_effect = slow
+            began = time.monotonic()
+            self.assertEqual(goal_graph.activity(TRACK, self.cfg), {})
+        self.assertLess(time.monotonic() - began, goal_graph.SIGNS_S * 2)
+
     def test_the_update_puts_the_sign_on_the_claimed_ticket_and_a_change_rewrites(self):
         self.write_goal(goal(str(self.issues)))
         with self.feed({"signs": {TRACK: {"Farid": "busy"}}}):

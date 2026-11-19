@@ -52,6 +52,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import time
 import urllib.request
 from pathlib import Path
@@ -116,15 +117,23 @@ def activity(track, cfg=None):
     if not re.match(r"https?://", url):
         return {}
     if url not in _FEED:
-        try:
-            with urllib.request.urlopen(url, timeout=SIGNS_S) as r:
-                got = json.loads(r.read(1 << 20)).get("signs")
-            _FEED[url] = got if isinstance(got, dict) else {}
-        except Exception:            # http.client's errors are no OSError; a feed never fails a write
-            _FEED[url] = {}
+        got = {}
+
+        def fetch():
+            try:
+                with urllib.request.urlopen(url, timeout=SIGNS_S) as r:
+                    got["signs"] = json.loads(r.read(1 << 20)).get("signs")
+            except Exception:        # http.client's errors are no OSError; a feed never fails a write
+                pass
+        # The timeout bounds each socket operation; the join bounds the whole read.
+        reader = threading.Thread(target=fetch, daemon=True)
+        reader.start()
+        reader.join(SIGNS_S)
+        signs = got.get("signs")
+        _FEED[url] = signs if isinstance(signs, dict) else {}
     mine = _FEED[url].get(track)
-    return {str(n).casefold(): WORKER_SIGNS[s] for n, s in mine.items() if s in WORKER_SIGNS} \
-        if isinstance(mine, dict) else {}
+    return {str(n).casefold(): WORKER_SIGNS[s] for n, s in mine.items()
+            if isinstance(s, str) and s in WORKER_SIGNS} if isinstance(mine, dict) else {}
 
 
 def _second_line(t, signs):
