@@ -77,7 +77,7 @@ class Form(GoalCase):
         got = "\n".join(goal_graph.block(out, NOW)) + "\n"
         self.assertEqual(got, (FIXTURE / "expected-block.md").read_text(encoding="utf-8"))
 
-    def test_no_line_that_freezes_a_sheaf_page(self):
+    def test_no_linkstyle_or_init_line(self):
         out, _ = goal_graph.read(str(self.issues), TRACK)
         for ln in goal_graph.diagram(out):
             self.assertNotIn("linkStyle", ln)

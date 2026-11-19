@@ -2,7 +2,7 @@
 
 ## 0.29.1
 
-- **The ticket graph no longer freezes the goal page in sheaf.** A goal page with the graph never finished loading: the diagram's `linkStyle default` line (and an `%%{init}%%` line tried in its place) froze the page in sheaf 1.2.0, measured on the pulse-park goal and on bisected copies of it. The line is gone; edges keep mermaid's own colour, and a test keeps both lines out. The timer rewrites every open goal's graph within a minute of the update.
+- **The ticket graph drops its `linkStyle default` line.** It was removed while a goal page with the graph would not finish loading in sheaf. A later check showed it was not the cause: in a clean headless Chrome the page loads with and without the line, and the earlier "frozen renderer" readings came from the browser extension used to test, which timed out on every page. Edges keep mermaid's own colour; the test that keeps `linkStyle` and `%%{init}%%` lines out stays.
 
 ## 0.29.0
 

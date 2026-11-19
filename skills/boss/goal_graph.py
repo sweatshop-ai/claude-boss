@@ -115,8 +115,8 @@ def diagram(out):
                 lines.append("  t%s --> t%s" % (b, t["num"]))
         for e in t["external"]:
             lines.append("  %s -.-> t%s" % (externals[e], t["num"]))
-    # No linkStyle and no %%{init}%% line: either one freezes a sheaf 1.2.0 page for good
-    # (measured 2026-11-19 on the pulse-park goal), so the edges keep mermaid's own colour.
+    # No linkStyle and no %%{init}%% line: the edges keep mermaid's own colour, and the block
+    # carries only what the spec names (removed in 0.29.1 while chasing a page that would not load).
     for name, style in CLASSES:
         lines.append("  classDef %s %s" % (name, style))
     for name, _ in CLASSES:
