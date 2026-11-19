@@ -115,6 +115,13 @@ class FixPass(base.Base):
         self.assertAsked(1)
 
 
+class DiffFiles(unittest.TestCase):
+    def test_both_names_of_a_rename_and_none_for_a_quoted_name(self):
+        self.assertEqual(br.diff_files("diff --git a/old.py b/new.py\nsimilarity index 90%\n"
+                                       "diff --git a/f.py b/f.py\n"), ["f.py", "new.py", "old.py"])
+        self.assertIsNone(br.diff_files('diff --git a/f.py b/f.py\ndiff --git "a/t\\tab" "b/t\\tab"\n'))
+
+
 def rnd(n, head, verdict, *, since=None, files=("f.py",), findings=0, kind="codex", status="posted"):
     rec = {"repo": OWNER[0], "pr": OWNER[1], "round": n, "head_sha": head, "base": "main", "kind": kind,
            "verdict": verdict, "status": status, "files": list(files) if files is not None else None,

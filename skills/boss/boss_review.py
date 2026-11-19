@@ -1395,12 +1395,21 @@ def _direct_problem(job: _Job, seen: _Pr) -> str | None:
 
 
 # ------------------------------------------------------------------ the fix pass ----
-_DIFF_FILES = re.compile(r"^diff --git a/(.*) b/(.*)$", re.M)
+_DIFF_FILES = re.compile(r"diff --git a/(.*) b/(.*)")
 
 
-def diff_files(diff: str) -> list[str]:
-    """The files a unified diff touches, both names of a rename, sorted. Read from the whole diff, before any cut."""
-    return sorted({name for pair in _DIFF_FILES.findall(diff) for name in pair})
+def diff_files(diff: str) -> list[str] | None:
+    """The files a unified diff touches, both names of a rename, sorted; None when a `diff --git` line cannot be read
+    (a quoted name), so that no file is left out unseen: the merge gate then asks for a full round. Read from the
+    whole diff, before any cut."""
+    names = set()
+    for line in diff.split("\n"):
+        if line.startswith("diff --git "):
+            got = _DIFF_FILES.fullmatch(line)
+            if got is None:
+                return None
+            names.update(got.groups())
+    return sorted(names)
 
 
 def _answered_round(job: _Job, seen: _Pr) -> tuple[str, str | None]:
