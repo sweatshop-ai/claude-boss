@@ -162,7 +162,30 @@ def _valid(r: Round, owner: tuple[str, int]) -> dict | None:
         return None
     if rec["verdict"] is None and rec["status"] in ("posted", "post-failed"):     # a verdict was posted, or tried
         return None
+    # the fix pass's fields (ticket 46) are optional: an older record has none of them
+    if "since" in rec and not (isinstance(rec["since"], str) and _SINCE.fullmatch(rec["since"])):
+        return None
+    if rec.get("files") is not None and not _strings(rec["files"]):
+        return None
+    if rec.get("findings") is not None and (type(rec["findings"]) is not int or rec["findings"] < 0):
+        return None
     return rec
+
+
+def _fix_diff_counts(rec: dict, rounds: list[Round], owner: tuple[str, int]) -> bool:
+    """Does the GO of a fix pass (`since` set) count as a GO for its head? Only when the highest round below it that
+    decided on the head `since`, against the same base, was a NO-GO or a GO with findings, and the fix diff touches
+    no file outside the files that round reviewed. A round at `since` that is missing or keeps no file list (one
+    written before ticket 46) does not let it count: the head then needs a full round."""
+    at = [x for r in rounds if r.number is not None and r.number < rec["round"]
+          and (x := _valid(r, owner)) is not None and x["head_sha"] == rec["since"] and x["base"] == rec["base"]
+          and (x["status"] == "posted" or (x["status"] == "post-failed" and x["verdict"] == "NO-GO"))]
+    if not at:
+        return False
+    prior = max(at, key=lambda x: x["round"])
+    answered = prior["verdict"] == "NO-GO" or (prior.get("findings") or 0) > 0
+    return answered and prior.get("files") is not None and rec.get("files") is not None \
+        and set(rec["files"]) <= set(prior["files"])
 
 
 class Decision(NamedTuple):
@@ -180,7 +203,8 @@ def decide(rounds: list[Round], head: str, base: str, non_deploying, owner: tupl
     `post-failed` GO), is passed over, and a later round that was passed over means a provisional or waived GO below
     it is `superseded-go`: that GO was not the PR's last word. The first valid posted round on the live head decides.
     A Codex GO decides on any base; a provisional or waived GO only on a branch in `non_deploying`. A `post-failed`
-    NO-GO on the live head still refuses: the verdict is known, only the comment is missing."""
+    NO-GO on the live head still refuses: the verdict is known, only the comment is missing. The GO of a fix pass
+    counts only by the rule of `_fix_diff_counts`, else `fix-diff-needs-full-round` (ticket 46)."""
     later = 0           # valid rounds above the one being looked at, passed over
     for r in sorted(rounds, key=lambda r: math.inf if r.number is None else r.number, reverse=True):
         rec = _valid(r, owner)
@@ -193,6 +217,8 @@ def decide(rounds: list[Round], head: str, base: str, non_deploying, owner: tupl
             continue
         if verdict == "NO-GO":
             return Decision(EXIT_REFUSED, "no-go" if status == "posted" else "unposted-no-go", r.number, kind)
+        if "since" in rec and not _fix_diff_counts(rec, rounds, owner):
+            return Decision(EXIT_REFUSED, "fix-diff-needs-full-round", r.number, kind)
         if kind == "codex":
             return Decision(EXIT_MERGED, "codex-go", r.number, kind)
         if later:
