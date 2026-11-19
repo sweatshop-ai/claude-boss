@@ -6,7 +6,9 @@
 
 **Blocked by:** 48 (decision 5A: decisions 3 and 4 first; both change `boss_review.py`)
 
-**Status:** ready-for-agent
+**Claimed by:** Reem 2026-11-19 16:01
+
+**Status:** in-progress
 
 - [ ] Test first: a usage-limit failure with "try again at <time>" writes the state; a review before that time does not start Codex; one after it does
 - [ ] An unparseable limit message skips for one hour, said in the round record
