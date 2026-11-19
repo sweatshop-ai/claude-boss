@@ -8,8 +8,9 @@
 
 **Blocked by:** None (can start immediately)
 
-**Claimed by:** none
 
-**Status:** ready-for-agent
+**Claimed by:** Suki 2026-11-19 15:34
+
+**Status:** in-progress
 
 - [ ] Test first: a provisional GO on a base with no deploy.json prints the path and the ready JSON for that base
