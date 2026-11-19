@@ -289,6 +289,9 @@ cmd_spawn() {
     if [[ -n "$live" ]]; then printf '%s\n' "$live"; return 0; fi
   fi
 
+  # The memory floor: no worker limit, but never below policy.MEMORY_FLOOR_GB free.
+  python3 "$(dirname "${BASH_SOURCE[0]}")/memfloor.py" check --boss "$BOSS_PANE" || die "spawn refused (memory floor)"
+
   local pane
   pane=$(tmux split-window -d -c "$dir" -P -F '#{pane_id}')
   tmux select-layout tiled >/dev/null 2>&1 || true

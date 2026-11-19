@@ -80,11 +80,9 @@ QUOTES = {
         "the %s split fire first" % k(policy.WORKER_SPLIT),
         "They show up below %s too" % k(policy.WORKER_SPLIT),
         "A worker crossing %s is asked" % k(policy.WORKER_SPLIT),
-        "### 3. Span of control. Up to %d workers." % policy.BOSS_SPAN,
-        "as there is ready work, up to %d**" % policy.BOSS_SPAN,
-        "more than %d running" % policy.BOSS_SPAN,
-        "the\nteam is under %d" % policy.BOSS_SPAN,
-        "Already %d workers" % policy.BOSS_SPAN,
+        "### 3. Span of control. No limit, a %d GB memory floor." % policy.MEMORY_FLOOR_GB,
+        "less than %d GB of `MemAvailable`" % policy.MEMORY_FLOOR_GB,
+        "at least %s GB" % policy.WORKER_MIN_GB,
         "start with %d background\n   subagents, at most %d" % (policy.BURST_START, policy.BURST_MAX),
         "Codex counts as down after %d failed attempts in a row" % policy.CODEX_DOWN_AFTER,
         "as back after %d answered ones in a row" % policy.CODEX_UP_AFTER,
@@ -106,7 +104,7 @@ QUOTES = {
         "**Start with %d helpers, at most %d.**" % (policy.BURST_START, policy.BURST_MAX),
     ],
     "skills/hand-to-boss/brief-template.md": [
-        "%d is the span of control" % policy.BOSS_SPAN,
+        "no limit but %d GB of free memory" % policy.MEMORY_FLOOR_GB,
     ],
     "skills/boss/bin/boss-start": [
         "(workers use %s/%s)" % (k(policy.WORKER_SPLIT), k(policy.WORKER_OVER)),

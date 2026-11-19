@@ -249,6 +249,16 @@ def tickets_source(text: str) -> str:
     return ""
 
 
+WORKERS_RE = re.compile(r"^Workers:[ \t]*(\d+)[ \t]*(?:[-\u2013\u2014]+[ \t]*(.*?))?[ \t]*$", re.M)
+
+
+def workers_cap(text: str):
+    """A track's `Workers: N - <reason>` line as (N, reason), or None without the line.
+    The reason is "" when none is written; the pulse then ignores N."""
+    m = WORKERS_RE.search(_masked(text))
+    return (int(m.group(1)), (m.group(2) or "").strip()) if m else None
+
+
 def next_items(text: str) -> list:
     """Every non-blank line of `## Next, in priority order`, indent kept: what the
     pulse hands an idle worker when there is no ticket graph."""

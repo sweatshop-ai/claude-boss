@@ -41,6 +41,21 @@ class Status(unittest.TestCase):
         self.assertEqual(objective.status("# O\nno status\n"), "")
 
 
+class WorkersCap(unittest.TestCase):
+    def test_a_workers_line_gives_the_number_and_the_reason(self):
+        t = "# Objective\n\nWorkers: 3 \u2014 one change at a time on the plans-live box\n"
+        self.assertEqual(objective.workers_cap(t), (3, "one change at a time on the plans-live box"))
+
+    def test_a_hyphen_also_starts_the_reason(self):
+        self.assertEqual(objective.workers_cap("Workers: 2 - shared DB\n"), (2, "shared DB"))
+
+    def test_without_a_reason_the_reason_is_empty(self):
+        self.assertEqual(objective.workers_cap("Workers: 3\n"), (3, ""))
+
+    def test_no_line_no_cap(self):
+        self.assertIsNone(objective.workers_cap("# Objective\n\nWorkers are many.\n"))
+
+
 class SetStatus(unittest.TestCase):
     def test_rewrites_the_first_status_line_and_nothing_else(self):
         body = "# Objective — t\nkept note\n_Status: OPEN_\n## Outcome\nx\n_Status: OPEN_\n"

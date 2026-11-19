@@ -382,18 +382,23 @@ your one-task rule and the 150k split fire first.
 broadcast is the most expensive thing you can do; it should be rare and
 deliberate.
 
-### 3. Span of control. Up to 12 workers.
+### 3. Span of control. No limit, a 8 GB memory floor.
 
-**Run as many workers as there is ready work, up to 12** (the owner, 2026-10-21:
-finishing sooner is worth spending the week's budget sooner). The limit the owner
-actually hits is the weekly usage cap, not the five-hour one and not the machine;
-more workers spend that budget faster, they do not add to it. Every worker's
-report still lands in your context, so keep reports short and let workers
-coordinate peer-to-peer through `/team` while you handle dispatch, review and
-escalation.
+**Run as many workers as there is ready work** (the owner, 2026-11-19: a cap only
+spends slower). The pulse asks for one spawn per ready ticket beyond the idle
+workers, however many that is. What stops a team is memory: `boss-lifecycle.sh
+spawn` refuses when less than 8 GB of `MemAvailable` would remain after the new
+worker, and says so with the numbers (free memory, the worker's estimated cost,
+the floor). It estimates the worker from your current workers' resident
+size, at least 0.5 GB. A refused spawn is not an error to work around: dispatch
+to the idle workers you have and spawn again when memory frees up.
 
-If the owner wants more than 12 running, split them across two bosses on separate
-tracks rather than one boss holding all of it.
+A track may cap itself with a line `Workers: N - <reason>` in its goal file. The
+pulse honours N only when a reason is written, and shows it ("team 3 of 3: one
+change at a time on the plans-live box"). Without a reason the field is ignored
+and the pulse says so. Every worker's report still lands in your context, so keep
+reports short and let workers coordinate peer-to-peer through `/team` while you
+handle dispatch, review and escalation.
 
 ---
 
@@ -609,7 +614,7 @@ just finished a related task gets the follow-up. Otherwise pick an idle worker a
 **With a ticket graph, dispatch the whole frontier.** When the objective names
 `## Tickets`, the pulse lists every ready ticket. Give one to each idle worker in
 the same turn, not one per turn; when ready tickets outnumber idle workers and the
-team is under 12, spawn for the rest. Claim each ticket before its dispatch goes
+spawn for the rest (no limit but the memory floor). Claim each ticket before its dispatch goes
 out: `python3 ${CLAUDE_PLUGIN_ROOT}/skills/hand-to-boss/frontier.py claim <source>
 <NN> <worker>` (a folder gets a `**Claimed by:**` line, committed by path; a
 `gh:` source gets a `worker:<name>` label). When a ticket closes, run
@@ -1086,7 +1091,7 @@ Parse `$ARGUMENTS`: empty or `status` → **A** · `dispatch <task> [worker]` �
 1. **Validate the task.** Issue ref → `gh api repos/<owner>/<repo>/issues/<N>`
    (never `gh issue view`, broken here). Doesn't resolve → report and stop.
 2. **Pick the worker** per P6. None suitable → `spawn`, wait for it in
-   `list --mine` (spawn stamps it, so it appears there). Wrong project → `move`. Already 12 workers → see Span of control.
+   `list --mine` (spawn stamps it, so it appears there). Wrong project → `move`. Spawn refused for memory → see Span of control.
 3. **Preview the first dispatch** (skip once the owner grants autonomy): task,
    target, project, rationale.
 4. **Send a self-contained prompt** — task and issue number, how to read it, the

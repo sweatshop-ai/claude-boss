@@ -368,11 +368,12 @@ def main():
     decided = decided_blockers(tracker_text)
     source = objective.tickets_source(body)
     ready, broken = read_frontier(source, track) if source else ([], None)
+    cap, cap_reason = objective.workers_cap(body) or (0, "")
     facts = pulse.Facts(
         track=track, idle=idle, size=size, rungs=rungs, fired=fired,
         blockers=blockers, decided=decided, source=source, ready=ready, broken=broken,
         outcome=objective.section(body, "Outcome"), unmet=objective.unmet(body),
-        next_items=objective.next_items(body))
+        next_items=objective.next_items(body), cap=cap, cap_reason=cap_reason)
     decision = pulse.decide(facts)
     if decision is None:
         return 0                                  # team busy, nothing overdue
