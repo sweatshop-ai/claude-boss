@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# boss-park — why an idle worker is idle, and the event that ends it.
+exec python3 "$(dirname "$(readlink -f -- "${BASH_SOURCE[0]}")")/../park.py" "$@"

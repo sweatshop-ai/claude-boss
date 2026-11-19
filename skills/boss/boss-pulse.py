@@ -48,6 +48,7 @@ import boss_store  # noqa: E402
 import codex_blocker  # noqa: E402
 import fleet  # noqa: E402
 import objective  # noqa: E402
+import park  # noqa: E402
 import policy  # noqa: E402
 import pulse  # noqa: E402
 import registry  # noqa: E402
@@ -93,6 +94,54 @@ def team(sid):
     return idle, size
 
 
+def worker_statuses(sid):
+    """{name: status} of this boss's live workers, for a park on `worker:<name>`.
+
+    A name that is missing has ended: park.py counts that as finished. With no fleet to
+    read the answer is `None`, not `{}`, which would wake every such park."""
+    try:
+        seats = fleet.view(fleet.Tmux(timeout=3), registry.live(boss_store.config_dir()))
+    except fleet.TmuxUnavailable:
+        return None
+    me = fleet.seat_of(seats, sid=sid)
+    if not me:
+        return None
+    return {(s.session.get("name") or s.pane.coord): (s.session.get("status") or "")
+            for s in fleet.workers(seats, me.pane.id) if s.session}
+
+
+def woken_parks(sid, track, idle, done, tracker_text):
+    """(idle workers still without a park, the Woken parks of the idle ones).
+
+    A worker whose park still holds is not idle for the pulse. A park of a worker that is busy
+    or gone is left alone: only an idle worker is the boss's to dispatch."""
+    parks = park.read_parks(track)
+    if not parks:
+        return idle, ()
+    workers = worker_statuses(sid) if any(p.event.startswith("worker:") for p in parks.values()) else {}
+    if workers is None:                     # no fleet to read: a worker park is not woken on a guess
+        workers = {}
+        for p in parks.values():
+            if p.event.startswith("worker:"):
+                workers[p.event.partition(":")[2]] = "busy"
+    world = park.World(done=frozenset(done), workers=workers,
+                       blockers=tuple(tracker.blocker_lines(tracker_text)) if tracker_text else ())
+    now = time.time()
+    free, woken = [], []
+    for name, coord in idle:
+        p = parks.get(name)
+        if p and tracker_text is None and p.event.startswith("owner:"):
+            st = "waiting"                  # tracker unread: no blocker line proves nothing
+        else:
+            st = park.state(p, now, world) if p else None
+        if st == "waiting":
+            continue
+        free.append((name, coord))
+        if st:
+            woken.append(pulse.Woken(name, p.event, st, int((now - p.since) / 60)))
+    return free, tuple(woken)
+
+
 # ------------------------------------------------------------- ticket graph
 
 FRONTIER_PY = pulse.FRONTIER_PY
@@ -106,8 +155,17 @@ def ready_of(out):
     return ["%s %s" % (t["num"], t["title"]) for t in out["tickets"] if t["state"] == "ready"]
 
 
+def done_of(out):
+    return [t["num"] for t in out["tickets"] if t["state"] == "done"]
+
+
 def read_frontier(source, track):
-    """(ready tickets as "NN title", error) for the ticket graph at `source`.
+    ready, _, err = read_graph(source, track)
+    return ready, err
+
+
+def read_graph(source, track):
+    """(ready tickets as "NN title", numbers of the done tickets, error) for the graph at `source`.
 
     A folder is read the way `frontier.py` reads it, by importing it, so the
     pulse and the claim never disagree on what is ready. GitHub takes one call
@@ -147,20 +205,22 @@ def read_frontier(source, track):
                 except OSError:
                     pass
         if age is None:
-            return [], None
+            return [], [], None
         text = cache.read_text(encoding="utf-8", errors="replace")
         try:
-            return ready_of(json.loads(text)), None
+            out = json.loads(text)
+            return ready_of(out), done_of(out), None
         except (ValueError, KeyError, TypeError):
-            return [], text.strip()[:300] or "empty frontier cache"
+            return [], [], text.strip()[:300] or "empty frontier cache"
     import importlib.util
     spec = importlib.util.spec_from_file_location("frontier", str(FRONTIER_PY))
     fr = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(fr)
     tickets, errors = fr.load(source)
     if tickets is None or errors:
-        return [], "; ".join(errors)[:300]
-    return ready_of(fr.classify(tickets)), None
+        return [], [], "; ".join(errors)[:300]
+    out = fr.classify(tickets)
+    return ready_of(out), done_of(out), None
 
 
 def open_blockers(body):
@@ -379,12 +439,13 @@ def main():
     blockers = [] if concierge_holding(sid) else open_blockers(tracker_text)
     decided = decided_blockers(tracker_text)
     source = objective.tickets_source(body)
-    ready, broken = read_frontier(source, track) if source else ([], None)
+    ready, done, broken = read_graph(source, track) if source else ([], [], None)
+    idle, woken = woken_parks(sid, track, idle, done, tracker_text)
     facts = pulse.Facts(
         track=track, idle=idle, size=size, rungs=rungs, fired=fired,
         blockers=blockers, decided=decided, source=source, ready=ready, broken=broken,
         outcome=objective.section(body, "Outcome"), unmet=objective.unmet(body),
-        next_items=objective.next_items(body))
+        next_items=objective.next_items(body), parks=woken)
     decision = pulse.decide(facts)
     unassigned = len(ready) if source else len(facts.next_items)
     if decision is None:
