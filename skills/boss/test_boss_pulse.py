@@ -270,15 +270,16 @@ class Frontier(PulseCase):
         self.goal_with_tickets(self.issues)
         out = self.pulse_with_team([("Ada", "w:1.0"), ("Bo", "w:1.1")], size=2)
         self.assertIn("one ticket per idle worker until the READY list runs out", out)
-        self.assertIn("Spawn 1 more worker (team 2 of 12)", out)
+        self.assertIn("Spawn 1 more worker (team 2 now, no worker limit", out)
 
-    def test_a_full_team_is_not_asked_to_grow(self):
+    def test_a_large_team_is_still_asked_to_grow(self):
+        # no worker limit (2026-11-19): 12 running and 3 ready with one idle still spawns
         for n in range(1, 4):
             (self.issues / ("%02d-x.md" % n)).write_text(ticket("%02d" % n, "T%d" % n))
         self.goal_with_tickets(self.issues)
         out = self.pulse_with_team([("Ada", "w:1.0")], size=12)
         self.assertIn("Dispatch the READY tickets", out)
-        self.assertNotIn("Spawn", out)
+        self.assertIn("Spawn 2 more workers (team 12 now, no worker limit", out)
 
     def test_without_tickets_each_idle_worker_gets_a_next_item(self):
         out = self.pulse_with_team([("Ada", "w:1.0"), ("Bo", "w:1.1")], size=2)
@@ -291,7 +292,7 @@ class Frontier(PulseCase):
             encoding="utf-8")
         out = self.pulse_with_team([], size=1, names=["Ada"])
         self.assertIn("UNASSIGNED in NEXT: 3 of 4; marks naming a worker that is gone: Zed", out)
-        self.assertIn("Spawn up to 3 more workers (team 1 of 12) and dispatch the unassigned NEXT items", out)
+        self.assertIn("Spawn up to 3 more workers (team 1 now, no worker limit; the spawn refuses below 8 GB free memory) and dispatch the unassigned NEXT items", out)
 
     def test_a_github_graph_is_read_from_its_cache(self):
         """GitHub is too slow for a 5 s Stop hook: the pulse reads the last
@@ -415,7 +416,26 @@ class Frontier(PulseCase):
         out = self.pulse_with_team([("Ada", "w:1.0"), ("Bo", "w:1.1")], size=2)
         self.assertIn("one ticket per idle worker until the READY list runs out", out)
 
-    def test_every_idle_worker_up_to_the_span_is_named(self):
+    def test_a_workers_line_with_a_reason_caps_the_spawn_in_the_pulse_text(self):
+        for n in range(1, 6):
+            (self.issues / ("%02d-x.md" % n)).write_text(ticket("%02d" % n, "T%d" % n))
+        self.goal_with_tickets(self.issues)
+        path = self.tmp / "pm" / (TRACK + ".goal.md")
+        path.write_text(path.read_text() + "\nWorkers: 3 - one at a time on the plans-live box\n")
+        out = self.pulse_with_team([], size=1)
+        self.assertIn("Spawn 2 more workers (team 3 of 3: one at a time on the plans-live box)", out)
+
+    def test_a_workers_line_without_a_reason_is_ignored_and_says_so(self):
+        for n in range(1, 6):
+            (self.issues / ("%02d-x.md" % n)).write_text(ticket("%02d" % n, "T%d" % n))
+        self.goal_with_tickets(self.issues)
+        path = self.tmp / "pm" / (TRACK + ".goal.md")
+        path.write_text(path.read_text() + "\nWorkers: 3\n")
+        out = self.pulse_with_team([], size=1)
+        self.assertIn("Spawn 5 more workers", out)
+        self.assertIn("`Workers: 3` in the goal file is ignored", out)
+
+    def test_every_idle_worker_up_to_the_list_limit_is_named(self):
         idle = [("W%d" % i, "w:1.%d" % i) for i in range(12)]
         out = self.pulse_with_team(idle, size=12)
         self.assertIn("W11 (w:1.11)", out)

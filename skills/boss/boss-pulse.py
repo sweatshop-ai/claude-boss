@@ -443,12 +443,13 @@ def main():
     source = objective.tickets_source(body)
     ready, done, broken = read_graph(source, track) if source else ([], [], None)
     idle, woken = woken_parks(sid, track, idle, done, tracker_text)
+    cap, cap_reason = objective.workers_cap(body) or (None, "")
     facts = pulse.Facts(
         track=track, idle=idle, size=size, rungs=rungs, fired=fired,
         blockers=blockers, decided=decided, source=source, ready=ready, broken=broken,
         outcome=objective.section(body, "Outcome"), unmet=objective.unmet(body),
         next_items=objective.next_items(body), parks=woken,
-        workers=None if names is None else tuple(names))
+        workers=None if names is None else tuple(names), cap=cap, cap_reason=cap_reason)
     decision = pulse.decide(facts)
     unassigned = len(ready) if source else len(facts.next_items)
     if decision is None:

@@ -11,7 +11,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import policy  # noqa: E402
 import pulse  # noqa: E402
 
-SPAN = policy.BOSS_SPAN
 R = pulse.Rung
 W = pulse.Woken
 
@@ -30,15 +29,39 @@ class Decide(unittest.TestCase):
                                      size=2, ready=["01 API", "02 UI", "03 Docs"]))
         self.assertEqual(d.actions, [pulse.Action("dispatch-ready"), pulse.Action("spawn", 2)])
 
-    def test_the_spawn_stops_at_the_span(self):
-        d = pulse.decide(pulse.Facts(track="demo", source="issues", size=SPAN - 2,
-                                     ready=["%02d T" % n for n in range(5)]))
+    def test_twenty_ready_and_two_idle_ask_for_eighteen_spawns(self):
+        d = pulse.decide(pulse.Facts(track="demo", source="issues", size=14,
+                                     idle=[("Ada", "w:1.0"), ("Bo", "w:1.1")],
+                                     ready=["%02d T" % n for n in range(20)]))
+        self.assertEqual(d.actions, [pulse.Action("dispatch-ready"), pulse.Action("spawn", 18)])
+
+    def test_a_workers_line_with_a_reason_caps_the_spawn(self):
+        d = pulse.decide(pulse.Facts(track="demo", source="issues", size=1, cap=3,
+                                     cap_reason="one change at a time",
+                                     ready=["%02d T" % n for n in range(20)]))
         self.assertEqual(d.actions, [pulse.Action("spawn", 2)])
 
-    def test_a_full_team_dispatches_without_growing(self):
-        d = pulse.decide(pulse.Facts(track="demo", source="issues", idle=[("Ada", "w:1.0")],
-                                     size=SPAN, ready=["01 API", "02 UI"]))
-        self.assertEqual(kinds(d), ["dispatch-ready"])
+    def test_a_track_at_its_cap_gets_no_spawn_pulse(self):
+        # the merge desk: capped at 3, it was told "spawn 6" in 51 pulses
+        d = pulse.decide(pulse.Facts(track="demo", source="issues", size=3, cap=3,
+                                     cap_reason="one at a time",
+                                     ready=["%02d T" % n for n in range(9)]))
+        self.assertIsNone(d)
+
+    def test_a_cap_with_a_reason_also_caps_the_spawn_for_next_items(self):
+        d = pulse.decide(pulse.Facts(track="demo", size=1, cap=2, cap_reason="one at a time",
+                                     workers=("Ada",), next_items=["- a", "- b", "- c", "- d"]))
+        self.assertEqual(d.actions, [pulse.Action("spawn-next", 1)])
+
+    def test_a_zero_cap_with_a_reason_spawns_nothing(self):
+        d = pulse.decide(pulse.Facts(track="demo", source="issues", size=0, cap=0,
+                                     cap_reason="paused", ready=["01 T"]))
+        self.assertIsNone(d)
+
+    def test_a_cap_without_a_reason_does_not_cap(self):
+        d = pulse.decide(pulse.Facts(track="demo", source="issues", size=3, cap=3,
+                                     ready=["%02d T" % n for n in range(9)]))
+        self.assertEqual(d.actions, [pulse.Action("spawn", 9)])
 
     def test_nothing_ready_and_nobody_idle_is_silence(self):
         self.assertIsNone(pulse.decide(pulse.Facts(track="demo", source="issues", size=3)))
@@ -180,8 +203,20 @@ class Render(unittest.TestCase):
         self.assertIn("BLOCKED, and you are ending your turn without asking: "
                       "- waiting on the org", lines)
         self.assertTrue([x for x in lines if x.startswith("1. **Ask the owner")])
-        self.assertIn("2. Spawn 2 more workers (team 2 of %d) and dispatch the "
-                      "remaining READY tickets to them." % SPAN, lines)
+        self.assertIn("2. Spawn 2 more workers (team 2 now, no worker limit; the spawn "
+                      "refuses below %d GB free memory) and dispatch the remaining READY "
+                      "tickets to them." % policy.MEMORY_FLOOR_GB, lines)
+
+    def test_a_capped_spawn_line_gives_the_reason(self):
+        lines = self.say(source="issues", size=1, cap=3, cap_reason="one change at a time",
+                         ready=["01 API", "02 UI", "03 Docs"])
+        self.assertIn("1. Spawn 2 more workers (team 3 of 3: one change at a time) and "
+                      "dispatch the remaining READY tickets to them.", lines)
+
+    def test_a_cap_without_a_reason_is_ignored_with_a_note(self):
+        lines = self.say(source="issues", size=1, cap=3, ready=["01 API", "02 UI"])
+        self.assertIn("NOTE: `Workers: 3` in the goal file is ignored: it needs a reason "
+                      "(`Workers: 3 - <reason>`).", lines)
 
     def test_each_overdue_rung_is_named_and_the_first_is_run(self):
         lines = self.say(rungs=[R("ka", 60, 100, "- A blocked"), R("kb", 15, 20, "- B")])
@@ -208,8 +243,10 @@ class Render(unittest.TestCase):
         lines = self.say(size=1, workers=("Ada",),
                          next_items=["- a (→ Ada)", "- b (→ Zed)", "- c"])
         self.assertIn("UNASSIGNED in NEXT: 2 of 3; marks naming a worker that is gone: Zed", lines)
-        self.assertIn("1. Spawn up to 2 more workers (team 1 of %d) and dispatch the unassigned "
-                      "NEXT items to them; none for an item that waits on work in progress." % SPAN, lines)
+        self.assertIn("1. Spawn up to 2 more workers (team 1 now, no worker limit; the spawn "
+                      "refuses below %d GB free memory) and dispatch the unassigned "
+                      "NEXT items to them; none for an item that waits on work in progress."
+                      % policy.MEMORY_FLOOR_GB, lines)
 
     def test_prose_is_no_park_and_the_command_is_named(self):
         text = "\n".join(self.say(idle=[("Ada", "w:1.0")]))

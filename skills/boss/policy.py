@@ -6,6 +6,7 @@ Every threshold a boss or a worker acts on lives here, and only here:
   context bands   when a session's context calls for action, by role
   cost lines      when cost per turn calls for action
   escalation      the rungs at which a blocker on the owner is re-raised
+  memory floor    how much memory a spawn must leave free
   review waits    how long a PR review waits on Codex, on the fallback, on gh and on its lock
   review text     how much of a PR's text goes into the brief, and how much of the findings into the comment
   fallback call   the model, the tools and the permission mode of the read-only fallback reviewer
@@ -40,10 +41,15 @@ WORKER_SPLIT, WORKER_OVER = 150_000, 250_000
 # were 25% of the fleet's spend over 2026-11-13..15.
 BOSS_EVAL, BOSS_RESTART = 150_000, 250_000
 
-# How many workers one boss runs at once (2026-10-21, the owner: finish sooner,
-# spend the weekly budget sooner). The binding limit is the weekly usage cap,
-# not the machine; each report still lands in the boss's context.
-BOSS_SPAN = 12
+# No cap on how many workers one boss runs (2026-11-19, the owner: a cap only spends
+# slower). What limits a team is memory: a spawn is refused when less than
+# MEMORY_FLOOR_GB of MemAvailable would remain after it (memfloor.py). The new worker
+# is estimated from the boss's current workers, at least WORKER_MIN_GB. A track may
+# cap itself with `Workers: N - <reason>` in its goal file. LIST_MAX is how many ready
+# tickets and idle workers the pulse names; it limits the text, not the team.
+MEMORY_FLOOR_GB = 8
+WORKER_MIN_GB = 0.5
+LIST_MAX = 12
 
 # A burst: at most BURST_MAX helpers inside one worker, BURST_START by default.
 # Anthropic's agent-teams guide: "Start with 3-5 teammates for most workflows."

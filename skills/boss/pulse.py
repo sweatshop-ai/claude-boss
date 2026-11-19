@@ -41,11 +41,13 @@ FRONTIER_PY = Path(__file__).resolve().parent.parent / "hand-to-boss" / "frontie
 # workers: the names of all its live workers, to tell a NEXT mark from a stale one;
 # None when the roster could not be read, and no mark is called stale then.
 # parks: the Woken parks of idle workers (a park still waiting keeps its worker out of `idle`).
+# cap, cap_reason: the goal file's `Workers: N - <reason>` (cap None without the line);
+# N holds only with a reason.
 Facts = namedtuple(
     "Facts",
     "track idle size rungs fired blockers source ready broken outcome unmet next_items decided"
-    " parks workers",
-    defaults=((), 0, (), {}, (), "", (), None, "", (), (), (), (), None))
+    " parks workers cap cap_reason",
+    defaults=((), 0, (), {}, (), "", (), None, "", (), (), (), (), None, None, ""))
 # An idle worker's park that no longer holds: state `over` (its event happened) or `expired`.
 Woken = namedtuple("Woken", "worker event state minutes")
 # A blocker line whose rung has come due: key into `fired`, the rung, minutes
@@ -100,12 +102,23 @@ def _idle_names(facts):
 
 def _more_workers(demand, facts):
     """How many workers to add for `demand` open items: those the idle ones
-    cannot take, and room left in the team."""
-    return min(demand - len(facts.idle), policy.BOSS_SPAN - facts.size)
+    cannot take. No team limit but the one the track wrote with a reason; the
+    spawn path checks memory."""
+    n = demand - len(facts.idle)
+    if facts.cap is not None and facts.cap_reason:
+        n = min(n, facts.cap - facts.size)
+    return n
+
+
+def _team(facts, n):
+    if facts.cap is not None and facts.cap_reason:
+        return "team %d of %d: %s" % (facts.size + n, facts.cap, facts.cap_reason)
+    return ("team %d now, no worker limit; the spawn refuses below %d GB free memory"
+            % (facts.size, policy.MEMORY_FLOOR_GB))
 
 
 def decide(facts):
-    # More ready tickets than idle workers, and room left in the team.
+    # More ready tickets than idle workers: one new worker for each.
     spawn = _more_workers(len(facts.ready), facts) if not facts.broken else 0
     free = [] if facts.source else unassigned(facts.next_items, facts.workers, _idle_names(facts))[0]
     spawn_next = (_more_workers(len(free), facts)
@@ -175,7 +188,7 @@ def _woken_line(w):
 
 def _wake(facts, action):
     return "Wake the workers whose park no longer holds: " + "; ".join(
-        _woken_line(w) for w in facts.parks[:policy.BOSS_SPAN]) + "."
+        _woken_line(w) for w in facts.parks[:policy.LIST_MAX]) + "."
 
 
 def _dispatch_ready(facts, action):
@@ -185,15 +198,15 @@ def _dispatch_ready(facts, action):
 
 
 def _spawn(facts, action):
-    return ("Spawn %d more worker%s (team %d of %d) and dispatch the "
+    return ("Spawn %d more worker%s (%s) and dispatch the "
             "remaining READY tickets to them." % (
-                action.n, "s" if action.n > 1 else "", facts.size, policy.BOSS_SPAN))
+                action.n, "s" if action.n > 1 else "", _team(facts, action.n)))
 
 
 def _spawn_next(facts, action):
-    return ("Spawn up to %d more worker%s (team %d of %d) and dispatch the unassigned "
+    return ("Spawn up to %d more worker%s (%s) and dispatch the unassigned "
             "NEXT items to them; none for an item that waits on work in progress." % (
-                action.n, "s" if action.n > 1 else "", facts.size, policy.BOSS_SPAN))
+                action.n, "s" if action.n > 1 else "", _team(facts, action.n)))
 
 
 def _dispatch_next(facts, action):
@@ -228,8 +241,11 @@ def render(facts, decision):
     if facts.broken:
         lines.append("TICKET GRAPH BROKEN (%s): %s" % (facts.source, facts.broken))
     elif facts.source:
-        lines.append("READY NOW: " + ("; ".join(r[:60] for r in facts.ready[:policy.BOSS_SPAN])
+        lines.append("READY NOW: " + ("; ".join(r[:60] for r in facts.ready[:policy.LIST_MAX])
                                       or "none"))
+    if facts.cap is not None and not facts.cap_reason:
+        lines.append("NOTE: `Workers: %d` in the goal file is ignored: it needs a reason "
+                     "(`Workers: %d - <reason>`)." % (facts.cap, facts.cap))
     if facts.next_items and (facts.broken or not facts.source or not facts.ready):
         lines.append("NEXT, in priority order:")
         lines += ["  " + item[:160] for item in facts.next_items[:6]]
@@ -243,8 +259,8 @@ def render(facts, decision):
 
     if facts.idle:
         lines.append("IDLE NOW, yours: "
-                     + ", ".join("%s (%s)" % (n, c) for n, c in facts.idle[:policy.BOSS_SPAN]))
-    lines += [_woken_line(w) for w in facts.parks[:policy.BOSS_SPAN]]
+                     + ", ".join("%s (%s)" % (n, c) for n, c in facts.idle[:policy.LIST_MAX]))
+    lines += [_woken_line(w) for w in facts.parks[:policy.LIST_MAX]]
     for r in decision.overdue:
         lines.append("OVERDUE: blocker open %d min, rung %d due - %s" % (r.minutes, r.rung, r.line))
     if facts.decided:
