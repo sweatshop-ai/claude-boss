@@ -254,6 +254,10 @@ def parse_deploy(answer: bytes) -> Deploy:
                   tuple(conf["required_checks"]) if "required_checks" in conf else None)
 
 
+MISSING_DEPLOY_HINT = ("to merge here, commit .boss/deploy.json on %s with %s; that file is the owner's declaration "
+                       "that the branch deploys nothing, so write it only if that is true")
+
+
 def read_deploy(repo: str, base: str, io_timeout: float = policy.REVIEW_IO_TIMEOUT) -> Deploy:
     """`.boss/deploy.json` on `base`, as committed there. The branch is percent-encoded, so `release/1.0` is one value."""
     endpoint = "repos/%s/contents/.boss/deploy.json?ref=%s" % (repo, urllib.parse.quote(base, safe=""))
@@ -717,6 +721,8 @@ def merge(repo: str, pr: int, *, dry_run: bool = False, since: str | None = None
         if merged_since is not None and got.reason == "no-round":
             got, note = merged_base(everything, merged_since, seen, deploy, (key, pr), repo, io_timeout)
         line.update(round=got.round, kind=got.kind)
+        if got.exit == EXIT_DEPLOYING and deploy.state == "missing":
+            note += "; " + MISSING_DEPLOY_HINT % (seen.base, json.dumps({"version": 1, "non_deploying": [seen.base]}))
         if got.exit != EXIT_MERGED:
             return finish(got.exit, got.reason, "refused", note)
         queued = queue_problem(repo, pr, seen.base, io_timeout, line)       # before the dry run too: it must say what the merge would
