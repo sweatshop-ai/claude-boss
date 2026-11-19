@@ -48,6 +48,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import boss_store  # noqa: E402
 import codex_blocker  # noqa: E402
 import fleet  # noqa: E402
+import goal_graph  # noqa: E402
 import memfloor  # noqa: E402
 import objective  # noqa: E402
 import park  # noqa: E402
@@ -470,6 +471,11 @@ def main():
         return held("no-goal")                    # opt-in: no objective, no pulse
     if not objective.is_open(body):
         return held("objective-closed")           # paused, or met
+
+    try:
+        goal_graph.update(track, fetch=False)     # the graph at the top of the goal page; never in the way
+    except Exception:
+        pass
 
     # "Session is done" vs "session is paused waiting for background work" — the
     # runtime hands us the difference, so use it instead of guessing.

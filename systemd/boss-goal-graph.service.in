@@ -1,0 +1,16 @@
+# Written by install.sh from the plugin's template, which keeps the file it replaces as
+# <unit>.bak-<YYYY-MM-DD-HHMMSS>. bin/boss-link says at session start when this file is
+# out of date. Put a deliberate change in a drop-in, <unit>.d/override.conf, which is left alone.
+[Unit]
+Description=Redraw the ticket graph at the top of every open boss goal page
+Documentation=file://@ROOT@/skills/boss/goal_graph.py
+
+[Service]
+# @ROOT@ is the stable link routines/claude-boss, not a version directory;
+# bin/boss-link moves it on every session start, so a new plugin version needs no re-render;
+# a change to this template does, and boss-link says so.
+Type=oneshot
+ExecStart=@ROOT@/routines/boss-goal-graph.sh
+Environment=CLAUDE_CONFIG_DIR=@CFG@
+# Folder tickets are read in milliseconds; a GitHub graph read is capped at 30 s.
+TimeoutStartSec=60
