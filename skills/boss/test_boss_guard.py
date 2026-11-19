@@ -37,7 +37,7 @@ class GuardCase(unittest.TestCase):
         import shutil
         shutil.rmtree(self.tmp, ignore_errors=True)
 
-    def fire(self, command="rm -rf build", tool="Bash", sid=None, tool_input=None):
+    def fire(self, command="rm -rf build", tool="Bash", sid=None, tool_input=None, agent=False):
         """One PreToolUse call. Returns the additionalContext, or '' if silent."""
         if tool_input is None:
             tool_input = ({"command": command} if tool == "Bash"
@@ -48,6 +48,8 @@ class GuardCase(unittest.TestCase):
             "tool_name": tool,
             "tool_input": tool_input,
         }
+        if agent:
+            payload.update(agent_id="a1", agent_type="Explore")
         env = dict(os.environ, CLAUDE_CONFIG_DIR=str(self.cfg), HOME=str(self.cfg))
         res = subprocess.run([sys.executable, str(GUARD)], input=json.dumps(payload),
                              capture_output=True, text=True, env=env, timeout=15)
@@ -372,6 +374,46 @@ class StillFlagged(GuardCase):
         self.fire('echo "%s" >> ~/.claude/pm/a.md' % ("x" * 1_000_000))
         self.assertLess(time.monotonic() - started, 4)
         self.assertEqual(len(self.log_lines()), 1)
+
+
+class ReadOnlySubagent(GuardCase):
+    """An Explore or Plan subagent has no Edit, Write or NotebookEdit, so it is
+    coordination: the answer comes back to the boss and nothing is written."""
+
+    def spawn(self, **extra):
+        ti = {"description": "inventory", "prompt": "list the open PRs", "run_in_background": True}
+        ti.update(extra)
+        return self.fire(tool="Agent", tool_input=ti)
+
+    def test_an_unnamed_explore_or_plan_call_is_not_warned(self):
+        for kind in ("Explore", "Plan"):
+            self.assertEqual(self.spawn(subagent_type=kind), "", kind)
+
+    def test_it_is_still_logged_as_read_only(self):
+        self.spawn(subagent_type="Explore")
+        self.assertEqual([(l["tool"], l.get("kind")) for l in self.log_lines()],
+                         [("Agent", "read-only-subagent")])
+
+    def test_it_spends_none_of_the_warning_budget(self):
+        self.spawn(subagent_type="Explore")
+        self.assertIn("Dispatch it to a worker", self.fire("touch f"))
+
+    def test_a_subagents_own_calls_are_logged_and_spend_no_budget(self):
+        for _ in range(3):
+            self.fire(tool_input={"command": "touch f"}, tool="Bash", agent=True)
+        self.assertEqual([l.get("kind") for l in self.log_lines()], ["subagent-call"] * 3)
+        self.assertIn("Dispatch it to a worker", self.fire("touch g"))
+
+    def test_a_general_purpose_call_is_warned_as_before(self):
+        self.assertIn("Dispatch it to a worker", self.spawn(subagent_type="general-purpose"))
+        self.assertNotIn("kind", self.log_lines()[0])
+
+    def test_a_call_with_no_type_is_warned_as_before(self):
+        self.assertIn("Dispatch it to a worker", self.spawn())
+
+    def test_a_named_explore_call_is_still_a_teammate(self):
+        self.assertIn("agent-teams teammate", self.spawn(subagent_type="Explore", name="scout"))
+        self.assertNotIn("kind", self.log_lines()[0])
 
 
 class AgentTeams(GuardCase):
