@@ -115,6 +115,27 @@ class FixPass(base.Base):
         self.assertAsked(1)
 
 
+    def test_an_empty_fix_diff_is_usage(self):
+        self.first_round("FINDING: [SERIOUS] f.py:1 says old\nVERDICT: NO-GO")
+        base.git(self.sb, self.checkout, "commit", "-q", "--allow-empty", "-m", "nothing")
+        self.gh.set_pr(headRefOid=base.git(self.sb, self.checkout, "rev-parse", "HEAD"))
+        result = self.review(since=base.git(self.sb, self.checkout, "rev-parse", "HEAD~1"))
+        self.assertEqual((result.exit_code, result.round), (br.EXIT_USAGE, None))
+        self.assertAsked(1)
+
+    def test_a_sha_git_does_not_know_is_usage(self):
+        self.first_round("VERDICT: NO-GO")
+        record = self.record(1)
+        ghost = "e" * 40
+        path = next((br._reviews_dir()).rglob("round01.json"))
+        path.write_text(br.json.dumps(dict(record, head_sha=ghost)), encoding="utf-8")
+        second = self.commit("f.py", "new\n", "the fix")
+        self.gh.set_pr(headRefOid=second)
+        result = self.review(since=ghost)
+        self.assertEqual((result.exit_code, result.round), (br.EXIT_USAGE, None))
+        self.assertAsked(1)
+
+
 class DiffFiles(unittest.TestCase):
     def test_both_names_of_a_rename_and_none_for_a_quoted_name(self):
         self.assertEqual(br.diff_files("diff --git a/old.py b/new.py\nsimilarity index 90%\n"

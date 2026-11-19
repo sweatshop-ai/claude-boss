@@ -1415,7 +1415,8 @@ def diff_files(diff: str) -> list[str] | None:
 def _answered_round(job: _Job, seen: _Pr) -> tuple[str, str | None]:
     """For a fix pass: the findings of the highest round on file whose head is `job.since`, against this base, that
     decided (posted, or a NO-GO whose post failed), and why it cannot be one, else None. The head must also be a
-    descendant of `job.since`. _Infra when git cannot say."""
+    descendant of `job.since`; git is asked about `seen.head`, never the checkout's HEAD, which another session can
+    move. _Infra when git cannot say."""
     since = job.since
     if since == seen.head:
         return "", "--since %s is the head itself: there is no fix diff" % since
@@ -1433,7 +1434,9 @@ def _answered_round(job: _Job, seen: _Pr) -> tuple[str, str | None]:
             best = (rec["round"], path)
     if best is None:
         return "", "--since %s is the head of no round of PR %d that gave a verdict" % (since, job.pr)
-    run = _spawn(["git", "-C", job.checkout, "merge-base", "--is-ancestor", since, "HEAD"], job.io_timeout)
+    run = _spawn(["git", "-C", job.checkout, "merge-base", "--is-ancestor", since, seen.head], job.io_timeout)
+    if not run.timed_out and run.code == 128:
+        return "", "--since %s or the head %s is not a commit in %s" % (since, seen.head, job.checkout)
     if run.timed_out or run.code not in (0, 1):
         raise _Infra("git merge-base %s" % ("ran past %ss" % job.io_timeout if run.timed_out
                                             else "failed (%s): %s" % (run.code, run.err.strip()[-300:])))
@@ -1446,10 +1449,11 @@ def _answered_round(job: _Job, seen: _Pr) -> tuple[str, str | None]:
     return "\n".join(finding_lines(out)) or "(no finding was written)", None
 
 
-def _fix_diff(job: _Job) -> str:
-    """`git diff <since>..HEAD` in the checkout, read as UTF-8 with replacement."""
-    run = _spawn(["git", "-C", job.checkout, "diff", "--no-color", "--no-ext-diff", "--no-textconv",
-                  "%s..HEAD" % job.since], job.io_timeout)
+def _fix_diff(job: _Job, head: str) -> str:
+    """`git diff <since>..<head>` in the checkout, read as UTF-8 with replacement. Paths unquoted, as `gh pr diff`
+    writes them, so that diff_files reads both the same way."""
+    run = _spawn(["git", "-c", "core.quotePath=false", "-C", job.checkout, "diff", "--no-color", "--no-ext-diff",
+                  "--no-textconv", "%s..%s" % (job.since, head)], job.io_timeout)
     if run.timed_out or run.code != 0:
         raise _Infra("git diff %s" % ("ran past %ss" % job.io_timeout if run.timed_out
                                       else "failed (%s): %s" % (run.code, run.err.strip()[-300:])))
@@ -1524,7 +1528,9 @@ def review(repo: str, pr: int, checkout: str, author: str, *,
     except OSError as exc:
         return _failed("the hard-rules file cannot be read: %s" % exc)
     try:
-        diff = _fix_diff(job) if since else _pr_diff(job)
+        diff = _fix_diff(job, seen.head) if since else _pr_diff(job)
+        if since and not diff.strip():
+            return _refused("the fix diff %s..%s is empty: nothing to review" % (since, seen.head))
         files = diff_files(diff)
         # the diff is not pinned to the head that was read: the PR must still be that one
         recheck = _read_pr(job)
