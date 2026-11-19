@@ -71,6 +71,27 @@ class Lines(PulseCase):
         self.stop()
         self.assertEqual([l.split("\t")[2] for l in self.log()], ["fired", "rate-gate"])
 
+    def test_a_boss_with_no_track_is_named(self):
+        (self.tmp / "pm/.boss-sessions" / self.sid).write_text("\n")
+        self.assertEqual(self.stop(), "")
+        self.assertEqual([l.split("\t")[2] for l in self.log()], ["no-track"])
+
+    def test_a_session_that_is_not_a_boss_logs_nothing_and_writes_no_file(self):
+        before = sorted(str(p) for p in self.tmp.rglob("*"))
+        env = dict(os.environ, CLAUDE_CONFIG_DIR=str(self.tmp))
+        other = "11111111-2222-3333-4444-555555555555"
+        for payload in ({"session_id": other, "hook_event_name": "Stop"},
+                        {"session_id": "", "hook_event_name": "Stop"},
+                        {"hook_event_name": "Stop"},
+                        {"session_id": self.sid, "hook_event_name": "PreToolUse"}):
+            res = subprocess.run([sys.executable, str(PULSE)], input=json.dumps(payload),
+                                 capture_output=True, text=True, env=env, timeout=20)
+            self.assertEqual((res.returncode, res.stdout), (0, ""), res.stderr)
+        res = subprocess.run([sys.executable, str(PULSE)], input="not json",
+                             capture_output=True, text=True, env=env, timeout=20)
+        self.assertEqual((res.returncode, res.stdout), (0, ""), res.stderr)
+        self.assertEqual(sorted(str(p) for p in self.tmp.rglob("*")), before)
+
     def test_a_pulse_that_fires_writes_its_decision(self):
         self.tracker(blockers="- pick the org")
         self.assertNotEqual(self.stop(), "")
