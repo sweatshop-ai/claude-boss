@@ -251,7 +251,7 @@ def _retire(facts, action):
             "(`boss-lifecycle.sh retire <pane> --require-idle --kill`)." % (
                 " (after the refill, if it finds nothing)"
                 if not _entries(facts.next_items) else "",
-                ", ".join(names[:policy.BOSS_SPAN]), "it" if len(names) == 1 else "them"))
+                ", ".join(names[:policy.LIST_MAX]), "it" if len(names) == 1 else "them"))
 
 
 def _run_rung(facts, action):
@@ -267,13 +267,13 @@ def block_reason(facts, decision):
     """Why the turn may not end: each idle worker and the unassigned items, the ways out,
     then the pulse's own instructions."""
     work = open_work(facts)
-    names = _idle_names(facts)[:policy.BOSS_SPAN]
+    names = _idle_names(facts)[:policy.LIST_MAX]
     return ("[boss pulse - BLOCK] You may not end this turn: %s idle without a park while work "
             "is unassigned.\nIDLE: %s\nUNASSIGNED: %s\n"
             "The only ways out: dispatch each idle worker, or park it with `boss-park %s <worker> "
             "--until <event>` (%s; 2 h at most).\n\n%s" % (
-                ", ".join(names), ", ".join("%s (%s)" % (n, c) for n, c in facts.idle[:policy.BOSS_SPAN]),
-                "; ".join(w[:80] for w in work[:policy.BOSS_SPAN]), facts.track, park.allowed(),
+                ", ".join(names), ", ".join("%s (%s)" % (n, c) for n, c in facts.idle[:policy.LIST_MAX]),
+                "; ".join(w[:80] for w in work[:policy.LIST_MAX]), facts.track, park.allowed(),
                 render(facts, decision)))
 
 
