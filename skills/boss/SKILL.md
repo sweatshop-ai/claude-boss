@@ -658,7 +658,7 @@ finding `[SERIOUS]` (a wrong result, a crash, data loss, a security or privacy b
 `[MINOR]`, and to say NO-GO only when one is SERIOUS. A GO with MINOR findings stays a GO: fix them in the same
 push and merge, with no new round. After a NO-GO, the next round reads only the fix diff: add `--since SHA`, SHA
 being the head the NO-GO reviewed. The merge gate counts that GO only after a NO-GO or a GO with findings at SHA,
-and only when the fixes touch no file that round did not review; otherwise run a full round. Codex counts as down after 3 failed attempts in a row (`absent`, `timeout`, `error`;
+and only when the fixes touch no file that round did not review; otherwise run a full round. **Codex at its usage limit is skipped by itself (ticket 49).** When a Codex attempt fails with the usage-limit error, its reset time is kept in `pm/reviews/codex-limit.json` (one file per machine, every track and repo); until then a review with a fallback allowed runs the labelled Opus fallback at once (comment: `Codex skipped: usage limit until <UTC time>`, record: `codex_skipped`), writes nothing to the attempts log and is no Codex failure, and its GO is still listed for the Codex recheck. At the reset time it ends by itself; there is no switch. Codex counts as down after 3 failed attempts in a row (`absent`, `timeout`, `error`;
 all repos together) and as back after 2 answered ones in a row (`codex_health.py` reads the attempts log).
 Pass `--track T` (the track from your dispatch header) and the same command raises a `Codex down` blocker in `pm/T.md` after the 3rd failure, with a ladder marker and a `boss-alert 0`, and clears it after the 2nd answer (`codex_blocker.py`); without it nothing is written to a tracker.
 
