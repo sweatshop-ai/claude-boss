@@ -12,8 +12,8 @@ Updates go to the cross-track boss (`~/.claude/pm/cross-track.md`), not to Rocco
 
 **Claimed by:** Rafael (2026-11-19, inside ticket 48)
 
-**Status:** open
+**Status:** done (in PR 159, merge eeb789b, 2026-11-19)
 
-- [ ] Test first: the brief built with `--since` carries `git diff SHA..HEAD`, not `git diff BASE...HEAD`, and the previous round's findings
-- [ ] A SHA that is no round's head, or not an ancestor, is exit 2
-- [ ] The merge rule above is tested
+- [x] Test first: the brief built with `--since` carries `git diff SHA..HEAD`, not `git diff BASE...HEAD`, and the previous round's findings
+- [x] A SHA that is no round's head, or not an ancestor, is exit 2
+- [x] The merge rule above is tested
