@@ -13,7 +13,6 @@ flowchart TD
   t03 --> t04
   t04 --> t05
   x1 -.-> t05
-  linkStyle default stroke:#8a8a8a,stroke-width:2px
   classDef done fill:#d4f0da,stroke:#2e7d32,color:#16361c
   classDef claimed fill:#d6e5fa,stroke:#1f5fb4,color:#0e2a52
   classDef ready fill:#fbe8c0,stroke:#b7791f,color:#46300a
