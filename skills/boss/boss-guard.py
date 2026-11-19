@@ -49,6 +49,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import boss_store  # noqa: E402
 import consent  # noqa: E402
 import fleet  # noqa: E402
+import park  # noqa: E402
 import registry  # noqa: E402
 
 
@@ -68,6 +69,7 @@ ALLOWED_CMD = re.compile(
     r"(?:\S*/)?boss-goal|"
     r"(?:\S*/)?boss-start|"
     r"(?:\S*/)?boss-unask|"
+    r"(?:\S*/)?boss-park|"
     r"(?:\S*/)?boss-panes\.py|"
     r"(?:\S*/)?boss-run\b|"
     r"(?:\S*/)?team-line\b|"
@@ -418,6 +420,16 @@ def concierge_name(sid):
     return (seat.session.get("name") or seat.pane.coord) if seat else None
 
 
+def drop_park(sid, to):
+    """A message from the boss to a worker is a dispatch: that worker's park ends (pulse-park/03)."""
+    track = boss_store.track_of(sid)
+    if track and isinstance(to, str):
+        try:
+            park.clear(track, to)
+        except OSError:
+            pass
+
+
 def main():
     try:
         payload = json.load(sys.stdin)
@@ -435,8 +447,11 @@ def main():
         return 0
     if tool == "SendMessage":
         msg = (payload.get("tool_input") or {}).get("message")
-        if isinstance(msg, str) and ASK_MESSAGE.match(msg) and needs_paste(msg):
-            deny(PASTE_DENIAL)
+        if isinstance(msg, str) and ASK_MESSAGE.match(msg):
+            if needs_paste(msg):
+                deny(PASTE_DENIAL)
+        else:
+            drop_park(sid, (payload.get("tool_input") or {}).get("to"))
         return 0
     if tool == "AskUserQuestion":
         if needs_paste(question_text(ti_questions(payload))):
