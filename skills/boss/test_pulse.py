@@ -47,6 +47,11 @@ class Decide(unittest.TestCase):
                                      ready=["%02d T" % n for n in range(9)]))
         self.assertIsNone(d)
 
+    def test_a_zero_cap_with_a_reason_spawns_nothing(self):
+        d = pulse.decide(pulse.Facts(track="demo", source="issues", size=0, cap=0,
+                                     cap_reason="paused", ready=["01 T"]))
+        self.assertIsNone(d)
+
     def test_a_cap_without_a_reason_does_not_cap(self):
         d = pulse.decide(pulse.Facts(track="demo", source="issues", size=3, cap=3,
                                      ready=["%02d T" % n for n in range(9)]))

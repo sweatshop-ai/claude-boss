@@ -32,12 +32,13 @@ FRONTIER_PY = Path(__file__).resolve().parent.parent / "hand-to-boss" / "frontie
 # source: the ticket graph, "" for none; ready: "NN title"; broken: its error.
 # outcome, unmet, next_items: from the objective, for the text only.
 # decided: blockers the owner has answered; shown, never asked again.
-# cap, cap_reason: the goal file's `Workers: N - <reason>`; N holds only with a reason.
+# cap, cap_reason: the goal file's `Workers: N - <reason>` (cap None without the line);
+# N holds only with a reason.
 Facts = namedtuple(
     "Facts",
     "track idle size rungs fired blockers source ready broken outcome unmet next_items decided"
     " cap cap_reason",
-    defaults=((), 0, (), {}, (), "", (), None, "", (), (), (), 0, ""))
+    defaults=((), 0, (), {}, (), "", (), None, "", (), (), (), None, ""))
 # A blocker line whose rung has come due: key into `fired`, the rung, minutes
 # since its T+0, the line.
 Rung = namedtuple("Rung", "key rung minutes line")
@@ -49,7 +50,7 @@ def decide(facts):
     # More ready tickets than idle workers: one new worker for each. No team limit
     # but the one the track wrote with a reason; the spawn path checks memory.
     spawn = len(facts.ready) - len(facts.idle) if not facts.broken else 0
-    if facts.cap and facts.cap_reason:
+    if facts.cap is not None and facts.cap_reason:
         spawn = min(spawn, facts.cap - facts.size)
     if (not facts.idle and not facts.rungs and not facts.blockers and not facts.broken
             and spawn <= 0):
@@ -102,7 +103,7 @@ def _dispatch_ready(facts, action):
 
 
 def _spawn(facts, action):
-    if facts.cap and facts.cap_reason:
+    if facts.cap is not None and facts.cap_reason:
         team = "team %d of %d: %s" % (facts.size + action.n, facts.cap, facts.cap_reason)
     else:
         team = ("team %d now, no worker limit; the spawn refuses below %d GB free memory"
@@ -144,7 +145,7 @@ def render(facts, decision):
     elif facts.source:
         lines.append("READY NOW: " + ("; ".join(r[:60] for r in facts.ready[:policy.LIST_MAX])
                                       or "none"))
-    if facts.cap and not facts.cap_reason:
+    if facts.cap is not None and not facts.cap_reason:
         lines.append("NOTE: `Workers: %d` in the goal file is ignored: it needs a reason "
                      "(`Workers: %d - <reason>`)." % (facts.cap, facts.cap))
     if facts.next_items and (facts.broken or not facts.source or not facts.ready):

@@ -368,7 +368,7 @@ def main():
     decided = decided_blockers(tracker_text)
     source = objective.tickets_source(body)
     ready, broken = read_frontier(source, track) if source else ([], None)
-    cap, cap_reason = objective.workers_cap(body) or (0, "")
+    cap, cap_reason = objective.workers_cap(body) or (None, "")
     facts = pulse.Facts(
         track=track, idle=idle, size=size, rungs=rungs, fired=fired,
         blockers=blockers, decided=decided, source=source, ready=ready, broken=broken,

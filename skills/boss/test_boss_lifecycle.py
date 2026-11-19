@@ -655,7 +655,7 @@ class RestartKeepsName(unittest.TestCase):
         (self.tmp / "cmd").write_text("bash\n")
         env = dict(os.environ, PATH="%s:%s" % (self.tmp / "bin", os.environ["PATH"]), TMUX="stub",
                    TMUX_PANE="%1", STUB_DIR=str(self.tmp), STUB_ROW="w-sid\tidle\tpin1",
-                   BOSS_MEMINFO=self.meminfo(40))
+                   BOSS_MEMINFO=self.meminfo(1))
         r = subprocess.run(["bash", str(self.tmp / "boss-lifecycle.sh"), "spawn", str(self.tmp), "--concierge"],
                            env=env, capture_output=True, text=True, timeout=60)
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -675,7 +675,7 @@ class RestartKeepsName(unittest.TestCase):
         (self.tmp / "cmd").write_text("bash\n")
         env = dict(os.environ, PATH="%s:%s" % (self.tmp / "bin", os.environ["PATH"]), TMUX="stub",
                    TMUX_PANE="%1", STUB_DIR=str(self.tmp), STUB_ROW="w-sid\tidle\tpin1",
-                   BOSS_MEMINFO=self.meminfo(8))
+                   BOSS_MEMINFO=self.meminfo(8), CLAUDE_CONFIG_DIR=str(self.tmp))
         r = subprocess.run(["bash", str(self.tmp / "boss-lifecycle.sh"), "spawn", str(self.tmp)],
                            env=env, capture_output=True, text=True, timeout=60)
         self.assertNotEqual(r.returncode, 0)

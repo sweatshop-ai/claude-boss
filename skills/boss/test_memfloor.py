@@ -56,6 +56,13 @@ class Reading(unittest.TestCase):
             self.assertEqual(r.returncode, 1)
             self.assertIn("8.0 GB free", r.stderr)
 
+    def test_an_unreadable_meminfo_refuses_without_a_traceback(self):
+        r = subprocess.run([sys.executable, str(HERE / "memfloor.py"), "check", "--meminfo", "/nonexistent"],
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("cannot read MemAvailable", r.stderr)
+        self.assertNotIn("Traceback", r.stderr)
+
     def test_the_command_passes_with_room(self):
         with tempfile.TemporaryDirectory() as d:
             f = Path(d) / "meminfo"

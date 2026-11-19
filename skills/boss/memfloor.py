@@ -69,7 +69,12 @@ def main(argv):
         return 2
     opt = dict(zip(argv[1::2], argv[2::2]))
     rss = boss_worker_rss(opt["--boss"]) if opt.get("--boss") else []
-    msg = refusal(mem_available_kb(opt.get("--meminfo") or os.environ.get("BOSS_MEMINFO") or "/proc/meminfo"), rss)
+    try:
+        avail = mem_available_kb(opt.get("--meminfo") or os.environ.get("BOSS_MEMINFO") or "/proc/meminfo")
+    except (OSError, ValueError) as e:
+        print("not spawning: cannot read MemAvailable (%s)" % e, file=sys.stderr)
+        return 1
+    msg = refusal(avail, rss)
     if msg:
         print(msg, file=sys.stderr)
         return 1

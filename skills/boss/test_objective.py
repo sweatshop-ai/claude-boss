@@ -52,6 +52,9 @@ class WorkersCap(unittest.TestCase):
     def test_without_a_reason_the_reason_is_empty(self):
         self.assertEqual(objective.workers_cap("Workers: 3\n"), (3, ""))
 
+    def test_a_number_followed_by_something_else_has_no_reason(self):
+        self.assertEqual(objective.workers_cap("Workers: 3 (shared DB)\n"), (3, ""))
+
     def test_no_line_no_cap(self):
         self.assertIsNone(objective.workers_cap("# Objective\n\nWorkers are many.\n"))
 

@@ -289,8 +289,11 @@ cmd_spawn() {
     if [[ -n "$live" ]]; then printf '%s\n' "$live"; return 0; fi
   fi
 
-  # The memory floor: no worker limit, but never below policy.MEMORY_FLOOR_GB free.
-  python3 "$(dirname "${BASH_SOURCE[0]}")/memfloor.py" check --boss "$BOSS_PANE" || die "spawn refused (memory floor)"
+  # The memory floor: no worker limit, but never below policy.MEMORY_FLOOR_GB free. A
+  # concierge is exempt: it holds the owner's questions and is the cheapest session there is.
+  if [[ -z "$ROLE" ]]; then
+    python3 "$(dirname "${BASH_SOURCE[0]}")/memfloor.py" check --boss "$BOSS_PANE" || die "spawn refused (memory floor)"
+  fi
 
   local pane
   pane=$(tmux split-window -d -c "$dir" -P -F '#{pane_id}')
