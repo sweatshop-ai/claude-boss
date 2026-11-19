@@ -6,7 +6,9 @@ Check that the SKILL.md sections written by 01-07 read as one text.
 
 **Blocked by:** 01, 02, 03, 04, 05, 06, 07
 
-**Status:** ready-for-agent
+**Claimed by:** Zainab 2026-11-19 19:08
+
+**Status:** in-progress
 
 - [ ] CHANGELOG entry and version bump in the plugin manifest
 - [ ] SKILL.md mentions `boss-park`, the five events, the 2 h limit, the block and the memory floor once each
