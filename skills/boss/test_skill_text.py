@@ -187,5 +187,24 @@ class CodexDownChoice(unittest.TestCase):
         self.assertIn("the owner's merge on tests alone", MergeRule.RULE)
 
 
+class PulsePark(unittest.TestCase):
+    """Pulse-park ticket 03: a park is a command and a checked event, never prose."""
+
+    def test_the_command_the_three_local_events_and_the_two_hours_are_named(self):
+        text = flat()
+        self.assertIn("`boss-park <track> <worker> --until <event>`", text)
+        for event in ("`ticket:<id>`", "`worker:<name>`", "`owner:<question id>`"):
+            self.assertIn(event, text)
+        self.assertIn("a clock time is not an event", text)
+        self.assertIn("ends after 2 hours at most", text)
+
+    def test_below_the_floor_the_longest_parked_worker_is_retired_first(self):
+        """Pulse-park ticket 07."""
+        text = flat()
+        self.assertIn("retire the worker parked longest", text)
+        self.assertIn("keeping its park recorded", text)
+        self.assertIn("start nobody", text)
+
+
 if __name__ == "__main__":
     unittest.main()

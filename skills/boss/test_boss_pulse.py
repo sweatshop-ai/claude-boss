@@ -21,6 +21,14 @@ PULSE = Path(__file__).resolve().parent / "boss-pulse.py"
 TRACK = "demo"
 
 
+def spoken(text):
+    """What the boss reads: the context of a pulse, or the reason of a Stop block."""
+    if not text:
+        return ""
+    out = json.loads(text)
+    return out["reason"] if out.get("decision") == "block" else out["hookSpecificOutput"]["additionalContext"]
+
+
 class PulseCase(unittest.TestCase):
 
     def setUp(self):
@@ -31,15 +39,17 @@ class PulseCase(unittest.TestCase):
         (self.tmp / "pm/.boss-sessions" / self.sid).write_text(TRACK + "\n")
         self.goal(open_=True)
         self.tracker(blockers="")
+        self.meminfo = self.tmp / "meminfo"
+        self.meminfo.write_text("MemAvailable:   67108864 kB\n")     # 64 GB free: the floor holds
 
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
-    def goal(self, open_=True):
+    def goal(self, open_=True, next_="- do a thing"):
         (self.tmp / "pm" / (TRACK + ".goal.md")).write_text(
             "# Objective\n\n_Status: %s_\n\n## Outcome\nShip the thing.\n\n"
-            "## Done when\n- [ ] it ships\n\n## Next, in priority order\n- do a thing\n"
-            % ("OPEN" if open_ else "MET"), encoding="utf-8")
+            "## Done when\n- [ ] it ships\n\n## Next, in priority order\n%s\n"
+            % ("OPEN" if open_ else "MET", next_), encoding="utf-8")
 
     def tracker(self, blockers=""):
         (self.tmp / "pm" / (TRACK + ".md")).write_text(
@@ -57,12 +67,12 @@ class PulseCase(unittest.TestCase):
     def stop(self, sid=None):
         payload = {"session_id": sid or self.sid, "hook_event_name": "Stop",
                    "stop_hook_active": False}
-        env = dict(os.environ, CLAUDE_CONFIG_DIR=str(self.tmp))
+        env = dict(os.environ, CLAUDE_CONFIG_DIR=str(self.tmp), BOSS_MEMINFO=str(self.meminfo))
         res = subprocess.run([sys.executable, str(PULSE)], input=json.dumps(payload),
                              capture_output=True, text=True, env=env, timeout=20)
         self.assertEqual(res.returncode, 0, res.stderr)
         out = res.stdout.strip()
-        return json.loads(out)["hookSpecificOutput"]["additionalContext"] if out else ""
+        return spoken(out)
 
 
 class StuckBoss(PulseCase):
@@ -75,6 +85,7 @@ class StuckBoss(PulseCase):
         self.assertIn("pick the org", out)
 
     def test_no_blocker_no_pulse(self):
+        self.goal(next_="- do a thing (→ Ada)")     # all of NEXT is being worked
         self.assertEqual(self.stop(), "",
                          "a boss with nothing open must stay silent")
 
@@ -176,7 +187,7 @@ class Frontier(PulseCase):
         return self.tmp / "pm/.pulse" / ("%s.%s.frontier.json" % (
             TRACK, hashlib.sha1(source.encode()).hexdigest()[:10]))
 
-    def pulse_with_team(self, idle, size, holding=False):
+    def pulse_with_team(self, idle, size, holding=False, names=None, statuses=None, memshort=""):
         """Run main() in-process with a stand-in for the tmux roster."""
         import contextlib
         import importlib.util
@@ -187,8 +198,10 @@ class Frontier(PulseCase):
             spec = importlib.util.spec_from_file_location("pulse_%d" % time.monotonic_ns(), str(PULSE))
             mod = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(mod)
-            mod.team = lambda sid: (idle, size)
+            mod.team = lambda sid: (idle, size, [n for n, _ in idle] if names is None else names)
             mod.concierge_holding = lambda sid: holding
+            mod.worker_statuses = lambda sid: dict(statuses or {})
+            mod.memory_short = lambda sid: memshort
             payload = {"session_id": self.sid, "hook_event_name": "Stop", "stop_hook_active": False}
             out, stdin = io.StringIO(), sys.stdin
             sys.stdin = io.StringIO(json.dumps(payload))
@@ -203,7 +216,207 @@ class Frontier(PulseCase):
             else:
                 os.environ["CLAUDE_CONFIG_DIR"] = old
         text = out.getvalue().strip()
-        return json.loads(text)["hookSpecificOutput"]["additionalContext"] if text else ""
+        return spoken(text)
+
+    def park(self, worker, event, age_s=60):
+        import park
+        park.set_park(TRACK, worker, event, now=time.time() - age_s, cfg=self.tmp)
+
+    def graph_one_done_one_open(self):
+        (self.issues / "11-api.md").write_text(ticket("11", "API", status="done"))
+        (self.issues / "12-ui.md").write_text(ticket("12", "UI", claimed="Bea 2026-11-19 10:00",
+                                                      status="in-progress"))
+        self.goal_with_tickets(self.issues)
+
+    def test_a_worker_parked_on_an_open_ticket_is_not_idle(self):
+        self.graph_one_done_one_open()
+        self.park("Ada", "ticket:12")
+        self.assertEqual(self.pulse_with_team([("Ada", "w:1.0")], 2), "")
+
+    def test_a_park_on_a_ticket_wakes_when_the_frontier_reports_it_done(self):
+        self.graph_one_done_one_open()
+        self.park("Ada", "ticket:11")
+        out = self.pulse_with_team([("Ada", "w:1.0")], 2)
+        self.assertIn("Ada's wait is over (ticket 11 done): dispatch it", out)
+
+    def test_a_park_on_a_worker_wakes_when_that_worker_goes_idle(self):
+        self.graph_one_done_one_open()
+        self.park("Ada", "worker:Bea")
+        self.assertEqual(self.pulse_with_team([("Ada", "w:1.0")], 2, statuses={"Bea": "busy"}), "")
+        out = self.pulse_with_team([("Ada", "w:1.0"), ("Bea", "w:1.1")], 2,
+                                   statuses={"Bea": "idle", "Ada": "idle"})
+        self.assertIn("Ada's wait is over (Bea finished)", out)
+
+    def test_a_park_on_the_owner_wakes_when_the_blocker_is_cleared(self):
+        self.graph_one_done_one_open()
+        self.tracker(blockers="- the org name q7")
+        self.park("Ada", "owner:q7")
+        self.assertEqual(self.pulse_with_team([("Ada", "w:1.0")], 2, holding=True), "")
+        self.tracker(blockers="")
+        out = self.pulse_with_team([("Ada", "w:1.0")], 2)
+        self.assertIn("Ada's wait is over (q7 answered)", out)
+
+    def test_an_unreadable_tracker_does_not_wake_an_owner_park(self):
+        self.graph_one_done_one_open()
+        self.park("Ada", "owner:q7")
+        (self.tmp / "pm" / (TRACK + ".md")).unlink()
+        self.assertEqual(self.pulse_with_team([("Ada", "w:1.0")], 2), "")
+
+    def test_a_park_older_than_two_hours_is_reported_expired(self):
+        self.graph_one_done_one_open()
+        self.park("Ada", "ticket:12", age_s=2 * 3600 + 60)
+        out = self.pulse_with_team([("Ada", "w:1.0")], 2)
+        self.assertIn("Ada has waited 2 h on ticket:12: dispatch, re-park or retire", out)
+
+    SHORT = ("not spawning: 6.0 GB free, a new worker costs about 1.0 GB, and the 8 GB floor "
+             "would not hold (5.0 GB left)")
+
+    def one_ready_one_busy(self):
+        (self.issues / "12-ui.md").write_text(ticket("12", "UI", claimed="Cy 2026-11-19 10:00",
+                                                      status="in-progress"))
+        (self.issues / "13-docs.md").write_text(ticket("13", "Docs"))
+        self.goal_with_tickets(self.issues)
+
+    def reopen_gate(self):
+        """Let the next pulse speak: forget the last one (the 60 s rate gate)."""
+        import boss_store
+        boss_store.state_path(self.sid, "pulse", self.tmp).unlink(missing_ok=True)
+
+    def silence_lines(self):
+        return (self.tmp / "pm/.pulse" / (self.sid + ".silence.log")).read_text().splitlines()
+
+    def test_a_refused_spawn_with_two_parked_workers_names_the_one_parked_longest(self):
+        self.one_ready_one_busy()
+        self.park("Ada", "ticket:12", age_s=20 * 60)
+        self.park("Bea", "ticket:12", age_s=95 * 60)
+        out = self.pulse_with_team([("Ada", "w:1.0"), ("Bea", "w:1.1")], 3, memshort=self.SHORT)
+        self.assertIn("Retire Bea (parked 1 h 35 min on ticket:12)", out)
+        self.assertNotIn("Retire Ada", out)
+        self.assertIn(self.SHORT, out)
+        self.assertNotIn("Spawn 1", out)
+
+    def test_a_refused_spawn_with_nobody_parked_is_silent_and_logs_free_memory_and_floor(self):
+        self.one_ready_one_busy()
+        out = self.pulse_with_team([], 1, memshort=self.SHORT)
+        self.assertEqual(out, "")
+        line = self.silence_lines()[-1].split("\t")
+        self.assertEqual(line[2], "memory-short")
+        self.assertIn("6.0 GB free", line[-1])
+        self.assertIn("8 GB floor", line[-1])
+
+    def test_enough_memory_spawns_as_before(self):
+        self.one_ready_one_busy()
+        self.park("Bea", "ticket:12", age_s=95 * 60)
+        out = self.pulse_with_team([("Bea", "w:1.1")], 2)
+        self.assertIn("Spawn 1", out)
+        self.assertNotIn("Retire", out)
+
+    def test_a_retired_workers_park_stays_recorded_and_wakes_when_its_event_happens(self):
+        import park
+        self.one_ready_one_busy()
+        self.park("Bea", "ticket:12", age_s=95 * 60)
+        self.assertTrue(park.retire(TRACK, "Bea", self.tmp))
+        # Bea is gone from the roster and her park holds: recorded, silent
+        out = self.pulse_with_team([], 1, memshort=self.SHORT)
+        self.assertEqual(out, "")
+        self.assertEqual(park.read_parks(TRACK, self.tmp)["retired:Bea"].event, "ticket:12")
+        # the ticket she waited on is done: the pulse says to hand her work on
+        (self.issues / "12-ui.md").write_text(ticket("12", "UI", status="done"))
+        out = self.pulse_with_team([], 1)
+        self.assertIn("Bea was retired for memory and its wait on ticket:12 has ended", out)
+
+    def test_a_new_worker_with_a_retired_workers_name_does_not_inherit_its_park(self):
+        import park
+        self.one_ready_one_busy()
+        self.park("Bea", "ticket:12", age_s=95 * 60)
+        park.retire(TRACK, "Bea", self.tmp)
+        out = self.pulse_with_team([("Bea", "w:1.1")], 2)
+        self.assertIn("IDLE NOW, yours: Bea", out)
+        # her event happens while a new Bea is idle: the retired park is still reported
+        self.reopen_gate()
+        (self.issues / "12-ui.md").write_text(ticket("12", "UI", status="done"))
+        out = self.pulse_with_team([("Bea", "w:1.1")], 2)
+        self.assertIn("Bea was retired for memory and its wait on ticket:12 has ended", out)
+
+    def test_a_worker_whose_name_has_a_kept_retired_park_is_not_offered_to_retire(self):
+        import park
+        self.one_ready_one_busy()
+        self.park("Bea", "ticket:12", age_s=95 * 60)
+        park.retire(TRACK, "Bea", self.tmp, now=time.time() - 3600)      # past the 15 min gap
+        self.park("Bea", "ticket:12", age_s=30 * 60)                     # a new Bea, parked
+        out = self.pulse_with_team([("Bea", "w:1.1")], 2, memshort=self.SHORT)
+        self.assertNotIn("Retire Bea", out)
+
+    def test_right_after_a_retire_nobody_else_is_offered_to_be_retired(self):
+        import park
+        self.one_ready_one_busy()
+        self.park("Ada", "ticket:12", age_s=20 * 60)
+        self.park("Bea", "ticket:12", age_s=95 * 60)
+        out = self.pulse_with_team([("Ada", "w:1.0"), ("Bea", "w:1.1")], 3, memshort=self.SHORT)
+        self.assertIn("Retire Bea", out)
+        park.retire(TRACK, "Bea", self.tmp)
+        self.reopen_gate()
+        out = self.pulse_with_team([("Ada", "w:1.0")], 2, memshort=self.SHORT)
+        self.assertEqual(out, "")                        # silent: nobody is offered to retire
+        self.assertEqual(self.silence_lines()[-1].split("\t")[2], "memory-short")
+
+    def test_an_expired_park_is_dispatched_not_retired_when_memory_is_short(self):
+        self.one_ready_one_busy()
+        self.park("Bea", "ticket:12", age_s=2 * 3600 + 60)
+        out = self.pulse_with_team([("Bea", "w:1.1")], 2, memshort=self.SHORT)
+        self.assertNotIn("Retire Bea", out)
+        self.assertIn("Bea has waited 2 h on ticket:12", out)
+
+    def test_an_idle_worker_without_a_park_is_still_named_beside_a_parked_one(self):
+        self.graph_one_done_one_open()
+        self.park("Ada", "ticket:12")
+        out = self.pulse_with_team([("Ada", "w:1.0"), ("Cy", "w:1.2")], 3)
+        self.assertIn("IDLE NOW, yours: Cy (w:1.2)", out)
+        self.assertNotIn("Ada", out.split("IDLE NOW")[1].splitlines()[0])
+
+    def with_gh(self, answer):
+        import park
+        old, park.gh_run = park.gh_run, lambda args, timeout: answer
+        self.addCleanup(setattr, park, "gh_run", old)
+
+    def test_a_worker_parked_on_the_ci_of_its_pr_is_not_idle_until_ci_ends(self):
+        self.graph_one_done_one_open()
+        self.park("Ada", "ci:acme/app#5")
+        self.with_gh(json.dumps({"state": "OPEN", "statusCheckRollup": [
+            {"__typename": "CheckRun", "status": "IN_PROGRESS"}]}))
+        self.assertEqual(self.pulse_with_team([("Ada", "w:1.0")], 2), "")
+
+    def test_a_park_on_ci_wakes_when_the_checks_have_concluded(self):
+        self.graph_one_done_one_open()
+        self.park("Ada", "ci:acme/app#5")
+        self.with_gh(json.dumps({"state": "OPEN", "statusCheckRollup": [
+            {"__typename": "CheckRun", "status": "COMPLETED"}]}))
+        out = self.pulse_with_team([("Ada", "w:1.0")], 2)
+        self.assertIn("Ada's wait is over (CI of acme/app#5 finished, or the PR is no longer open): dispatch it", out)
+
+    def test_a_park_on_a_merge_wakes_when_the_pr_is_merged(self):
+        self.graph_one_done_one_open()
+        self.park("Ada", "pr:acme/app#5-merged")
+        self.with_gh(json.dumps({"state": "MERGED", "statusCheckRollup": []}))
+        out = self.pulse_with_team([("Ada", "w:1.0")], 2)
+        self.assertIn("Ada's wait is over (acme/app#5 merged or closed): dispatch it", out)
+
+    def test_a_gh_failure_leaves_the_park_holding(self):
+        self.graph_one_done_one_open()
+        self.park("Ada", "ci:acme/app#5")
+        self.with_gh("not json")
+        self.assertEqual(self.pulse_with_team([("Ada", "w:1.0")], 2), "")
+
+    def test_ready_work_beside_a_worker_waiting_on_its_pr_is_spawned_not_given_to_it(self):
+        for n in ("01", "02"):
+            (self.issues / ("%s-x.md" % n)).write_text(ticket(n, "T" + n))
+        self.goal_with_tickets(self.issues)
+        self.park("Ada", "ci:acme/app#5")
+        self.with_gh(json.dumps({"state": "OPEN", "statusCheckRollup": [
+            {"__typename": "CheckRun", "status": "QUEUED"}]}))
+        out = self.pulse_with_team([("Ada", "w:1.0")], size=1)
+        self.assertIn("Spawn 2 more workers", out)
+        self.assertNotIn("IDLE NOW", out)
 
     def test_every_idle_worker_gets_a_ready_ticket(self):
         for n, name in (("01", "API"), ("02", "UI"), ("03", "Docs")):
@@ -211,19 +424,29 @@ class Frontier(PulseCase):
         self.goal_with_tickets(self.issues)
         out = self.pulse_with_team([("Ada", "w:1.0"), ("Bo", "w:1.1")], size=2)
         self.assertIn("one ticket per idle worker until the READY list runs out", out)
-        self.assertIn("Spawn 1 more worker (team 2 of 12)", out)
+        self.assertIn("Spawn 1 more worker (team 2 now, no worker limit", out)
 
-    def test_a_full_team_is_not_asked_to_grow(self):
+    def test_a_large_team_is_still_asked_to_grow(self):
+        # no worker limit (2026-11-19): 12 running and 3 ready with one idle still spawns
         for n in range(1, 4):
             (self.issues / ("%02d-x.md" % n)).write_text(ticket("%02d" % n, "T%d" % n))
         self.goal_with_tickets(self.issues)
         out = self.pulse_with_team([("Ada", "w:1.0")], size=12)
         self.assertIn("Dispatch the READY tickets", out)
-        self.assertNotIn("Spawn", out)
+        self.assertIn("Spawn 2 more workers (team 12 now, no worker limit", out)
 
     def test_without_tickets_each_idle_worker_gets_a_next_item(self):
         out = self.pulse_with_team([("Ada", "w:1.0"), ("Bo", "w:1.1")], size=2)
         self.assertIn("one each, top first", out)
+
+    def test_marks_in_next_tell_the_busy_workers_from_the_unassigned_items(self):
+        (self.tmp / "pm" / (TRACK + ".goal.md")).write_text(
+            "# Objective\n\n_Status: OPEN_\n\n## Outcome\nShip the thing.\n\n"
+            "## Next, in priority order\n- a (→ Ada)\n- b (→ Zed)\n- c\n- d\n",
+            encoding="utf-8")
+        out = self.pulse_with_team([], size=1, names=["Ada"])
+        self.assertIn("UNASSIGNED in NEXT: 3 of 4; marks naming a worker that is gone: Zed", out)
+        self.assertIn("Spawn up to 3 more workers (team 1 now, no worker limit; the spawn refuses below 8 GB free memory) and dispatch the unassigned NEXT items", out)
 
     def test_a_github_graph_is_read_from_its_cache(self):
         """GitHub is too slow for a 5 s Stop hook: the pulse reads the last
@@ -314,7 +537,8 @@ class Frontier(PulseCase):
 
     def test_a_blocker_the_concierge_holds_is_not_asked_again(self):
         self.tracker(blockers="- waiting on the owner to pick the org")
-        self.assertEqual(self.pulse_with_team([], 2, holding=True), "")
+        self.goal(next_="- do a thing (→ Ada)")
+        self.assertEqual(self.pulse_with_team([], 2, holding=True, names=["Ada", "Bo"]), "")
 
     def test_idle_workers_still_get_work_while_the_concierge_holds_a_question(self):
         self.tracker(blockers="- waiting on the owner to pick the org")
@@ -338,7 +562,7 @@ class Frontier(PulseCase):
         from unittest import mock
         with mock.patch.object(mod.fleet, "Tmux", lambda timeout=3: tmux), \
                 mock.patch.object(mod.registry, "live", lambda cfg=None: rows):
-            self.assertEqual(mod.team("boss"), ([("Wanda", "b:0.1")], 1))
+            self.assertEqual(mod.team("boss"), ([("Wanda", "b:0.1")], 1, ["Wanda"]))
 
     def test_more_idle_workers_than_tickets_stops_at_the_frontier(self):
         (self.issues / "01-x.md").write_text(ticket("01", "API"))
@@ -346,7 +570,26 @@ class Frontier(PulseCase):
         out = self.pulse_with_team([("Ada", "w:1.0"), ("Bo", "w:1.1")], size=2)
         self.assertIn("one ticket per idle worker until the READY list runs out", out)
 
-    def test_every_idle_worker_up_to_the_span_is_named(self):
+    def test_a_workers_line_with_a_reason_caps_the_spawn_in_the_pulse_text(self):
+        for n in range(1, 6):
+            (self.issues / ("%02d-x.md" % n)).write_text(ticket("%02d" % n, "T%d" % n))
+        self.goal_with_tickets(self.issues)
+        path = self.tmp / "pm" / (TRACK + ".goal.md")
+        path.write_text(path.read_text() + "\nWorkers: 3 - one at a time on the production box\n")
+        out = self.pulse_with_team([], size=1)
+        self.assertIn("Spawn 2 more workers (team 3 of 3: one at a time on the production box)", out)
+
+    def test_a_workers_line_without_a_reason_is_ignored_and_says_so(self):
+        for n in range(1, 6):
+            (self.issues / ("%02d-x.md" % n)).write_text(ticket("%02d" % n, "T%d" % n))
+        self.goal_with_tickets(self.issues)
+        path = self.tmp / "pm" / (TRACK + ".goal.md")
+        path.write_text(path.read_text() + "\nWorkers: 3\n")
+        out = self.pulse_with_team([], size=1)
+        self.assertIn("Spawn 5 more workers", out)
+        self.assertIn("`Workers: 3` in the goal file is ignored", out)
+
+    def test_every_idle_worker_up_to_the_list_limit_is_named(self):
         idle = [("W%d" % i, "w:1.%d" % i) for i in range(12)]
         out = self.pulse_with_team(idle, size=12)
         self.assertIn("W11 (w:1.11)", out)

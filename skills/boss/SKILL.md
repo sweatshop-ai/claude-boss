@@ -66,7 +66,7 @@ Code puts on every session's PATH.
 
 **You coordinate. Every piece of actual work goes to a worker — there is no task
 too small to dispatch.** You may run only: `boss-lifecycle.sh`, `boss-tracker`,
-`boss-goal`, `boss-alert`, `boss-unask`, `boss-panes.py`, read-only `gh`, `sleep`, `tmux`, a read-only subagent or a `Monitor` (see Carriers below), files under
+`boss-goal`, `boss-alert`, `boss-unask`, `boss-park`, `boss-panes.py`, read-only `gh`, `sleep`, `tmux`, a read-only subagent or a `Monitor` (see Carriers below), files under
 `~/.claude/pm/` or `${CLAUDE_PLUGIN_ROOT}/skills/boss/`, and `boss-run` for a write the
 mission needs that you would otherwise hand to the owner's clipboard — a PR
 comment, a PR creation, a file outside `pm/`, a dev restart. `boss-run` asks
@@ -382,18 +382,38 @@ your one-task rule and the 150k split fire first.
 broadcast is the most expensive thing you can do; it should be rare and
 deliberate.
 
-### 3. Span of control. Up to 12 workers.
+### 3. Span of control. No limit, an 8 GB memory floor.
 
-**Run as many workers as there is ready work, up to 12** (the owner, 2026-10-21:
-finishing sooner is worth spending the week's budget sooner). The limit the owner
-actually hits is the weekly usage cap, not the five-hour one and not the machine;
-more workers spend that budget faster, they do not add to it. Every worker's
-report still lands in your context, so keep reports short and let workers
-coordinate peer-to-peer through `/team` while you handle dispatch, review and
-escalation.
+**Run as many workers as there is ready work** (the owner, 2026-11-19: a cap only
+spends slower). The pulse asks for one spawn per ready ticket beyond the idle
+workers, however many that is. What stops a team is memory: `boss-lifecycle.sh
+spawn` refuses when less than 8 GB of `MemAvailable` would remain after the new
+worker, and says so with the numbers (free memory, the worker's estimated cost,
+the floor). It estimates the worker from your current workers' resident
+size, at least 0.5 GB. A refused spawn is not an error to work around: dispatch
+to the idle workers you have and spawn again when memory frees up.
 
-If the owner wants more than 12 running, split them across two bosses on separate
-tracks rather than one boss holding all of it.
+**Below the floor, the pulse tells you to retire the worker parked longest.** When
+the READY tickets (or the unassigned NEXT items) ask for a spawn and the pulse reads
+memory short, it does not tell you to spawn. With workers parked (`boss-park`), it names
+the one that has waited longest, its park event and the refusal's numbers: retire the
+worker parked longest (`retire <pane> --require-idle --kill`), then mark its park
+`boss-park <track> <worker> --retire`, keeping its park recorded without letting a new
+session of the same name inherit it, and write on its Tracker line that it was retired for
+memory and waits on that event. When the event has happened (or 2 hours passed) the pulse
+says so: hand that work to a worker and `boss-park <track> <worker> --clear --retired`. Then retry the
+spawn once. For 15 minutes after a retire the pulse offers no other worker to retire, so a team is not
+emptied one pulse at a time.
+With nobody parked, or memory still short after the retire, start nobody: the pulse does
+not block you over it, and logs a `memory-short` line (`boss-pulse why <track>`) with the
+free memory and the floor.
+
+A track may cap itself with a line `Workers: N - <reason>` in its goal file. The
+pulse honours N only when a reason is written, and shows it ("team 3 of 3: one
+change at a time on the production box"). Without a reason the field is ignored
+and the pulse says so. Every worker's report still lands in your context, so keep
+reports short and let workers coordinate peer-to-peer through `/team` while you
+handle dispatch, review and escalation.
 
 ---
 
@@ -437,7 +457,7 @@ boss-goal status <track> open|paused|met "<note>"
 | **Constraints** | what this track must not do |
 | **Pause when** | what genuinely needs the owner |
 | **Tickets** | optional: the ticket graph this track works, a folder (`/abs/path/issues`) or `gh:owner/repo#N`; when set, its frontier replaces Next |
-| **Next, in priority order** | what an idle worker gets, without anyone being asked |
+| **Next, in priority order** | what an idle worker gets, without anyone being asked. On a track without a ticket graph, mark each item a worker is on with `(→ Name)`: the pulse counts the items without a mark as unassigned, tells idle workers to take them, asks for one more worker per item left over, and names a mark whose worker no longer exists (that item counts as unassigned too). With a ticket graph the marks are ignored |
 
 **Write it at session start from what the owner asked for.** They give an outcome in
 a sentence; deriving the fields is your job.
@@ -608,9 +628,9 @@ just finished a related task gets the follow-up. Otherwise pick an idle worker a
 
 **With a ticket graph, dispatch the whole frontier.** When the objective names
 `## Tickets`, the pulse lists every ready ticket. Give one to each idle worker in
-the same turn, not one per turn; when ready tickets outnumber idle workers and the
-team is under 12, spawn for the rest. Claim each ticket before its dispatch goes
-out: `python3 ${CLAUDE_PLUGIN_ROOT}/skills/hand-to-boss/frontier.py claim <source>
+the same turn, not one per turn; when ready tickets outnumber idle workers,
+spawn for the rest (no limit but the memory floor). Claim each ticket before its dispatch
+goes out: `python3 ${CLAUDE_PLUGIN_ROOT}/skills/hand-to-boss/frontier.py claim <source>
 <NN> <worker>` (a folder gets a `**Claimed by:**` line, committed by path; a
 `gh:` source gets a `worker:<name>` label). When a ticket closes, run
 `boss-goal check <track>`: it re-reads the graph, so the tickets it unblocked are
@@ -818,6 +838,12 @@ concerned — invisibly.
 > never end a turn on a report only printed in your pane. Wait with `Monitor` or
 > `run_in_background`, not a `pgrep` loop; a task you started and no longer need
 > is stopped before you report, and one you still wait on (CI) is named in it.
+>
+> When you report a PR of yours that is open and you are waiting on its CI, park yourself on
+> it first: `boss-park <track> <your name> --until ci:<owner/repo>#<N>` (waiting on its review
+> or merge instead: `--until pr:<owner/repo>#<N>-merged`).
+> It costs nothing and keeps the boss from counting you idle; it ends on its own when CI is
+> done, the PR is merged or closed, or after 2 hours.
 
 Workers are started with `--disallowedTools AskUserQuestion` (`launch_claude` in
 `boss-lifecycle.sh`), so only your concierge, or you if you have none, asks the owner. A worker's question rang
@@ -1086,7 +1112,7 @@ Parse `$ARGUMENTS`: empty or `status` → **A** · `dispatch <task> [worker]` �
 1. **Validate the task.** Issue ref → `gh api repos/<owner>/<repo>/issues/<N>`
    (never `gh issue view`, broken here). Doesn't resolve → report and stop.
 2. **Pick the worker** per P6. None suitable → `spawn`, wait for it in
-   `list --mine` (spawn stamps it, so it appears there). Wrong project → `move`. Already 12 workers → see Span of control.
+   `list --mine` (spawn stamps it, so it appears there). Wrong project → `move`. Spawn refused for memory → see Span of control.
 3. **Preview the first dispatch** (skip once the owner grants autonomy): task,
    target, project, rationale.
 4. **Send a self-contained prompt** — task and issue number, how to read it, the
@@ -1188,12 +1214,54 @@ Three sources. Turn all three on.
    work of yours is still running, and it goes silent the moment the objective is
    `met` or `paused`. `boss-goal check` reports whether it is armed.
 
-   When it fires, **act — do not acknowledge it.** Dispatch the top item, or name
-   for each idle worker the ticket or event it is parked on, and stop. "Parked on
-   purpose" with nothing named is an idle team: on 2026-10-30 a boss said it 174
+   Every Stop of a boss session leaves one line in `pm/.pulse/<sid>.silence.log`
+   (rotated at 1 MB): the time, the track, and the gate that held the pulse back
+   (`stop-hook-active`, `no-track`, `no-goal`, `objective-closed`,
+   `background-tasks`, `rate-gate`, `open-question`, `nothing-to-say`, `memory-short`,
+   `block-let-go`) or `blocked` or `fired` with its actions, plus the idle workers and unassigned items when
+   known. A session that is not a boss is not logged. `boss-pulse.py why <track>`
+   counts the last day's Stops per gate and gives the last firing, so a silence
+   can be explained afterwards instead of argued.
+
+   When it fires, **act — do not acknowledge it.** Dispatch the top item, or park
+   the idle worker with a condition the pulse can check, and stop. "Parked on
+   purpose" in words is an idle team: on 2026-10-30 a boss said it 174
    times while four side tickets sat unstaffed, because its ticket graph showed
    READY none and it never looked past it. READY none is not an empty backlog —
    check NEXT, the tracker and the open side tickets before parking anyone.
+
+   **You cannot end your turn while work lies around.** When a worker of yours is idle
+   without a valid park and unassigned work exists (a READY ticket, or a NEXT item without
+   `(→ Name)`), the pulse does not hand you context: it **blocks the Stop**, and the reason
+   names each idle worker and the unassigned items. Dispatch the worker or park it with a
+   checked event before you stop again. The runtime marks the Stop that follows a block
+   `stop_hook_active`, and the hook never stacks on its own block, so a block holds one turn; the
+   next turn's Stop blocks again. After 3 blocks in a row for the same set of
+   idle workers the pulse lets go: you get the ordinary pulse text, no block, and the log says
+   `block-let-go`. A dispatch or a park (a different idle set, or none) starts the count again,
+   as does an hour without a block. Nothing reaches the owner: you fix it. A worker idle with
+   nothing left to hand out (a NEXT list all marked, no ticket graph) and no park gets "retire X",
+   with no block. The concierge is never an idle worker.
+
+   **Park a worker: `boss-park <track> <worker> --until <event>`.** The event is one of
+   five: `ticket:<id>` (the ticket graph reports it done), `worker:<name>` (that worker's
+   session is idle or has ended), `owner:<question id>` (the concierge's `ANSWER` came and you
+   cleared the question's blocker: the id, `q7`, must stand on an Open blockers line when you
+   park, and the park wakes when no such line is left), `pr:<owner/repo#N>-merged` (the PR is
+   merged, or closed so it never will be) and `ci:<owner/repo#N>` (every check run of the PR's
+   head has concluded, or the PR is no longer open; a PR with no check run yet holds). The pulse
+   reads the two GitHub ones with one `gh pr view` per PR, at most once a minute; when `gh`
+   fails the park holds and the failure goes to `pm/park-gh.log`. **A worker waiting on its own
+   PR's CI or review parks itself on `ci:`**: that is the last paragraph of the reporting contract
+   (P8), so you do nothing, it stays out of IDLE NOW, keeps its PR, and READY tickets beside it
+   are spawned for, not given to it; when CI ends the pulse says so and you dispatch the fixes or
+   the next task. Anything else is refused with this list; a clock time is
+   not an event. A park starts when you make it and ends after 2 hours at most. While its event
+   has not happened the pulse leaves the worker out of the idle list; when it has, the pulse says
+   "X's wait is over (ticket 12 done): dispatch it", and when the 2 hours ran out first, "X has
+   waited 2 h on <event>: dispatch, re-park or retire". `boss-park <track> --list` shows the parks,
+   `boss-park <track> <worker> --clear` drops one, and any message of yours to the worker
+   (a dispatch) drops it too, except an `ASK`.
 
 3. **The escalation timer.** P12's ladder, `references/escalation.md`. A blocker
    waiting on the owner emits nothing at all; the detached `sleep` is what brings
