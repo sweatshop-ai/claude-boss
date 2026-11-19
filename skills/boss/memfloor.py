@@ -40,7 +40,7 @@ def refusal(avail_kb, rss_kb):
                                               (avail_kb - cost) / KB_PER_GB))
 
 
-def _rss_kb(pid):
+def rss_kb(pid):
     try:
         for line in Path("/proc/%d/status" % int(pid)).read_text(encoding="utf-8").splitlines():
             if line.startswith("VmRSS:"):
@@ -59,7 +59,7 @@ def boss_worker_rss(boss_pane):
         seats = fleet.view(fleet.Tmux(timeout=3), registry.live(boss_store.config_dir()))
     except fleet.TmuxUnavailable:
         return []
-    rss = (_rss_kb(s.session.get("pid")) for s in fleet.workers(seats, boss_pane) if s.session)
+    rss = (rss_kb(s.session.get("pid")) for s in fleet.workers(seats, boss_pane) if s.session)
     return [r for r in rss if r]
 
 

@@ -13,6 +13,8 @@ import pulse  # noqa: E402
 
 R = pulse.Rung
 W = pulse.Woken
+SHORT = ("not spawning: 6.0 GB free, a new worker costs about 1.0 GB, and the 8 GB floor "
+         "would not hold (5.0 GB left)")
 
 
 class Decide(unittest.TestCase):
@@ -190,6 +192,66 @@ class Decide(unittest.TestCase):
         pulse.decide(pulse.Facts(track="demo", rungs=[R("ka", 60, 100, "- A")], fired=fired))
         self.assertEqual(fired, {"old": 120})
 
+    def test_a_refused_spawn_retires_the_worker_parked_longest(self):
+        d = pulse.decide(pulse.Facts(track="demo", source="issues", size=3, memshort=SHORT,
+                                     ready=["01 API", "02 UI"],
+                                     parked=[W("Ada", "ticket:12", "waiting", 20),
+                                             W("Bea", "owner:q7", "waiting", 90)]))
+        self.assertEqual(d.actions, [pulse.Action("retire-parked", 2)])
+        self.assertEqual(pulse.longest_parked(pulse.Facts(
+            track="demo", parked=[W("Ada", "ticket:12", "waiting", 20), W("Bea", "owner:q7", "waiting", 90)])).worker, "Bea")
+
+    def test_an_expired_or_over_park_is_dispatched_never_retired(self):
+        # such a worker is idle already: retiring it frees nothing the spawn needs
+        f = pulse.Facts(track="demo", parked=[W("Ada", "ticket:12", "waiting", 20)],
+                        parks=[W("Bea", "ticket:9", "expired", 125), W("Cy", "ticket:3", "over", 300)])
+        self.assertEqual(pulse.longest_parked(f).worker, "Ada")
+        self.assertIsNone(pulse.longest_parked(pulse.Facts(track="demo", parks=f.parks)))
+
+    def test_a_retired_workers_park_ending_says_to_hand_its_work_on(self):
+        lines = pulse.render(*(lambda f: (f, pulse.decide(f)))(pulse.Facts(
+            track="demo", parks=[W("Bea", "ticket:9", "retired", 30)]))).splitlines()
+        self.assertTrue([x for x in lines if x.startswith("Bea was retired for memory")
+                         and "`boss-park demo Bea --clear --retired`" in x])
+
+    def test_a_refused_spawn_that_speaks_for_another_reason_says_why_nobody_is_started(self):
+        f = pulse.Facts(track="demo", source="issues", size=3, memshort=SHORT,
+                        ready=["01 API", "02 UI"], idle=[("Ada", "w:1.0")])
+        text = pulse.render(f, pulse.decide(f))
+        self.assertIn("MEMORY: " + SHORT, text)
+        self.assertIn("start nobody", text)
+        self.assertNotIn("Spawn", text)
+
+    def test_a_refused_spawn_with_nobody_parked_starts_nobody_and_does_not_speak(self):
+        f = pulse.Facts(track="demo", source="issues", size=3, memshort=SHORT, ready=["01 API"])
+        self.assertIsNone(pulse.decide(f))
+        self.assertEqual(pulse.shortfall(f), SHORT)
+
+    def test_a_refused_spawn_still_dispatches_to_the_idle_and_asks(self):
+        d = pulse.decide(pulse.Facts(track="demo", source="issues", size=3, memshort=SHORT,
+                                     blockers=["- q7"], idle=[("Ada", "w:1.0")],
+                                     ready=["01 API", "02 UI"]))
+        self.assertEqual(kinds(d), ["ask", "dispatch-ready"])
+
+    def test_enough_memory_leaves_the_spawn_alone(self):
+        d = pulse.decide(pulse.Facts(track="demo", source="issues", size=3, ready=["01 API"],
+                                     parked=[W("Bea", "owner:q7", "waiting", 90)]))
+        self.assertEqual(d.actions, [pulse.Action("spawn", 1)])
+
+    def test_no_spawn_wanted_means_no_shortfall(self):
+        f = pulse.Facts(track="demo", source="issues", size=3, memshort=SHORT, ready=["01 API"],
+                        idle=[("Ada", "w:1.0")])
+        self.assertIsNone(pulse.shortfall(f))
+
+    def test_a_refused_spawn_for_next_items_retires_the_longest_parked_too(self):
+        facts = dict(track="demo", size=2, workers=("Ada",), memshort=SHORT,
+                     next_items=["- one", "- two"],
+                     parked=[W("Bea", "owner:q7", "waiting", 90)])
+        d = pulse.decide(pulse.Facts(**facts))
+        self.assertEqual(kinds(d), ["retire-parked"])
+        facts["parked"] = ()
+        self.assertIsNone(pulse.decide(pulse.Facts(**facts)))
+
 
 class Render(unittest.TestCase):
     def say(self, **facts):
@@ -265,6 +327,19 @@ class Render(unittest.TestCase):
     def test_an_expired_park_says_how_long_and_on_what(self):
         lines = self.say(idle=[("Ada", "w:1.0")], parks=[W("Ada", "ticket:12", "expired", 125)])
         self.assertIn("Ada has waited 2 h on ticket:12: dispatch, re-park or retire", lines)
+
+    def test_the_retire_line_names_the_worker_keeps_its_park_and_retries_once(self):
+        text = "\n".join(self.say(source="issues", size=3, memshort=SHORT, ready=["01 API", "02 UI"],
+                                  parked=[W("Ada", "ticket:12", "waiting", 20),
+                                          W("Bea", "owner:q7", "waiting", 135)]))
+        self.assertIn(SHORT, text)
+        self.assertIn("Bea (parked 2 h 15 min on owner:q7)", text)
+        self.assertNotIn("Ada (parked", text)
+        self.assertIn("`boss-park demo Bea --retire`", text)
+        self.assertIn("Tracker", text)
+        self.assertIn("Retry the spawn once", text)
+        self.assertIn("start nobody", text)
+        self.assertNotIn("Spawn 2", text)
 
 
 def kinds(decision):
