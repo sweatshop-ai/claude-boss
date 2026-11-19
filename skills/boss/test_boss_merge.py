@@ -597,6 +597,20 @@ class DeployList(Base):
                 self.assertEqual(len(self.log()), before + 1)
         self.assertEqual(self.merges(), [])
 
+    def test_a_missing_deploy_json_refusal_names_the_file_and_the_ready_json(self):
+        self.answer(rc=1, err="gh: Not Found (HTTP 404)")
+        self.provisional()
+        self.assertEqual(self.run_gate(dry_run=True), 4, self.err)
+        self.assertIn(".boss/deploy.json", self.err)
+        self.assertIn('{"version": 1, "non_deploying": ["main"]}', self.err)
+        self.assertIn("owner's declaration", self.err)
+
+    def test_only_a_missing_deploy_json_gets_the_hint(self):
+        self.answer(rc=1, err="HTTP 500")
+        self.provisional()
+        self.assertEqual(self.run_gate(dry_run=True), 4, self.err)
+        self.assertNotIn('"non_deploying"', self.err)
+
     def test_a_branch_is_non_deploying_by_exact_name_only(self):
         for listed in (["ma*"], ["Main"], ["main "], ["release/*"], ["origin/main"], []):
             with self.subTest(listed=listed):
