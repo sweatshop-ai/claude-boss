@@ -11,10 +11,14 @@ record to the worker's report path.
 
 **Blocked by:** 03
 
-**Status:** ready-for-agent
+**Claimed by:** Talia 2026-11-19 18:03
 
-- [ ] A park on a merged PR wakes; on an open PR it holds
-- [ ] A park on CI wakes when all check runs of the PR head have concluded
-- [ ] Repeated Stops within a minute make no new `gh` call for the same PR
-- [ ] A `gh` failure keeps the park and writes a log line, never a crash
-- [ ] A worker reporting "PR #N open, CI running" is auto-parked on `ci:` for that PR
+**Status:** done
+
+- [x] A park on a merged PR wakes; on an open PR it holds — test_park.py::GithubEvents::test_a_park_on_a_merged_pr_wakes_and_on_an_open_pr_holds + test_boss_pulse park-on-merge test pass
+- [x] A park on CI wakes when all check runs of the PR head have concluded — GithubEvents::test_a_park_on_ci_wakes_when_every_check_run_of_the_head_has_concluded passes (queued/in-progress/no runs hold)
+- [x] Repeated Stops within a minute make no new `gh` call for the same PR — GithubEvents::test_stops_within_a_minute_make_no_new_gh_call_for_the_same_pr passes (3 lookups, 1 call)
+- [x] A `gh` failure keeps the park and writes a log line, never a crash — GithubEvents gh-failure, bad-output and timeout tests pass; log in pm/park-gh.log
+- [x] A worker reporting "PR #N open, CI running" is auto-parked on `ci:` for that PR — worker parks itself via the reporting contract; test_boss_pulse ready-work-beside-a-parked-worker test shows Spawn, no IDLE NOW
+
+PR 165, head ee6f0c7, CI green (pytest success), review GO (round 1 Opus fallback, 4 MINOR fixed in the same push).

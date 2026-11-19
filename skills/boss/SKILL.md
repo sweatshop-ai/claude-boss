@@ -1217,7 +1217,7 @@ Three sources. Turn all three on.
    Every Stop of a boss session leaves one line in `pm/.pulse/<sid>.silence.log`
    (rotated at 1 MB): the time, the track, and the gate that held the pulse back
    (`stop-hook-active`, `no-track`, `no-goal`, `objective-closed`,
-   `background-tasks`, `rate-gate`, `open-question`, `nothing-to-say`,
+   `background-tasks`, `rate-gate`, `open-question`, `nothing-to-say`, `memory-short`,
    `block-let-go`) or `blocked` or `fired` with its actions, plus the idle workers and unassigned items when
    known. A session that is not a boss is not logged. `boss-pulse.py why <track>`
    counts the last day's Stops per gate and gives the last firing, so a silence

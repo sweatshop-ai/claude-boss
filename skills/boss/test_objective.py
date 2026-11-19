@@ -43,8 +43,8 @@ class Status(unittest.TestCase):
 
 class WorkersCap(unittest.TestCase):
     def test_a_workers_line_gives_the_number_and_the_reason(self):
-        t = "# Objective\n\nWorkers: 3 \u2014 one change at a time on the plans-live box\n"
-        self.assertEqual(objective.workers_cap(t), (3, "one change at a time on the plans-live box"))
+        t = "# Objective\n\nWorkers: 3 \u2014 one change at a time on the production box\n"
+        self.assertEqual(objective.workers_cap(t), (3, "one change at a time on the production box"))
 
     def test_a_hyphen_also_starts_the_reason(self):
         self.assertEqual(objective.workers_cap("Workers: 2 - shared DB\n"), (2, "shared DB"))

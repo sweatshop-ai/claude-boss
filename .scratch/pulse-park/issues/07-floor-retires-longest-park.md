@@ -8,8 +8,10 @@ nobody, the pulse does not block over it, and it logs the shortfall.
 
 **Blocked by:** 02, 03
 
-**Status:** ready-for-agent
+**Claimed by:** Nilufar 2026-11-19 18:16
 
-- [ ] Refused spawn with two parked workers: the pulse names the one parked longest
-- [ ] Refused spawn with no parked worker: no block, one log line with free memory and floor
-- [ ] A worker retired this way leaves its park event recorded so its work is not lost
+**Status:** done
+
+- [x] Refused spawn with two parked workers: the pulse names the one parked longest (test_boss_pulse.py::test_a_refused_spawn_with_two_parked_workers_names_the_one_parked_longest, passed)
+- [x] Refused spawn with no parked worker: no block, one log line with free memory and floor (test_a_refused_spawn_with_nobody_parked_is_silent_and_logs_free_memory_and_floor, passed)
+- [x] A worker retired this way leaves its park event recorded so its work is not lost (test_the_retired_workers_park_stays_recorded, passed; text tells the boss to keep the park and note it on its Tracker line)
