@@ -820,7 +820,8 @@ concerned — invisibly.
 > is stopped before you report, and one you still wait on (CI) is named in it.
 >
 > When you report a PR of yours that is open and you are waiting on its CI, park yourself on
-> it first (for a review wait, `--until pr:<owner/repo>#<N>-merged`): `boss-park <track> <your name> --until ci:<owner/repo>#<N>`.
+> it first: `boss-park <track> <your name> --until ci:<owner/repo>#<N>` (waiting on its review
+> or merge instead: `--until pr:<owner/repo>#<N>-merged`).
 > It costs nothing and keeps the boss from counting you idle; it ends on its own when CI is
 > done, the PR is merged or closed, or after 2 hours.
 
