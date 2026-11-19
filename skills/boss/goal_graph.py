@@ -74,7 +74,6 @@ CLASSES = (
     ("waiting", "fill:#e4e4e4,stroke:#777777,color:#2b2b2b"),
     ("external", "fill:#f9dada,stroke:#c62828,color:#560f0f,stroke-dasharray:5 3"),
 )
-LINKS = "stroke:#8a8a8a,stroke-width:2px"   # mermaid's own edge grey vanishes on a dark page
 
 
 def _label(text):
@@ -116,8 +115,8 @@ def diagram(out):
                 lines.append("  t%s --> t%s" % (b, t["num"]))
         for e in t["external"]:
             lines.append("  %s -.-> t%s" % (externals[e], t["num"]))
-    if any("-->" in ln or "-.->" in ln for ln in lines):
-        lines.append("  linkStyle default %s" % LINKS)
+    # No linkStyle and no %%{init}%% line: either one freezes a sheaf 1.2.0 page for good
+    # (measured 2026-11-19 on the pulse-park goal), so the edges keep mermaid's own colour.
     for name, style in CLASSES:
         lines.append("  classDef %s %s" % (name, style))
     for name, _ in CLASSES:

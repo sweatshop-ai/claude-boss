@@ -77,6 +77,12 @@ class Form(GoalCase):
         got = "\n".join(goal_graph.block(out, NOW)) + "\n"
         self.assertEqual(got, (FIXTURE / "expected-block.md").read_text(encoding="utf-8"))
 
+    def test_no_line_that_freezes_a_sheaf_page(self):
+        out, _ = goal_graph.read(str(self.issues), TRACK)
+        for ln in goal_graph.diagram(out):
+            self.assertNotIn("linkStyle", ln)
+            self.assertNotIn("%%{", ln)
+
     def test_titles_lose_quotes_backticks_and_angle_brackets_and_are_cut(self):
         out, _ = goal_graph.read(str(self.issues), TRACK)
         node = next(ln for ln in goal_graph.diagram(out) if ln.startswith("  t02["))
