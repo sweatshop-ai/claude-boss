@@ -1,6 +1,6 @@
 # 01: The goal page carries its ticket graph, kept up to date
 
-**Status:** ready-for-agent
+**Status:** done (PR 170, merge 2184e02, released 0.29.0; Opus fallback GO, Codex follow-up owed after 2026-11-20 14:10)
 
 **Why (2026-11-19, Thierry):** boss tracks keep their tickets in local markdown, and the graph of those
 tickets goes **in the goal page** (`<pm>/<track>.goal.md`, opened through sheaf), drawn by fixed rules and
@@ -55,12 +55,12 @@ template: Thierry edits the goal page, and sheaf merges his save with this write
 
 ## Done when
 
-- [ ] A goal with `## Tickets` has `## Ticket graph` with the block at the top, before `## Outcome`; one without is left alone
-- [ ] A fixture frontier gives a block equal byte for byte to a checked-in expected file (all four states,
+- [x] A goal with `## Tickets` has `## Ticket graph` with the block at the top, before `## Outcome`; one without is left alone
+- [x] A fixture frontier gives a block equal byte for byte to a checked-in expected file (all four states,
       one external blocker, one ticket blocked by two)
-- [ ] An unchanged frontier writes nothing (mtime unchanged); a changed state rewrites only the block,
+- [x] An unchanged frontier writes nothing (mtime unchanged); a changed state rewrites only the block,
       and a paragraph Thierry typed elsewhere in the goal survives it
-- [ ] The pulse, `claim` and the sweep each update the block; the sweep is silent on no change
-- [ ] A broken source keeps the last graph and shows the error on the summary line
-- [ ] Checked on a live goal in sheaf: the page reloads with the new graph after a ticket's Status changes
-- [ ] CHANGELOG entry and a release; tests run on t-compute CI, only the touched files locally
+- [x] The pulse, `claim` and the sweep each update the block; the sweep is silent on no change
+- [x] A broken source keeps the last graph and shows the error on the summary line
+- [ ] Checked on a live goal in sheaf: the page reloads with the new graph after a ticket's Status changes (partly: the timer drew both open goals at 19:54 and sheaf renders the SVG, 8 nodes, above Outcome; the browser reload itself not watched)
+- [x] CHANGELOG entry and a release; tests run on t-compute CI, only the touched files locally
