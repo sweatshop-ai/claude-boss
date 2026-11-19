@@ -47,11 +47,11 @@ Command line (exit 0, also when a track cannot be read, which goes to stderr;
 """
 import fcntl
 import importlib.util
+import json
 import os
 import re
 import subprocess
 import sys
-import json
 import time
 import urllib.request
 from pathlib import Path
@@ -107,7 +107,8 @@ def _worker(claimed_by):
 
 def activity(track, cfg=None):
     """`{name casefolded: sign glyph}` of the track's workers doing something now, from
-    the feed named in SIGNS_FILE; empty when there is none or it does not answer."""
+    the feed named in SIGNS_FILE; empty when there is none or it does not answer. The
+    feed gives one sign per worker, already ordered (review beats a turn, which beats a job)."""
     try:
         url = (boss_store.pm_dir(cfg) / SIGNS_FILE).read_text(encoding="utf-8").strip()
     except (OSError, UnicodeDecodeError):
@@ -119,7 +120,7 @@ def activity(track, cfg=None):
             with urllib.request.urlopen(url, timeout=SIGNS_S) as r:
                 got = json.loads(r.read(1 << 20)).get("signs")
             _FEED[url] = got if isinstance(got, dict) else {}
-        except (OSError, ValueError, AttributeError):
+        except Exception:            # http.client's errors are no OSError; a feed never fails a write
             _FEED[url] = {}
     mine = _FEED[url].get(track)
     return {str(n).casefold(): WORKER_SIGNS[s] for n, s in mine.items() if s in WORKER_SIGNS} \

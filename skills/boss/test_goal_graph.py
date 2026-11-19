@@ -3,6 +3,7 @@
 
 Run: python3 skills/boss/test_goal_graph.py
 """
+import http.client
 import json
 import os
 import shutil
@@ -99,7 +100,6 @@ class Form(GoalCase):
         self.assertTrue(label.endswith("<br/>Farid"))
 
 
-
 class Activity(GoalCase):
     def setUp(self):
         super().setUp()
@@ -124,6 +124,10 @@ class Activity(GoalCase):
         with self.feed({}) as got:
             got.side_effect = OSError("refused")
             self.assertEqual(goal_graph.activity(TRACK, self.cfg), {})
+        goal_graph._FEED.clear()
+        with self.feed({}) as got:
+            got.side_effect = http.client.IncompleteRead(b"")
+            self.assertEqual(goal_graph.activity(TRACK, self.cfg), {})
 
     def test_the_update_puts_the_sign_on_the_claimed_ticket_and_a_change_rewrites(self):
         self.write_goal(goal(str(self.issues)))
@@ -134,6 +138,7 @@ class Activity(GoalCase):
         with self.feed({"signs": {}}):
             self.assertEqual(self.update(NOW + 60), "written")
         self.assertIn("<br/>Farid\"", self.text())
+
 
 class Place(GoalCase):
     def test_the_section_goes_at_the_top_and_the_goal_still_reads(self):
