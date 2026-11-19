@@ -11,7 +11,9 @@ record to the worker's report path.
 
 **Blocked by:** 03
 
-**Status:** ready-for-agent
+**Claimed by:** Talia 2026-11-19 18:03
+
+**Status:** in-progress
 
 - [ ] A park on a merged PR wakes; on an open PR it holds
 - [ ] A park on CI wakes when all check runs of the PR head have concluded
