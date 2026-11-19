@@ -78,6 +78,9 @@ class Base(unittest.TestCase):
 
 class Hook(Base):
     def test_a_decided_blocker_alone_says_nothing(self):
+        (self.sb.cfg / "pm" / (TRACK + ".goal.md")).write_text(
+            "# Objective\n\n_Status: OPEN_\n\n## Outcome\nShip the thing.\n\n"
+            "## Next, in priority order\n- do a thing (→ Ada)\n", encoding="utf-8")
         self.tracker(cd_line(), choice_line())
         self.assertEqual(self.stop(), "")
 

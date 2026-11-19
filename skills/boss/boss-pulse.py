@@ -69,7 +69,8 @@ def read_goal(track):
 # ------------------------------------------------------------------ fleet
 
 def team(sid):
-    """This boss's live workers: (the idle ones as (name, coordinate), how many in all).
+    """This boss's live workers: (the idle ones as (name, coordinate), how many in all,
+    the names of all of them, None when the roster cannot be read).
 
     The concierge is not one: it sits idle by design, and no ticket is for it.
 
@@ -81,18 +82,19 @@ def team(sid):
     try:
         seats = fleet.view(fleet.Tmux(timeout=3), registry.live(boss_store.config_dir()))
     except fleet.TmuxUnavailable:
-        return [], 0
+        return [], 0, None
     me = fleet.seat_of(seats, sid=sid)
     if not me:
-        return [], 0
-    idle, size = [], 0
+        return [], 0, None
+    idle, size, names = [], 0, []
     for seat in fleet.workers(seats, me.pane.id):
         if not seat.session:
             continue
         size += 1
+        names.append(seat.session.get("name") or seat.pane.coord)
         if (seat.session.get("status") or "") == "idle":
             idle.append((seat.session.get("name") or seat.pane.coord, seat.pane.coord))
-    return idle, size
+    return idle, size, names
 
 
 def worker_statuses(sid):
@@ -454,7 +456,7 @@ def main():
     if question_pending(sid):
         return held("open-question")
 
-    idle, size = team(sid)
+    idle, size, names = team(sid)
     fired = dict(st.get("rungs") or {})
     tracker_text = boss_store.read_tracker(track)  # once per Stop, both consumers share it
     rungs = due_rungs(track, fired, tracker_text)
@@ -468,9 +470,9 @@ def main():
         track=track, idle=idle, size=size, rungs=rungs, fired=fired,
         blockers=blockers, decided=decided, source=source, ready=ready, broken=broken,
         outcome=objective.section(body, "Outcome"), unmet=objective.unmet(body),
-        next_items=objective.next_items(body), cap=cap, cap_reason=cap_reason,
-        parks=woken, parked=parked)
-    if source and not broken and len(ready) > len(idle):
+        next_items=objective.next_items(body), parks=woken, parked=parked,
+        workers=None if names is None else tuple(names), cap=cap, cap_reason=cap_reason)
+    if pulse.spawn_wanted(facts) > 0:
         facts = facts._replace(memshort=memory_short(sid))   # one meminfo read, only when a spawn may follow
     decision = pulse.decide(facts)
     short = pulse.shortfall(facts)
