@@ -124,7 +124,7 @@ class GithubEvents(unittest.TestCase):
 
     def test_a_github_event_needs_its_exact_form(self):
         for text in ("pr:acme/app#5", "pr:5-merged", "pr:acme/app#-merged", "ci:acme/app",
-                     "ci:acme/app#5-merged", "ci:5", "ci:acme/app#x"):
+                     "ci:acme/app#5-merged", "ci:5", "ci:acme/app#x", "ci:-x/app#5", "ci:acme/--upload-pack#5"):
             with self.assertRaises(ValueError, msg=text) as cm:
                 park.parse_event(text)
             self.assertIn("ci:<owner/repo#N>", str(cm.exception))

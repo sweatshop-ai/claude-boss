@@ -103,7 +103,7 @@ def _woken_line(w):
     kind, _, target = w.event.partition(":")
     if w.state == "over":
         what = {"ticket": "ticket %s done", "worker": "%s finished", "owner": "%s answered",
-                "pr": "%s merged or closed", "ci": "CI of %s finished"}.get(
+                "pr": "%s merged or closed", "ci": "CI of %s finished, or the PR is no longer open"}.get(
                     kind, "%s happened") % target.removesuffix("-merged")
         return "%s's wait is over (%s): dispatch it" % (w.worker, what)
     return "%s has waited %d h on %s: dispatch, re-park or retire" % (

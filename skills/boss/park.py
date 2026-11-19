@@ -32,7 +32,7 @@ import tracker
 
 TTL_S = 2 * 3600
 TARGET_RE = re.compile(r"[\w.-]{1,40}\Z")
-PR = r"[\w.-]{1,100}/[\w.-]{1,100}#\d{1,7}"
+PR = r"\w[\w.-]{0,99}/\w[\w.-]{0,99}#\d{1,7}"      # no leading "-": it goes to `gh --repo`
 TARGETS = {"pr": re.compile(PR + r"-merged\Z"), "ci": re.compile(PR + r"\Z")}   # kind -> target form
 GH_CACHE_S = 60         # one `gh` call per PR per minute, a failed one included
 GH_CALL_S = 3           # one call's timeout; the Stop hook has 5 s in all
@@ -65,7 +65,7 @@ def _pr_of(target, world):
     return world.prs(repo, int(num)) if world.prs else None
 
 
-def _pr_merged(target, world):
+def _pr_ended(target, world):
     pr = _pr_of(target, world)
     return bool(pr) and pr["state"] != "OPEN"
 
@@ -80,7 +80,7 @@ WAKE = {
     "ticket": ("<id>", _ticket),
     "worker": ("<name>", _worker),
     "owner": ("<question id>", _owner),
-    "pr": ("<owner/repo#N>-merged", _pr_merged),
+    "pr": ("<owner/repo#N>-merged", _pr_ended),
     "ci": ("<owner/repo#N>", _ci),
 }
 
@@ -136,6 +136,7 @@ def pr_lookup(track, now=None, cfg=None, run=None):
             return hit.get("info")
         left = deadline - time.monotonic()
         if left <= 0:
+            _gh_log(cfg, key, "pulse budget spent, not asked")
             return None                         # this pulse's budget is spent: ask again next time
         try:
             info = _pr_info(run(["pr", "view", str(number), "--repo", repo,

@@ -281,7 +281,7 @@ class Frontier(PulseCase):
         self.with_gh(json.dumps({"state": "OPEN", "statusCheckRollup": [
             {"__typename": "CheckRun", "status": "COMPLETED"}]}))
         out = self.pulse_with_team([("Ada", "w:1.0")], 2)
-        self.assertIn("Ada's wait is over (CI of acme/app#5 finished): dispatch it", out)
+        self.assertIn("Ada's wait is over (CI of acme/app#5 finished, or the PR is no longer open): dispatch it", out)
 
     def test_a_park_on_a_merge_wakes_when_the_pr_is_merged(self):
         self.graph_one_done_one_open()
