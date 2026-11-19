@@ -198,6 +198,13 @@ class PulsePark(unittest.TestCase):
         self.assertIn("a clock time is not an event", text)
         self.assertIn("ends after 2 hours at most", text)
 
+    def test_below_the_floor_the_longest_parked_worker_is_retired_first(self):
+        """Pulse-park ticket 07."""
+        text = flat()
+        self.assertIn("retire the worker parked longest", text)
+        self.assertIn("keeping its park recorded", text)
+        self.assertIn("start nobody", text)
+
 
 if __name__ == "__main__":
     unittest.main()

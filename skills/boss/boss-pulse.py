@@ -48,6 +48,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import boss_store  # noqa: E402
 import codex_blocker  # noqa: E402
 import fleet  # noqa: E402
+import memfloor  # noqa: E402
 import objective  # noqa: E402
 import park  # noqa: E402
 import policy  # noqa: E402
@@ -114,13 +115,18 @@ def worker_statuses(sid):
 
 
 def woken_parks(sid, track, idle, done, tracker_text):
-    """(idle workers still without a park, the Woken parks of the idle ones).
+    """(idle workers still without a park, the Woken parks, the parked ones).
 
-    A worker whose park still holds is not idle for the pulse. A park of a worker that is busy
-    or gone is left alone: only an idle worker is the boss's to dispatch."""
+    A worker whose park still holds is not idle for the pulse; it is one of the parked, as
+    Woken with state `waiting`, which the boss may retire when memory is short. A park of a
+    worker that is busy or gone is left alone: only an idle worker is the boss's to dispatch.
+    A retired worker's park (`boss-park --retire`) is no idle worker's: when its event has
+    happened or its time ran out, it is a Woken with state `retired`, for the boss to hand that
+    work on. For `park.RETIRE_GAP_S` after a retire nobody is offered to retire (the memory the
+    retire freed is not back yet), so retires do not cascade."""
     parks = park.read_parks(track)
     if not parks:
-        return idle, ()
+        return idle, (), ()
     workers = worker_statuses(sid) if any(p.event.startswith("worker:") for p in parks.values()) else {}
     if workers is None:                     # no fleet to read: a worker park is not woken on a guess
         workers = {}
@@ -130,7 +136,13 @@ def woken_parks(sid, track, idle, done, tracker_text):
     world = park.World(done=frozenset(done), workers=workers, prs=park.pr_lookup(track),
                        blockers=tuple(tracker.blocker_lines(tracker_text)) if tracker_text else ())
     now = time.time()
-    free, woken = [], []
+    free, woken, waiting = [], [], []
+    for p in parks.values():
+        if (p.retired and not (p.event.startswith("owner:") and tracker_text is None)
+                and park.state(p, now, world) != "waiting"):
+            woken.append(pulse.Woken(p.worker, p.event, "retired", int((now - p.since) / 60)))
+    kept = {p.worker for p in parks.values() if p.retired}    # `--retire` would refuse these names
+    just_retired = any(p.retired and now - p.retired < park.RETIRE_GAP_S for p in parks.values())
     for name, coord in idle:
         p = parks.get(name)
         if p and tracker_text is None and p.event.startswith("owner:"):
@@ -138,11 +150,31 @@ def woken_parks(sid, track, idle, done, tracker_text):
         else:
             st = park.state(p, now, world) if p else None
         if st == "waiting":
+            if name not in kept:
+                waiting.append(pulse.Woken(name, p.event, st, int((now - p.since) / 60)))
             continue
         free.append((name, coord))
         if st:
             woken.append(pulse.Woken(name, p.event, st, int((now - p.since) / 60)))
-    return free, tuple(woken)
+    return free, tuple(woken), () if just_retired else tuple(waiting)
+
+
+def memory_short(sid):
+    """memfloor's refusal for one more worker, or "" when it would fit (or cannot be told)."""
+    try:
+        avail = memfloor.mem_available_kb(os.environ.get("BOSS_MEMINFO") or "/proc/meminfo")
+    except (OSError, ValueError):
+        return ""
+    rss = []
+    try:
+        seats = fleet.view(fleet.Tmux(timeout=3), registry.live(boss_store.config_dir()))
+        me = fleet.seat_of(seats, sid=sid)
+        if me:
+            rss = [r for r in (memfloor.rss_kb(s.session.get("pid"))
+                               for s in fleet.workers(seats, me.pane.id) if s.session) if r]
+    except fleet.TmuxUnavailable:
+        pass
+    return memfloor.refusal(avail, rss) or ""
 
 
 # ------------------------------------------------------------- ticket graph
@@ -463,19 +495,24 @@ def main():
     decided = decided_blockers(tracker_text)
     source = objective.tickets_source(body)
     ready, done, broken = read_graph(source, track) if source else ([], [], None)
-    idle, woken = woken_parks(sid, track, idle, done, tracker_text)
+    idle, woken, parked = woken_parks(sid, track, idle, done, tracker_text)
     cap, cap_reason = objective.workers_cap(body) or (None, "")
     facts = pulse.Facts(
         track=track, idle=idle, size=size, rungs=rungs, fired=fired,
         blockers=blockers, decided=decided, source=source, ready=ready, broken=broken,
         outcome=objective.section(body, "Outcome"), unmet=objective.unmet(body),
-        next_items=objective.next_items(body), parks=woken,
+        next_items=objective.next_items(body), parks=woken, parked=parked,
         workers=None if names is None else tuple(names), cap=cap, cap_reason=cap_reason)
+    if pulse.spawn_wanted(facts) > 0:
+        facts = facts._replace(memshort=memory_short(sid))   # one meminfo read, only when a spawn may follow
     decision = pulse.decide(facts)
+    short = pulse.shortfall(facts)
     unassigned = len(ready) if source else len(facts.next_items)
     if decision is None:
         # team busy, nothing overdue
         reset_blocks(sid)
+        if short:
+            return held("memory-short", idle=len(idle), unassigned=unassigned, refusal=short)
         return held("nothing-to-say", idle=len(idle), unassigned=unassigned)
 
     let_go = 0
@@ -485,7 +522,8 @@ def main():
         if blocked < pulse.BLOCK_LIMIT:
             commit(sid, now, decision.fired, blocks={"set": idle_key, "n": blocked + 1, "at": now})
             print(json.dumps({"decision": "block", "reason": pulse.block_reason(facts, decision)}))
-            return held("blocked", idle=len(idle), unassigned=unassigned, blocks=blocked + 1)
+            return held("blocked", idle=len(idle), unassigned=unassigned, blocks=blocked + 1,
+                        refusal=short)
         let_go = blocked           # the ordinary pulse below still speaks: only the block is let go
     print(json.dumps({"hookSpecificOutput": {
         "hookEventName": "Stop",
@@ -496,7 +534,7 @@ def main():
         return held("block-let-go", idle=len(idle), unassigned=unassigned, blocks=let_go,
                     actions=",".join(a.kind for a in decision.actions))
     return held("fired", idle=len(idle), unassigned=unassigned,
-                actions=",".join(a.kind for a in decision.actions))
+                actions=",".join(a.kind for a in decision.actions), refusal=short)
 
 
 if __name__ == "__main__":
