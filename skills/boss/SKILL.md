@@ -66,7 +66,7 @@ Code puts on every session's PATH.
 
 **You coordinate. Every piece of actual work goes to a worker — there is no task
 too small to dispatch.** You may run only: `boss-lifecycle.sh`, `boss-tracker`,
-`boss-goal`, `boss-alert`, `boss-unask`, `boss-panes.py`, read-only `gh`, `sleep`, `tmux`, a read-only subagent or a `Monitor` (see Carriers below), files under
+`boss-goal`, `boss-alert`, `boss-unask`, `boss-park`, `boss-panes.py`, read-only `gh`, `sleep`, `tmux`, a read-only subagent or a `Monitor` (see Carriers below), files under
 `~/.claude/pm/` or `${CLAUDE_PLUGIN_ROOT}/skills/boss/`, and `boss-run` for a write the
 mission needs that you would otherwise hand to the owner's clipboard — a PR
 comment, a PR creation, a file outside `pm/`, a dev restart. `boss-run` asks
@@ -442,7 +442,7 @@ boss-goal status <track> open|paused|met "<note>"
 | **Constraints** | what this track must not do |
 | **Pause when** | what genuinely needs the owner |
 | **Tickets** | optional: the ticket graph this track works, a folder (`/abs/path/issues`) or `gh:owner/repo#N`; when set, its frontier replaces Next |
-| **Next, in priority order** | what an idle worker gets, without anyone being asked |
+| **Next, in priority order** | what an idle worker gets, without anyone being asked. On a track without a ticket graph, mark each item a worker is on with `(→ Name)`: the pulse counts the items without a mark as unassigned, tells idle workers to take them, asks for one more worker per item left over, and names a mark whose worker no longer exists (that item counts as unassigned too). With a ticket graph the marks are ignored |
 
 **Write it at session start from what the owner asked for.** They give an outcome in
 a sentence; deriving the fields is your job.
@@ -1193,12 +1193,34 @@ Three sources. Turn all three on.
    work of yours is still running, and it goes silent the moment the objective is
    `met` or `paused`. `boss-goal check` reports whether it is armed.
 
-   When it fires, **act — do not acknowledge it.** Dispatch the top item, or name
-   for each idle worker the ticket or event it is parked on, and stop. "Parked on
-   purpose" with nothing named is an idle team: on 2026-10-30 a boss said it 174
+   Every Stop of a boss session leaves one line in `pm/.pulse/<sid>.silence.log`
+   (rotated at 1 MB): the time, the track, and the gate that held the pulse back
+   (`stop-hook-active`, `no-track`, `no-goal`, `objective-closed`,
+   `background-tasks`, `rate-gate`, `open-question`, `nothing-to-say`) or
+   `fired` with its actions, plus the idle workers and unassigned items when
+   known. A session that is not a boss is not logged. `boss-pulse.py why <track>`
+   counts the last day's Stops per gate and gives the last firing, so a silence
+   can be explained afterwards instead of argued.
+
+   When it fires, **act — do not acknowledge it.** Dispatch the top item, or park
+   the idle worker with a condition the pulse can check, and stop. "Parked on
+   purpose" in words is an idle team: on 2026-10-30 a boss said it 174
    times while four side tickets sat unstaffed, because its ticket graph showed
    READY none and it never looked past it. READY none is not an empty backlog —
    check NEXT, the tracker and the open side tickets before parking anyone.
+
+   **Park a worker: `boss-park <track> <worker> --until <event>`.** The event is one of
+   five (the two GitHub ones arrive with ticket 04; today three work):
+   `ticket:<id>` (the ticket graph reports it done), `worker:<name>` (that worker's session
+   is idle or has ended), `owner:<question id>` (the concierge's `ANSWER` came and you cleared
+   the question's blocker: the id, `q7`, must stand on an Open blockers line when you park, and the
+   park wakes when no such line is left). Anything else is refused with this list; a clock time is
+   not an event. A park starts when you make it and ends after 2 hours at most. While its event
+   has not happened the pulse leaves the worker out of the idle list; when it has, the pulse says
+   "X's wait is over (ticket 12 done): dispatch it", and when the 2 hours ran out first, "X has
+   waited 2 h on <event>: dispatch, re-park or retire". `boss-park <track> --list` shows the parks,
+   `boss-park <track> <worker> --clear` drops one, and any message of yours to the worker
+   (a dispatch) drops it too, except an `ASK`.
 
 3. **The escalation timer.** P12's ladder, `references/escalation.md`. A blocker
    waiting on the owner emits nothing at all; the detached `sleep` is what brings
