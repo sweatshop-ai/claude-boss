@@ -819,8 +819,8 @@ concerned — invisibly.
 > `run_in_background`, not a `pgrep` loop; a task you started and no longer need
 > is stopped before you report, and one you still wait on (CI) is named in it.
 >
-> When you report a PR of yours that is open and you are waiting on its CI or its review,
-> park yourself on it first: `boss-park <track> <your name> --until ci:<owner/repo>#<N>`.
+> When you report a PR of yours that is open and you are waiting on its CI, park yourself on
+> it first (for a review wait, `--until pr:<owner/repo>#<N>-merged`): `boss-park <track> <your name> --until ci:<owner/repo>#<N>`.
 > It costs nothing and keeps the boss from counting you idle; it ends on its own when CI is
 > done, the PR is merged or closed, or after 2 hours.
 

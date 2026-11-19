@@ -196,8 +196,10 @@ class GithubEvents(unittest.TestCase):
         self.assertEqual(len(gh.calls), 1)
 
     def test_output_gh_could_not_have_written_is_a_failure_not_a_crash(self):
-        for bad in ("", "not json", "[]", json.dumps({"state": 7}), json.dumps({"nostate": 1})):
-            self.assertIsNone(self.lookup(FakeGh(bad), now=NOW + len(bad))("acme/app", 5), bad)
+        for i, bad in enumerate(("", "not json", "[]", json.dumps({"state": 7}), json.dumps({"nostate": 1}))):
+            gh = FakeGh(bad)
+            self.assertIsNone(self.lookup(gh, now=NOW + 100 * i)("acme/app", 5), bad)
+            self.assertEqual(len(gh.calls), 1, bad)         # each one really was parsed
 
     def test_a_call_that_times_out_is_a_failure_too(self):
         gh = FakeGh(subprocess.TimeoutExpired("gh", 3))
