@@ -431,9 +431,10 @@ class CommentText(unittest.TestCase):
     def test_the_signature_takes_the_block_last_and_defaults_to_none(self):
         import inspect
         sig = inspect.signature(br.comment_body)
-        self.assertEqual(list(sig.parameters), ["number", "author", "head_sha", "verdict", "findings", "fallback", "direct_model"])
+        self.assertEqual(list(sig.parameters), ["number", "author", "head_sha", "verdict", "findings", "fallback", "direct_model",
+                                               "since"])
         self.assertEqual([p.kind.name for p in sig.parameters.values()],
-                         ["POSITIONAL_OR_KEYWORD"] * 5 + ["KEYWORD_ONLY"] * 2)
+                         ["POSITIONAL_OR_KEYWORD"] * 5 + ["KEYWORD_ONLY"] * 3)
         self.assertEqual(sig.parameters["findings"].default, "")
         self.assertIsNone(sig.parameters["fallback"].default)
 

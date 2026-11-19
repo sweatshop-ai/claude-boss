@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.26.0
+
+- **NO-GO only for a serious defect, and the reviewer starts from the diff (the owner, 2026-11-19, ticket 48).** `build_brief` carries the text measured on 2026-11-19 (25 rounds: 29% cheaper per review): each `FINDING:` is tagged `[SERIOUS]` (a wrong result, a crash, data loss, a security or privacy breach, a failed deploy) or `[MINOR]`, and the verdict is NO-GO only when one is SERIOUS. The reviewer reviews from the fenced diff and opens other files only for a specific concern, never a whole file over 300 lines. A GO with MINOR findings stays a GO: the worker fixes them in the same push and merges, with no new round. The tags reach the PR comment as written. SKILL.md, the `codex-review` skill and the global CLAUDE.md say the rule.
+- **`boss_review.py --since SHA`: the round after a NO-GO reads only the fix diff (ticket 46).** The reviewer gets `git diff SHA..HEAD` and the findings of the round whose head was SHA, fenced as data; the comment says `Fix diff since: SHA` and the record keeps `since`. SHA must be the head of an earlier round with a verdict and an ancestor of the head, else exit 2 with nothing claimed. Every round record now also keeps `files` (the files its diff touches) and `findings` (how many `FINDING:` lines). The merge gate counts a fix-pass GO for the head only when the round at SHA was a NO-GO or a GO with findings and the fix diff touches no file outside the files that round reviewed; otherwise it refuses with `fix-diff-needs-full-round`. A round written before this release has no `files`, so a fix pass over it needs a full round.
+
 ## 0.25.0
 
 - **The boss runs at effort `medium` (the owner, 2026-11-15; was `high`).** `bin/boss-start` defaults `BOSS_EFFORT` to `medium`; SKILL.md and `references/models.md` say so. This release also ships the 2026-11-15 change below: a boss started before it was installed ran on 0.24.1 with `--autocompact 450k`.

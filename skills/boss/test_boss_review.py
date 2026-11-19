@@ -230,7 +230,7 @@ class Base(unittest.TestCase):
 
 TS = re.compile(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ")
 KEYS = ["repo", "pr", "round", "head_sha", "base", "reviewer", "model", "kind", "verdict",
-        "status", "author", "ts", "attempts"]
+        "status", "author", "ts", "attempts", "files", "findings"]
 ATTEMPT_KEYS = ["reviewer", "reason", "exit_code", "stderr_tail", "model"]
 LOG_KEYS = ["ts", "repo", "pr", "round", "reviewer", "reason", "exit_code"]
 
@@ -252,7 +252,8 @@ class GoPosted(Base):
             "reviewer": "codex", "model": None, "kind": "codex", "verdict": "GO",
             "status": "posted", "author": AUTHOR,
             "attempts": [{"reviewer": "codex", "reason": "answered", "exit_code": 0,
-                          "stderr_tail": "", "model": None}]})
+                          "stderr_tail": "", "model": None}],
+            "files": ["f.py"], "findings": 0})      # `FINDING: none` is no finding
         self.assertEqual(list(self.record(1)["attempts"][0]), ATTEMPT_KEYS)
         self.assertEqual(self.round_file(1, "out").read_text(encoding="utf-8"),
                          "FINDING: none\nVERDICT: GO\nREASON: fine")
@@ -890,9 +891,10 @@ class Contract(Base):
         sig = inspect.signature(br.review)
         self.assertEqual(list(sig.parameters),
                          ["repo", "pr", "checkout", "author", "codex_timeout", "io_timeout",
-                          "fallback_timeout", "allow_fallback", "track", "opus_direct"])
+                          "fallback_timeout", "allow_fallback", "track", "opus_direct", "since"])
         self.assertEqual([p.kind.name for p in sig.parameters.values()],
-                         ["POSITIONAL_OR_KEYWORD"] * 4 + ["KEYWORD_ONLY"] * 6)
+                         ["POSITIONAL_OR_KEYWORD"] * 4 + ["KEYWORD_ONLY"] * 7)
+        self.assertIsNone(sig.parameters["since"].default)
         self.assertIsNone(sig.parameters["track"].default)
         self.assertEqual((sig.parameters["codex_timeout"].default, sig.parameters["io_timeout"].default,
                           sig.parameters["fallback_timeout"].default, sig.parameters["allow_fallback"].default),
