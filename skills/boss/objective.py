@@ -73,6 +73,18 @@ def _heading_at(lines) -> int:
     return -1
 
 
+def top_at(lines) -> int:
+    """Where a section that leads the page goes: after the `# ` heading and its
+    `_Status:` line, before the first `## `; at the very top with no heading."""
+    h = _heading_at(lines)
+    if h < 0:
+        return 0
+    j = h + 1
+    while j < len(lines) and not lines[j].strip():
+        j += 1
+    return j + 1 if j < len(lines) and lines[j].startswith("_Status:") else h + 1
+
+
 def set_status(text: str, value: str) -> str:
     """`text` with its first `_Status:` line saying `value`. With none, the line
     goes under the `# ` heading, or first when there is no heading either."""

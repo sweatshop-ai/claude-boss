@@ -12,9 +12,11 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+import boss_store  # noqa: E402
 import goal_graph  # noqa: E402
 import objective  # noqa: E402
 
@@ -154,6 +156,34 @@ class OnlyTheBlock(GoalCase):
         line = next(ln for ln in text.split("\n") if ln.startswith("Ticket source unreadable"))
         self.assertIn("at 11:02", line)
         self.assertIn("cycle", line)
+
+
+class GitHub(GoalCase):
+    SOURCE = "gh:acme/widgets#7"
+
+    def cache(self):
+        out, _ = goal_graph.read(str(self.issues), TRACK)
+        path = boss_store.frontier_cache(TRACK, self.SOURCE, self.cfg)
+        path.write_text(json.dumps(out), encoding="utf-8")
+        old = time.time() - 600
+        os.utime(path, (old, old))
+
+    def test_a_graph_nobody_has_read_draws_nothing(self):
+        self.write_goal(goal(self.SOURCE))
+        self.assertEqual(goal_graph.update(TRACK, fetch=False, now=NOW, cfg=self.cfg), "none")
+
+    def test_the_cache_is_drawn_and_a_failed_read_is_named_under_it(self):
+        self.write_goal(goal(self.SOURCE))
+        self.cache()
+        self.assertEqual(goal_graph.update(TRACK, fetch=False, now=NOW, cfg=self.cfg), "written")
+        with mock.patch.object(boss_store, "refresh_frontier", return_value="gh: HTTP 502") as r:
+            self.assertEqual(goal_graph.update(TRACK, now=NOW + 60, cfg=self.cfg), "written")
+            self.assertEqual(r.call_count, 1)
+        text = self.text()
+        self.assertIn('t03["03 · A claim updates the graph<br/>ready"]', text)
+        self.assertIn("Ticket source unreadable at 11:01: gh: HTTP 502", text)
+        with mock.patch.object(boss_store, "refresh_frontier", return_value="gh: HTTP 502"):
+            self.assertEqual(goal_graph.update(TRACK, now=NOW + 120, cfg=self.cfg), "unchanged")
 
 
 class Callers(GoalCase):

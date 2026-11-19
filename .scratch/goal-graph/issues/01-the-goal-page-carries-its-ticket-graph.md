@@ -47,8 +47,9 @@ file changes on disk, merging a save from the page paragraph by paragraph (SPEC 
 
 ## How it writes
 
-The write replaces only the text between the markers, through the track store (`boss_store`, read, swap
-the block, write via a sibling file and rename, under the store's `flock`), checks that the file still
+The write replaces only the text between the markers (read, swap the block, write via a sibling file and
+rename, under a `flock` of its own, `pm/.pulse/.goal-graph.lock`: the store's state lock is held for
+milliseconds by every hook, and a goal write must not make them wait), checks that the file still
 holds the text it read just before the rename, and retries once if not. Never a whole-file rewrite from a
 template: Thierry edits the goal page, and sheaf merges his save with this write by paragraph.
 

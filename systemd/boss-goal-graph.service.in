@@ -3,7 +3,7 @@
 # out of date. Put a deliberate change in a drop-in, <unit>.d/override.conf, which is left alone.
 [Unit]
 Description=Redraw the ticket graph at the top of every open boss goal page
-Documentation=file://@ROOT@/skills/boss/goal_graph.py
+Documentation=file://@ROOT@/routines/boss-goal-graph.md
 
 [Service]
 # @ROOT@ is the stable link routines/claude-boss, not a version directory;

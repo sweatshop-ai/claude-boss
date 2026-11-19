@@ -26,7 +26,8 @@ edits this page in sheaf while the pulse writes it.
 
 Who calls it:
 
-  boss-pulse.py   update(track) on every Stop of an open track's boss (cache only)
+  boss-pulse.py   update(track) after it read the track's tickets, on every Stop of
+                  an open track's boss (a GitHub graph from the cache it just read)
   frontier.py     `goal_graph.py source <source>` after a claim it made
   the timer       `goal_graph.py sweep` every minute (boss-goal-graph.timer)
 
@@ -39,7 +40,6 @@ Command line (exit 0, also when a track cannot be read, which goes to stderr;
 """
 import fcntl
 import importlib.util
-import json
 import os
 import re
 import subprocess
@@ -50,8 +50,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import boss_store  # noqa: E402
 import objective  # noqa: E402
-
-FRONTIER_PY = Path(__file__).resolve().parent.parent / "hand-to-boss" / "frontier.py"
+import pulse  # noqa: E402
 
 HEADING = "## Ticket graph"
 START = "<!-- ticket-graph:start (written by claude-boss from the Tickets source; edits here are overwritten) -->"
@@ -64,7 +63,7 @@ SUMMARY_RE = re.compile(r"^(\d+ tickets: .*?) · read \d{2}:\d{2}$|^(Ticket sour
 TITLE_MAX = 48
 GH_STALE_S = 120        # the sweep reads a GitHub graph again when its cache is older
 GH_READ_S = 30
-LOCK_NAME = ".goal-graph.lock"
+LOCK_NAME = ".goal-graph.lock"   # its own: the pulse's state lock is held for milliseconds, a goal write may wait on a slow disk
 
 # Light fills with dark text: readable on sheaf's light and dark theme alike.
 CLASSES = (
@@ -89,7 +88,8 @@ def _cut(text, n=TITLE_MAX):
 
 def _worker(claimed_by):
     """`Farid 2026-10-27 12:16` (a folder claim) or `Farid` (a GitHub label) -> `Farid`."""
-    return (claimed_by or "").split()[0] if (claimed_by or "").split() else "claimed"
+    words = (claimed_by or "").split()
+    return words[0] if words else "claimed"
 
 
 def diagram(out):
@@ -176,21 +176,6 @@ def _span(lines):
     return None if e is None else (s, e)
 
 
-def _top(lines):
-    """Where a new section goes: after the `# ` heading and its `_Status:` line, before
-    the first `## `; at the very top when there is no heading."""
-    h = objective._heading_at(lines)
-    if h < 0:
-        return 0
-    i = h + 1
-    j = i
-    while j < len(lines) and not lines[j].strip():
-        j += 1
-    if j < len(lines) and lines[j].startswith("_Status:"):
-        i = j + 1
-    return i
-
-
 def place(text, make):
     """`text` with its graph block replaced, or a new section inserted at the top.
 
@@ -209,7 +194,7 @@ def place(text, make):
     head = next((i for i, ln in enumerate(lines) if SECTION_RE.match(ln)), None)
     if head is not None:                    # the heading is there, the block is not
         return "\n".join(lines[:head + 1] + [""] + new + lines[head + 1:])
-    at = _top(lines)
+    at = objective.top_at(lines)
     before = lines[:at]
     after = lines[at:]
     while after and not after[0].strip():
@@ -219,51 +204,29 @@ def place(text, make):
 
 # ------------------------------------------------------------------ reading
 
-def _frontier_module():
-    spec = importlib.util.spec_from_file_location("frontier", str(FRONTIER_PY))
+def read(source, track, fetch=True, cfg=None):
+    """(frontier output, error) for a source; (None, None) for a GitHub graph nobody
+    has read yet. A folder is read now, as frontier.py reads it; a GitHub graph from
+    the cache the pulse keeps, read again first when `fetch` and the cache is older
+    than GH_STALE_S. A failed read keeps the cached frontier and returns its error."""
+    if source.startswith("gh:"):
+        failed = None
+        if fetch:
+            _, _, age = boss_store.cached_frontier(track, source, cfg)
+            if age is None or age > GH_STALE_S:
+                try:
+                    failed = boss_store.refresh_frontier(track, source, pulse.FRONTIER_PY, GH_READ_S, cfg)
+                except (subprocess.SubprocessError, OSError) as exc:
+                    failed = str(exc)
+        out, error, age = boss_store.cached_frontier(track, source, cfg)
+        if age is None:
+            return None, None
+        return out, error or failed
+    spec = importlib.util.spec_from_file_location("frontier", str(pulse.FRONTIER_PY))
     fr = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(fr)
-    return fr
-
-
-def read(source, track, fetch=True, cfg=None):
-    """(frontier output, error) for a source. A folder is read now; a GitHub graph from
-    the pulse's cache, read again first when `fetch` and the cache is older than
-    GH_STALE_S (a failed read never replaces the cache)."""
-    if source.startswith("gh:"):
-        cache = boss_store.frontier_cache(track, source, cfg)
-        try:
-            age = time.time() - cache.stat().st_mtime
-        except OSError:
-            age = None
-        if fetch and (age is None or age > GH_STALE_S):
-            try:
-                r = subprocess.run([sys.executable, str(FRONTIER_PY), "--json", source],
-                                   capture_output=True, text=True, timeout=GH_READ_S)
-                if r.returncode == 0:
-                    cache.parent.mkdir(parents=True, exist_ok=True)
-                    tmp = cache.with_suffix(".tmp%d" % os.getpid())
-                    tmp.write_text(r.stdout, encoding="utf-8")
-                    os.replace(tmp, cache)
-                elif age is None:
-                    return None, (r.stderr or r.stdout).strip() or "frontier.py exit %d" % r.returncode
-            except (subprocess.SubprocessError, OSError) as exc:
-                if age is None:
-                    return None, str(exc)
-        try:
-            text = cache.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            return None, None               # nothing read yet: no graph, no error
-        try:
-            out = json.loads(text)
-            out["tickets"]
-            return out, None
-        except (ValueError, KeyError, TypeError):
-            return None, text.strip()[:300] or "empty frontier cache"
-    fr = _frontier_module()
-    folder = os.path.expanduser(source)
     try:
-        tickets, errors = fr.load(folder)
+        tickets, errors = fr.load(os.path.expanduser(source))
     except OSError as exc:
         return None, str(exc)
     if tickets is None or errors:
@@ -289,8 +252,10 @@ def _write_if_same(path, expected, text):
 
 
 def update(track, fetch=True, now=None, cfg=None):
-    """Bring one track's graph up to date. Returns "written", "unchanged" or "none"
-    (no goal, no Tickets source, or a GitHub graph nobody has read yet).
+    """Bring one track's graph up to date. Returns "written"; "unchanged"; "deferred"
+    when the goal changed under the write (its source moved, or its text changed
+    twice), for the next run; or "none" (no goal, no Tickets source, or a GitHub
+    graph nobody has read yet).
 
     The frontier is read before the lock is taken: a GitHub read may take
     GH_READ_S, and the pulse, which waits on the same lock, has 5 s in all."""
@@ -324,13 +289,13 @@ def update(track, fetch=True, now=None, cfg=None):
             except (OSError, UnicodeDecodeError):
                 return "none"
             if objective.tickets_source(text) != source:
-                return "unchanged"           # the source moved meanwhile: the next run draws it
+                return "deferred"            # the source moved meanwhile: the next run draws it
             new = place(text, lambda old: block(out, at, error, old))
             if new == text:
                 return "unchanged"
             if _write_if_same(path, text, new):
                 return "written"
-        return "unchanged"                   # changed under us twice: the next run catches up
+        return "deferred"                    # changed under us twice: the next run catches up
     finally:
         if lock is not None:
             lock.close()

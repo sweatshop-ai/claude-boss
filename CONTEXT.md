@@ -96,8 +96,13 @@ gathers the facts and owns the gate and the state file.
 **Objective status**: the first `_Status: …_` line of `pm/<track>.goal.md`,
 wherever it sits; `boss-goal status` rewrites that same line. A track is open
 when it starts with OPEN. The objective's format — status, sections, ticket
-source — lives in `skills/boss/objective.py`; `boss-goal` reads and writes it
-through that module's command line.
+source, where a leading section goes — lives in `skills/boss/objective.py`;
+`boss-goal` reads and writes it through that module's command line.
+
+**Ticket graph**: the section `## Ticket graph` at the top of a goal page with a
+`## Tickets` source, a mermaid flowchart between two marker comments.
+`skills/boss/goal_graph.py` alone writes between the markers, and only when the
+graph changed; the pulse, `frontier.py claim` and `boss-goal-graph.timer` call it.
 
 **Reviewer chain**: the order in which a second model is asked for an answer:
 Codex first, then an optional fallback model through `claude`, otherwise
