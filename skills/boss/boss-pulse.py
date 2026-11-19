@@ -388,7 +388,8 @@ def main():
     decision = pulse.decide(facts)
     unassigned = len(ready) if source else len(facts.next_items)
     if decision is None:
-        return held("nothing-to-say", idle=len(idle), unassigned=unassigned)  # team busy, nothing overdue
+        # team busy, nothing overdue
+        return held("nothing-to-say", idle=len(idle), unassigned=unassigned)
 
     print(json.dumps({"hookSpecificOutput": {
         "hookEventName": "Stop",

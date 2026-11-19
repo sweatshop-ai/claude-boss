@@ -14,18 +14,13 @@ import time
 import boss_store
 
 MAX_BYTES = 1024 * 1024
-SUFFIX = ".silence.log"
 DAY_S = 86400
-
-
-def path(sid, cfg=None):
-    return boss_store.state_dir(cfg) / (sid + SUFFIX)
 
 
 def record(sid, track, gate, now=None, cfg=None, **details):
     """Append one line. `details` with a value of None are left out."""
     try:
-        p = path(sid, cfg)
+        p = boss_store.state_path(sid, "silence", cfg)
         p.parent.mkdir(parents=True, exist_ok=True)
         try:
             if p.stat().st_size >= MAX_BYTES:
@@ -48,7 +43,7 @@ def summary(track, now=None, cfg=None, window=DAY_S):
     counts, last = {}, None
     d = boss_store.state_dir(cfg)
     try:
-        files = [p for p in d.iterdir() if SUFFIX in p.name and p.is_file()]
+        files = [p for p in d.iterdir() if ".silence.log" in p.name and p.is_file()]
     except OSError:
         return counts, last
     for p in files:

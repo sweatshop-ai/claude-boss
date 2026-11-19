@@ -15,6 +15,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import boss_store  # noqa: E402
 import silence_log  # noqa: E402
 from test_boss_pulse import PULSE, TRACK, PulseCase  # noqa: E402
 
@@ -99,6 +100,16 @@ class Rotation(unittest.TestCase):
             self.assertEqual(p.read_text().count("\n"), 1)
             self.assertEqual((p.parent / (sid + ".silence.log.1")).stat().st_size,
                              silence_log.MAX_BYTES)
+
+    def test_reap_takes_the_log_and_its_rotation_with_the_session(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            sid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+            silence_log.record(sid, "demo", "no-goal", cfg=d)
+            p = boss_store.state_path(sid, "silence", d)
+            p.with_name(p.name + ".1").write_text("old\n")
+            found = {q.name for q, s in boss_store.reap_candidates(d) if s == sid}
+            self.assertEqual(found, {p.name, p.name + ".1"})
 
     def test_a_bad_session_id_is_not_an_error(self):
         silence_log.record("../x", "demo", "no-goal", cfg="/nonexistent")
