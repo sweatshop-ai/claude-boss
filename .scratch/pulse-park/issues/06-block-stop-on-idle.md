@@ -11,7 +11,9 @@ dispatch or park resets the count. A worker idle with no unassigned work and no 
 
 **Blocked by:** 01, 03, 05
 
-**Status:** ready-for-agent
+**Claimed by:** Anahita 2026-11-19 18:26
+
+**Status:** in-progress
 
 - [ ] Idle unparked worker plus unassigned work: the Stop hook blocks with a reason naming both
 - [ ] A validly parked worker does not block
