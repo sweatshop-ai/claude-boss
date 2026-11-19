@@ -202,7 +202,7 @@ class PulsePark(unittest.TestCase):
         """Pulse-park ticket 07."""
         text = flat()
         self.assertIn("retire the worker parked longest", text)
-        self.assertIn("keeping its park", text)
+        self.assertIn("keeping its park recorded", text)
         self.assertIn("start nobody", text)
 
 

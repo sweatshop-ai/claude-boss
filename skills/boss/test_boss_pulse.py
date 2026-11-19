@@ -298,16 +298,34 @@ class Frontier(PulseCase):
         self.assertIn("Spawn 1", out)
         self.assertNotIn("Retire", out)
 
-    def test_the_retired_workers_park_stays_recorded(self):
+    def test_a_retired_workers_park_stays_recorded_and_wakes_when_its_event_happens(self):
         import park
         self.one_ready_one_busy()
         self.park("Bea", "ticket:12", age_s=95 * 60)
-        self.pulse_with_team([("Bea", "w:1.1")], 2, memshort=self.SHORT)
-        self.assertEqual(park.read_parks(TRACK, self.tmp)["Bea"].event, "ticket:12")
-        # Bea is retired, gone from the roster: the pulse neither crashes nor wakes the park
+        self.assertTrue(park.retire(TRACK, "Bea", self.tmp))
+        # Bea is gone from the roster and her park holds: recorded, silent
         out = self.pulse_with_team([], 1, memshort=self.SHORT)
         self.assertEqual(out, "")
         self.assertEqual(park.read_parks(TRACK, self.tmp)["Bea"].event, "ticket:12")
+        # the ticket she waited on is done: the pulse says to hand her work on
+        (self.issues / "12-ui.md").write_text(ticket("12", "UI", status="done"))
+        out = self.pulse_with_team([], 1)
+        self.assertIn("Bea was retired for memory and its wait on ticket:12 has ended", out)
+
+    def test_a_new_worker_with_a_retired_workers_name_does_not_inherit_its_park(self):
+        import park
+        self.one_ready_one_busy()
+        self.park("Bea", "ticket:12", age_s=95 * 60)
+        park.retire(TRACK, "Bea", self.tmp)
+        out = self.pulse_with_team([("Bea", "w:1.1")], 2)
+        self.assertIn("IDLE NOW, yours: Bea", out)
+
+    def test_an_expired_park_is_dispatched_not_retired_when_memory_is_short(self):
+        self.one_ready_one_busy()
+        self.park("Bea", "ticket:12", age_s=2 * 3600 + 60)
+        out = self.pulse_with_team([("Bea", "w:1.1")], 2, memshort=self.SHORT)
+        self.assertNotIn("Retire Bea", out)
+        self.assertIn("Bea has waited 2 h on ticket:12", out)
 
     def test_an_idle_worker_without_a_park_is_still_named_beside_a_parked_one(self):
         self.graph_one_done_one_open()

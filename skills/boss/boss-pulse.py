@@ -114,12 +114,14 @@ def worker_statuses(sid):
 
 
 def woken_parks(sid, track, idle, done, tracker_text):
-    """(idle workers still without a park, the Woken parks of the idle ones, the parked ones).
+    """(idle workers still without a park, the Woken parks, the parked ones).
 
-    The parked are the idle workers whose park still holds, as Woken with state `waiting`: the
-    ones the boss may retire when memory is short. A worker whose park still holds is not idle
-    for the pulse. A park of a worker that is busy
-    or gone is left alone: only an idle worker is the boss's to dispatch."""
+    A worker whose park still holds is not idle for the pulse; it is one of the parked, as
+    Woken with state `waiting`, which the boss may retire when memory is short. A park of a
+    worker that is busy or gone is left alone: only an idle worker is the boss's to dispatch.
+    A park marked retired (`boss-park --retire`) is no idle worker's park: when its event
+    has happened or its time ran out, it is a Woken with state `retired`, for the boss to
+    hand that work on."""
     parks = park.read_parks(track)
     if not parks:
         return idle, (), ()
@@ -133,8 +135,15 @@ def woken_parks(sid, track, idle, done, tracker_text):
                        blockers=tuple(tracker.blocker_lines(tracker_text)) if tracker_text else ())
     now = time.time()
     free, woken, waiting = [], [], []
+    names = {n for n, _ in idle}
+    for name, p in parks.items():
+        if (p.retired and name not in names and not (p.event.startswith("owner:") and tracker_text is None)
+                and park.state(p, now, world) != "waiting"):
+            woken.append(pulse.Woken(name, p.event, "retired", int((now - p.since) / 60)))
     for name, coord in idle:
         p = parks.get(name)
+        if p and p.retired:
+            p = None                        # the old worker's park, not this session's
         if p and tracker_text is None and p.event.startswith("owner:"):
             st = "waiting"                  # tracker unread: no blocker line proves nothing
         else:
@@ -159,7 +168,7 @@ def memory_short(sid):
         seats = fleet.view(fleet.Tmux(timeout=3), registry.live(boss_store.config_dir()))
         me = fleet.seat_of(seats, sid=sid)
         if me:
-            rss = [r for r in (memfloor._rss_kb(s.session.get("pid"))
+            rss = [r for r in (memfloor.rss_kb(s.session.get("pid"))
                                for s in fleet.workers(seats, me.pane.id) if s.session) if r]
     except fleet.TmuxUnavailable:
         pass

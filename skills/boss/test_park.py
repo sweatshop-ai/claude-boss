@@ -110,6 +110,15 @@ class Store(unittest.TestCase):
         self.assertFalse(park.clear("demo", "Ada", self.cfg))
         self.assertEqual(list(park.read_parks("demo", self.cfg)), ["Bea"])
 
+    def test_retire_keeps_the_event_and_marks_the_park(self):
+        park.set_park("demo", "Ada", "ticket:12", now=NOW, cfg=self.cfg)
+        self.assertTrue(park.retire("demo", "Ada", self.cfg))
+        self.assertFalse(park.retire("demo", "Bea", self.cfg))
+        got = park.read_parks("demo", self.cfg)["Ada"]
+        self.assertEqual((got.event, got.since, got.retired), ("ticket:12", NOW, True))
+        park.set_park("demo", "Ada", "ticket:13", now=NOW + 1, cfg=self.cfg)   # a new park is not retired
+        self.assertFalse(park.read_parks("demo", self.cfg)["Ada"].retired)
+
     def test_a_torn_or_foreign_file_reads_as_no_parks(self):
         f = park.boss_store.parks_path("demo", self.cfg)
         f.parent.mkdir(parents=True)

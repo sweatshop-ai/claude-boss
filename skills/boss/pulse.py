@@ -137,10 +137,9 @@ def spawn_wanted(facts):
 
 
 def longest_parked(facts):
-    """The Woken of the worker that has waited longest on a park that does not call for a
-    dispatch (still waiting, or expired), or None. An `over` park is dispatched, not retired."""
-    held = [w for w in list(facts.parked) + list(facts.parks) if w.state in ("waiting", "expired")]
-    return max(held, key=lambda w: w.minutes) if held else None
+    """The Woken of the parked worker that has waited longest, or None. Only a park that still
+    holds counts: a worker whose park is over or expired is idle already, and is dispatched."""
+    return max(facts.parked, key=lambda w: w.minutes) if facts.parked else None
 
 
 def shortfall(facts):
@@ -159,7 +158,7 @@ def decide(facts):
         retire = spawn_wanted(facts) if longest_parked(facts) else 0
         spawn = spawn_next = 0
     if (not facts.idle and not facts.rungs and not facts.blockers and not facts.broken
-            and spawn <= 0 and spawn_next <= 0 and not retire):
+            and not facts.parks and spawn <= 0 and spawn_next <= 0 and not retire):
         return None                               # team busy, nothing overdue
     overdue = list(facts.rungs[:3])
     fired = dict(facts.fired)
@@ -215,8 +214,11 @@ def _fix_graph(facts, action):
             "`python3 %s %s` names what is wrong." % (FRONTIER_PY, facts.source))
 
 
-def _woken_line(w):
+def _woken_line(w, track):
     kind, _, target = w.event.partition(":")
+    if w.state == "retired":
+        return ("%s was retired for memory and its wait on %s has ended: hand its work (see its "
+                "Tracker line) to a worker, then `boss-park %s %s --clear`" % (w.worker, w.event, track, w.worker))
     if w.state == "over":
         what = {"ticket": "ticket %s done", "worker": "%s finished",
                 "owner": "%s answered"}.get(kind, "%s happened") % target
@@ -227,7 +229,7 @@ def _woken_line(w):
 
 def _wake(facts, action):
     return "Wake the workers whose park no longer holds: " + "; ".join(
-        _woken_line(w) for w in facts.parks[:policy.LIST_MAX]) + "."
+        _woken_line(w, facts.track) for w in facts.parks[:policy.LIST_MAX]) + "."
 
 
 def _dispatch_ready(facts, action):
@@ -253,12 +255,13 @@ def _retire_parked(facts, action):
     waited = "%d h %d min" % divmod(w.minutes, 60) if w.minutes >= 60 else "%d min" % w.minutes
     return ("Memory is short for the %d more worker%s your open work asks for (%s). Retire "
             "%s (parked %s on %s), the longest-parked: `boss-lifecycle.sh retire <pane> "
-            "--require-idle --kill`, its pane from `boss-lifecycle.sh list --mine`. Keep its park "
-            "(do not `--clear` it) and write on its Tracker line that it was retired for memory "
-            "and waits on %s, so its work is picked up when that happens. Then retry the spawn "
-            "once; if it is refused again, start nobody and carry on: this is not a blocker."
+            "--require-idle --kill`, its pane from `boss-lifecycle.sh list --mine`. Then mark its "
+            "park `boss-park %s %s --retire` (the event stays recorded, and the pulse tells you "
+            "when it has happened) and write on its Tracker line that it was retired for memory "
+            "and waits on %s, so its work is picked up then. Retry the spawn once; if it is "
+            "refused again, start nobody and carry on: this is not a blocker."
             % (action.n, "s" if action.n > 1 else "", facts.memshort, w.worker, waited,
-               w.event, w.event))
+               w.event, facts.track, w.worker, w.event))
 
 
 def _dispatch_next(facts, action):
@@ -312,7 +315,7 @@ def render(facts, decision):
     if facts.idle:
         lines.append("IDLE NOW, yours: "
                      + ", ".join("%s (%s)" % (n, c) for n, c in facts.idle[:policy.LIST_MAX]))
-    lines += [_woken_line(w) for w in facts.parks[:policy.LIST_MAX]]
+    lines += [_woken_line(w, facts.track) for w in facts.parks[:policy.LIST_MAX]]
     for r in decision.overdue:
         lines.append("OVERDUE: blocker open %d min, rung %d due - %s" % (r.minutes, r.rung, r.line))
     if facts.decided:

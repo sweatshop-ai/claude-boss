@@ -394,15 +394,17 @@ size, at least 0.5 GB. A refused spawn is not an error to work around: dispatch
 to the idle workers you have and spawn again when memory frees up.
 
 **Below the floor, the pulse tells you to retire the worker parked longest.** When
-the READY tickets ask for a spawn and the pulse reads memory short, it does not tell
-you to spawn. With workers parked (`boss-park`), it names the one that has waited
-longest, its park event and the refusal's numbers: retire the worker parked longest
-(`retire <pane> --require-idle --kill`), keeping its park (no `--clear`) and writing
-on its Tracker line that it was retired for memory and waits on that event, so its
-work is picked up when the event happens; then retry the spawn once. With nobody
-parked, or memory still short after the retire, start nobody: the pulse does not
-block you over it, and logs one `memory-short` line (`boss-pulse why <track>`) with
-the free memory and the floor.
+the READY tickets (or the unassigned NEXT items) ask for a spawn and the pulse reads
+memory short, it does not tell you to spawn. With workers parked (`boss-park`), it names
+the one that has waited longest, its park event and the refusal's numbers: retire the
+worker parked longest (`retire <pane> --require-idle --kill`), then mark its park
+`boss-park <track> <worker> --retire`, keeping its park recorded without letting a new
+session of the same name inherit it, and write on its Tracker line that it was retired for
+memory and waits on that event. When the event has happened (or 2 hours passed) the pulse
+says so: hand that work to a worker and `--clear` the park. Then retry the spawn once.
+With nobody parked, or memory still short after the retire, start nobody: the pulse does
+not block you over it, and logs a `memory-short` line (`boss-pulse why <track>`) with the
+free memory and the floor.
 
 A track may cap itself with a line `Workers: N - <reason>` in its goal file. The
 pulse honours N only when a reason is written, and shows it ("team 3 of 3: one

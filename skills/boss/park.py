@@ -4,6 +4,7 @@
     boss-park <track> <worker> --until <event>   park the worker (a new park replaces the old one)
     boss-park <track> --list                     the parks, each with what the pulse sees now
     boss-park <track> <worker> --clear           drop the park
+    boss-park <track> <worker> --retire          the worker was retired for memory: keep the park
 
 The events, in `WAKE`: `ticket:<id>` (the ticket graph reports it done), `worker:<name>` (that
 worker's session is idle or gone) and `owner:<question id>` (no open blocker of the tracker
@@ -26,7 +27,7 @@ import tracker
 TTL_S = 2 * 3600
 TARGET_RE = re.compile(r"[\w.-]{1,40}\Z")
 
-Park = namedtuple("Park", "worker event since")
+Park = namedtuple("Park", "worker event since retired", defaults=(False,))
 # What the pulse sees: ticket numbers the frontier reports done, {worker name: status} of the
 # boss's live workers, the lines under Open blockers.
 World = namedtuple("World", "done workers blockers", defaults=(frozenset(), {}, ()))
@@ -76,7 +77,7 @@ def read_parks(track, cfg=None):
     for worker, rec in boss_store.read_json(path).items():
         if (isinstance(rec, dict) and isinstance(rec.get("event"), str)
                 and isinstance(rec.get("since"), (int, float))):
-            out[worker] = Park(worker, rec["event"], rec["since"])
+            out[worker] = Park(worker, rec["event"], rec["since"], rec.get("retired") is True)
     return out
 
 
@@ -102,6 +103,20 @@ def clear(track, worker, cfg=None):
     had = []
     _update(track, lambda st: had.append(st.pop(worker, None)), cfg)
     return had[0] is not None
+
+
+def retire(track, worker, cfg=None):
+    """Mark the worker's park as that of a retired worker: its event stays recorded, so the
+    pulse can say when its work may be picked up, but a new session that gets the same name
+    does not inherit it. True when there was a park."""
+    had = []
+
+    def mark(st):
+        if isinstance(st.get(worker), dict):
+            st[worker]["retired"] = True
+            had.append(True)
+    _update(track, mark, cfg)
+    return bool(had)
 
 
 def state(p, now, world):
@@ -137,9 +152,13 @@ def main(argv):
                 # reads: the list judges expiry and the owner's answer, and says "waiting" else.
                 st = state(p, now, world) if p.event.startswith("owner:") else (
                     "expired" if now - p.since >= TTL_S else "waiting")
-                print("%s\t%s\t%s\t%d min" % (w, p.event, st, (now - p.since) // 60))
+                print("%s\t%s\t%s\t%d min" % (w, p.event, "retired, " + st if p.retired else st,
+                                               (now - p.since) // 60))
             if not parks:
                 print("no parks")
+            return 0
+        if len(rest) == 2 and rest[1] == "--retire":
+            print("retired park kept" if retire(track, rest[0]) else "no park for %s" % rest[0])
             return 0
         if len(rest) == 2 and rest[1] == "--clear":
             print("cleared" if clear(track, rest[0]) else "no park for %s" % rest[0])

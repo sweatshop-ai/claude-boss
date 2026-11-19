@@ -13,7 +13,8 @@ import pulse  # noqa: E402
 
 R = pulse.Rung
 W = pulse.Woken
-SHORT = "not spawning: 6.0 GB free, a new worker costs about 1.0 GB, and the 8 GB floor would not hold (5.0 GB left)"
+SHORT = ("not spawning: 6.0 GB free, a new worker costs about 1.0 GB, and the 8 GB floor "
+         "would not hold (5.0 GB left)")
 
 
 class Decide(unittest.TestCase):
@@ -200,10 +201,18 @@ class Decide(unittest.TestCase):
         self.assertEqual(pulse.longest_parked(pulse.Facts(
             track="demo", parked=[W("Ada", "ticket:12", "waiting", 20), W("Bea", "owner:q7", "waiting", 90)])).worker, "Bea")
 
-    def test_an_expired_park_counts_as_parked_longest(self):
+    def test_an_expired_or_over_park_is_dispatched_never_retired(self):
+        # such a worker is idle already: retiring it frees nothing the spawn needs
         f = pulse.Facts(track="demo", parked=[W("Ada", "ticket:12", "waiting", 20)],
                         parks=[W("Bea", "ticket:9", "expired", 125), W("Cy", "ticket:3", "over", 300)])
-        self.assertEqual(pulse.longest_parked(f).worker, "Bea")
+        self.assertEqual(pulse.longest_parked(f).worker, "Ada")
+        self.assertIsNone(pulse.longest_parked(pulse.Facts(track="demo", parks=f.parks)))
+
+    def test_a_retired_workers_park_ending_says_to_hand_its_work_on(self):
+        lines = pulse.render(*(lambda f: (f, pulse.decide(f)))(pulse.Facts(
+            track="demo", parks=[W("Bea", "ticket:9", "retired", 30)]))).splitlines()
+        self.assertTrue([x for x in lines if x.startswith("Bea was retired for memory")
+                         and "`boss-park demo Bea --clear`" in x])
 
     def test_a_refused_spawn_with_nobody_parked_starts_nobody_and_does_not_speak(self):
         f = pulse.Facts(track="demo", source="issues", size=3, memshort=SHORT, ready=["01 API"])
@@ -318,9 +327,9 @@ class Render(unittest.TestCase):
         self.assertIn(SHORT, text)
         self.assertIn("Bea (parked 2 h 15 min on owner:q7)", text)
         self.assertNotIn("Ada (parked", text)
-        self.assertIn("Keep its park", text)
+        self.assertIn("`boss-park demo Bea --retire`", text)
         self.assertIn("Tracker", text)
-        self.assertIn("retry the spawn once", text)
+        self.assertIn("Retry the spawn once", text)
         self.assertIn("start nobody", text)
         self.assertNotIn("Spawn 2", text)
 
