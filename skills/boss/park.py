@@ -8,8 +8,13 @@
     boss-park <track> <worker> --clear --retired drop a retired worker's kept park
 
 The events, in `WAKE`: `ticket:<id>` (the ticket graph reports it done), `worker:<name>` (that
-worker's session is idle or gone) and `owner:<question id>` (no open blocker of the tracker
-names the question any more: the boss clears it when the concierge's `ANSWER` comes). A clock
+worker's session is idle or gone), `owner:<question id>` (no open blocker of the tracker
+names the question any more: the boss clears it when the concierge's `ANSWER` comes),
+`pr:<owner/repo#N>-merged` (the PR is merged, or closed and so never will be) and
+`ci:<owner/repo#N>` (every check run of the PR's head has concluded, or the PR is no longer
+open). The two GitHub events are read with one `gh pr view` per PR, cached for `GH_CACHE_S`,
+so the Stop hook stays fast; a failed call keeps the park and goes to `pm/park-gh.log`. A worker
+that ends its turn waiting on CI or review of its own PR parks itself on `ci:` (SKILL.md). A clock
 time is no event. A park lasts `TTL_S`, then the pulse asks the boss again; a message from the
 boss to the worker (boss-guard.py) or `--clear` drops it sooner.
 
@@ -17,8 +22,10 @@ A park is `{worker: {"event": ..., "since": epoch}}` in `pm/.pulse/<track>.parks
 retired worker's park moves to the key `retired:<worker>` with `"retired": epoch` (when), so a
 new session that gets the name neither inherits it nor wipes it.
 """
+import json
 import os
 import re
+import subprocess
 import sys
 import time
 from collections import namedtuple
@@ -29,6 +36,11 @@ import tracker
 
 TTL_S = 2 * 3600
 TARGET_RE = re.compile(r"[\w.-]{1,40}\Z")
+PR = r"\w[\w.-]{0,99}/\w[\w.-]{0,99}#\d{1,7}"      # no leading "-": it goes to `gh --repo`
+TARGETS = {"pr": re.compile(PR + r"-merged\Z"), "ci": re.compile(PR + r"\Z")}   # kind -> target form
+GH_CACHE_S = 60         # one `gh` call per PR per minute, a failed one included
+GH_CALL_S = 3           # one call's timeout; the Stop hook has 5 s in all
+GH_BUDGET_S = 3.5       # all the calls of one pulse
 
 RETIRED = "retired:"
 RETIRE_GAP_S = 15 * 60          # after a retire for memory, the pulse retires no other for this long
@@ -36,7 +48,8 @@ RETIRE_GAP_S = 15 * 60          # after a retire for memory, the pulse retires n
 Park = namedtuple("Park", "worker event since retired", defaults=(False,))
 # What the pulse sees: ticket numbers the frontier reports done, {worker name: status} of the
 # boss's live workers, the lines under Open blockers.
-World = namedtuple("World", "done workers blockers", defaults=(frozenset(), {}, ()))
+# `prs(repo, number)` is the GitHub lookup (pr_lookup): {"state", "ci_done"} or None when unknown.
+World = namedtuple("World", "done workers blockers prs", defaults=(frozenset(), {}, (), None))
 
 
 def _ticket(target, world):
@@ -53,12 +66,98 @@ def _owner(target, world):
     return not any(pat.search(line) for line in world.blockers)
 
 
-# kind -> (target label for the usage line, wake check). Ticket 04 adds the GitHub kinds here.
+def _pr_of(target, world):
+    """The lookup's answer for `owner/repo#N[-merged]`, None when unknown or there is no lookup."""
+    repo, _, num = target.removesuffix("-merged").partition("#")
+    return world.prs(repo, int(num)) if world.prs else None
+
+
+def _pr_ended(target, world):
+    pr = _pr_of(target, world)
+    return bool(pr) and pr["state"] != "OPEN"
+
+
+def _ci(target, world):
+    pr = _pr_of(target, world)
+    return bool(pr) and (pr["state"] != "OPEN" or pr["ci_done"])
+
+
+# kind -> (target label for the usage line, wake check).
 WAKE = {
     "ticket": ("<id>", _ticket),
     "worker": ("<name>", _worker),
     "owner": ("<question id>", _owner),
+    "pr": ("<owner/repo#N>-merged", _pr_ended),
+    "ci": ("<owner/repo#N>", _ci),
 }
+
+
+def gh_run(args, timeout):
+    """`gh <args>` stdout; raises OSError, SubprocessError or ValueError on any failure."""
+    r = subprocess.run(["gh", *args], capture_output=True, text=True, timeout=timeout)
+    if r.returncode:
+        raise ValueError("gh exited %d: %s" % (r.returncode, r.stderr.strip()[:200]))
+    return r.stdout
+
+
+def _pr_info(text):
+    """{"state", "ci_done"} from `gh pr view --json state,statusCheckRollup`; ValueError when unreadable."""
+    try:
+        data = json.loads(text)
+        state, rollup = data["state"], data.get("statusCheckRollup") or []
+        if not isinstance(state, str) or not isinstance(rollup, list):
+            raise TypeError(state)
+        def over(c):
+            if c.get("__typename") == "StatusContext":
+                return c.get("state") not in ("PENDING", "EXPECTED")
+            return c.get("status") == "COMPLETED"
+        return {"state": state, "ci_done": bool(rollup) and all(over(c) for c in rollup)}
+    except (TypeError, KeyError, AttributeError, ValueError) as exc:
+        raise ValueError("unreadable gh output: %s" % exc)
+
+
+def _gh_log(cfg, key, why):
+    try:
+        path = boss_store.pm_dir(cfg) / "park-gh.log"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write("%s %s: %s\n" % (time.strftime("%Y-%m-%dT%H:%M:%S"), key, why))
+    except OSError:
+        pass
+
+
+def pr_lookup(track, now=None, cfg=None, run=None):
+    """A `World.prs`: (repo, number) -> {"state", "ci_done"} or None, never raising.
+
+    An answer, or a failure, is kept in `pm/.pulse/<track>.gh.json` for GH_CACHE_S, so repeated
+    Stops make no new call. A failure is logged and reads as unknown: the park holds."""
+    now = time.time() if now is None else now
+    run = run or gh_run
+    path = boss_store.gh_cache_path(track, cfg)
+    deadline = time.monotonic() + GH_BUDGET_S
+
+    def lookup(repo, number):
+        key = "%s#%d" % (repo, number)
+        hit = boss_store.read_json(path).get(key) if path else None
+        if isinstance(hit, dict) and isinstance(hit.get("at"), (int, float)) and 0 <= now - hit["at"] < GH_CACHE_S:
+            return hit.get("info")
+        left = deadline - time.monotonic()
+        if left <= 0:
+            _gh_log(cfg, key, "pulse budget spent, not asked")
+            return None                         # this pulse's budget is spent: ask again next time
+        try:
+            info = _pr_info(run(["pr", "view", str(number), "--repo", repo,
+                                 "--json", "state,statusCheckRollup"], min(GH_CALL_S, left)))
+        except (OSError, subprocess.SubprocessError, ValueError) as exc:
+            info = None
+            _gh_log(cfg, key, exc)
+        if path:
+            try:
+                boss_store.update_json(path, lambda st: st.update({key: {"at": now, "info": info}}))
+            except OSError:
+                pass
+        return info
+    return lookup
 
 
 def allowed():
@@ -68,7 +167,7 @@ def allowed():
 def parse_event(text):
     """(kind, target) of an event, or ValueError naming the allowed events."""
     kind, sep, target = (text or "").strip().partition(":")
-    if kind not in WAKE or not sep or not TARGET_RE.match(target.strip()):
+    if kind not in WAKE or not sep or not TARGETS.get(kind, TARGET_RE).match(target.strip()):
         raise ValueError("not an event: %r. Allowed: %s (a clock time is not one)"
                          % (text, allowed()))
     return kind, target.strip()

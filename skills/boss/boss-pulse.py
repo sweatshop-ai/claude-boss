@@ -11,8 +11,9 @@ A Stop hook's `additionalContext` is delivered to the model and the conversation
 continues (Claude Code 2.1.266: hookSpecificOutput for Stop accepts exactly that
 one field, "non-error feedback delivered to the model; the conversation
 continues so the model can act on it"). So the pulse does not argue with the
-boss and does not block it. It hands it the objective and the list of idle
-workers at the moment it was about to go quiet.
+boss. It hands it the objective and the list of idle workers at the moment it
+was about to go quiet. One case blocks the Stop: an idle worker with no park beside
+unassigned work, at most 3 times in a row for the same idle set, then the pulse lets go.
 
 Silence stays the default. The pulse fires ONLY when all of these hold:
 
@@ -132,7 +133,7 @@ def woken_parks(sid, track, idle, done, tracker_text):
         for p in parks.values():
             if p.event.startswith("worker:"):
                 workers[p.event.partition(":")[2]] = "busy"
-    world = park.World(done=frozenset(done), workers=workers,
+    world = park.World(done=frozenset(done), workers=workers, prs=park.pr_lookup(track),
                        blockers=tuple(tracker.blocker_lines(tracker_text)) if tracker_text else ())
     now = time.time()
     free, woken, waiting = [], [], []
@@ -399,7 +400,25 @@ def gate(sid):
     return now, st
 
 
-def commit(sid, now, fired):
+BLOCKS_STALE_S = 3600   # a count older than this is from another spell of idleness
+
+
+def blocks_so_far(sid, idle_key, now):
+    """Blocks in a row already given for this exact idle set; a different set, or one
+    long ago, starts again."""
+    b = boss_store.read_state(sid, "pulse").get("blocks") or {}
+    if b.get("set") != idle_key or now - b.get("at", 0) > BLOCKS_STALE_S:
+        return 0
+    return b.get("n", 0)
+
+
+def reset_blocks(sid):
+    """Nobody is idle beside open work any more: the count of blocks starts over."""
+    if boss_store.read_state(sid, "pulse").get("blocks"):
+        boss_store.update_state(sid, "pulse", lambda st: st.pop("blocks", None))
+
+
+def commit(sid, now, fired, blocks=None):
     """Record that the pulse spoke. Under the store's lock, so the hour's count
     is the sum of every Stop hook that spoke, not the last writer's."""
     def spoke(st):
@@ -409,6 +428,8 @@ def commit(sid, now, fired):
         st["count"] = st.get("count", 0) + 1
         st.setdefault("hour_start", now)
         st["rungs"] = fired
+        if blocks is not None:
+            st["blocks"] = blocks
     boss_store.update_state(sid, "pulse", spoke)
 
 
@@ -487,15 +508,29 @@ def main():
     unassigned = len(ready) if source else len(facts.next_items)
     if decision is None:
         # team busy, nothing overdue
+        reset_blocks(sid)
         if short:
             return held("memory-short", idle=len(idle), unassigned=unassigned, refusal=short)
         return held("nothing-to-say", idle=len(idle), unassigned=unassigned)
 
+    let_go = 0
+    if decision.block:
+        idle_key = ",".join(sorted(n for n, _ in idle))
+        blocked = blocks_so_far(sid, idle_key, now)
+        if blocked < pulse.BLOCK_LIMIT:
+            commit(sid, now, decision.fired, blocks={"set": idle_key, "n": blocked + 1, "at": now})
+            print(json.dumps({"decision": "block", "reason": pulse.block_reason(facts, decision)}))
+            return held("blocked", idle=len(idle), unassigned=unassigned, blocks=blocked + 1,
+                        refusal=short)
+        let_go = blocked           # the ordinary pulse below still speaks: only the block is let go
     print(json.dumps({"hookSpecificOutput": {
         "hookEventName": "Stop",
         "additionalContext": pulse.render(facts, decision),
     }}))
-    commit(sid, now, decision.fired)
+    commit(sid, now, decision.fired, blocks={"set": idle_key, "n": let_go, "at": now} if let_go else {})
+    if let_go:
+        return held("block-let-go", idle=len(idle), unassigned=unassigned, blocks=let_go,
+                    actions=",".join(a.kind for a in decision.actions))
     return held("fired", idle=len(idle), unassigned=unassigned,
                 actions=",".join(a.kind for a in decision.actions), refusal=short)
 
