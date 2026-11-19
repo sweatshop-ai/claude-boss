@@ -264,6 +264,16 @@ def starts_teammate(ti):
         and not ti.get("isolation")
 
 
+# Their tool sets have no Edit, Write or NotebookEdit: the answer comes back and nothing is written.
+READ_ONLY_AGENTS = {"Explore", "Plan"}
+
+
+def is_read_only_subagent(ti):
+    """True for an Explore or Plan subagent that is not a teammate. Any other type may write, and
+    the guard cannot tell from the prompt whether it will."""
+    return ti.get("subagent_type") in READ_ONLY_AGENTS and not starts_teammate(ti)
+
+
 def ordinal(n):
     if 10 <= n % 100 <= 20:
         suffix = "th"
@@ -467,18 +477,24 @@ def main():
             return 0
         detail = str(fp)[:200]
 
+    read_only = tool == "Agent" and is_read_only_subagent(ti)
     try:
         boss_store.markers_dir().mkdir(parents=True, exist_ok=True)
         with (boss_store.pm_dir() / "boss-guard.log").open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps({
+            entry = {
                 "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
                 "session": sid,
                 "tool": tool,
                 "detail": detail,
-            }) + "\n")
+            }
+            if read_only:
+                entry["kind"] = "read-only-subagent"
+            fh.write(json.dumps(entry) + "\n")
     except OSError:
         pass
 
+    if read_only:
+        return 0                      # coordination: logged, never warned, never counted
     n = bump(sid)
     if tool == "Agent" and starts_teammate(ti):
         # Every one is said. A teammate has no pane and no stamp, so nothing else

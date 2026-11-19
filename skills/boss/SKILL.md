@@ -66,7 +66,7 @@ Code puts on every session's PATH.
 
 **You coordinate. Every piece of actual work goes to a worker — there is no task
 too small to dispatch.** You may run only: `boss-lifecycle.sh`, `boss-tracker`,
-`boss-goal`, `boss-alert`, `boss-unask`, `boss-panes.py`, read-only `gh`, `sleep`, `tmux`, files under
+`boss-goal`, `boss-alert`, `boss-unask`, `boss-panes.py`, read-only `gh`, `sleep`, `tmux`, a read-only subagent or a `Monitor` (see Carriers below), files under
 `~/.claude/pm/` or `${CLAUDE_PLUGIN_ROOT}/skills/boss/`, and `boss-run` for a write the
 mission needs that you would otherwise hand to the owner's clipboard — a PR
 comment, a PR creation, a file outside `pm/`, a dev restart. `boss-run` asks
@@ -89,6 +89,19 @@ names every spawn a bare-`claude` boss makes. Workers may lead them — see Phas
 
 *Why this is four lines and not three pages: the three pages did not work. See
 `references/incidents.md`.*
+
+## Carriers — worker, subagent or Monitor
+
+Which carrier a job gets is decided by the job, not by habit. A pane costs tokens for hours; most one-answer jobs need none.
+
+| Job | Carrier |
+|---|---|
+| Read-only, under about an hour, one answer comes back to you: an inventory, a render check, a dependency graph from the trackers | **Subagent**: `subagent_type` `Explore` or `Plan` (no Edit, Write or NotebookEdit), always `run_in_background: true`, never with a `name` (that is a teammate, refused above) |
+| Waiting on an external state: CI green, a cron firing | **`Monitor`** or a background shell. Neither is in the guard's watched set |
+| It writes to a repo or a box, holds state for hours (a stage, a PR taken to merge), or needs the owner's word in its pane | **Worker** in its own pane |
+| A review | **Not a boss subagent.** The one-round rule stands: the worker's `code-review` plus `/codex-review` is the round, and you run none of your own |
+
+The guard logs an unnamed `Explore` or `Plan` call as `kind: read-only-subagent` and says nothing. A `general-purpose` call, or any type with write tools, keeps the warning: the guard cannot tell from the prompt whether it will write.
 
 ## Never defer an obvious action back to the owner
 

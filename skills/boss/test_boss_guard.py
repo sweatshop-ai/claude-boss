@@ -374,6 +374,40 @@ class StillFlagged(GuardCase):
         self.assertEqual(len(self.log_lines()), 1)
 
 
+class ReadOnlySubagent(GuardCase):
+    """An Explore or Plan subagent has no Edit, Write or NotebookEdit, so it is
+    coordination: the answer comes back to the boss and nothing is written."""
+
+    def spawn(self, **extra):
+        ti = {"description": "inventory", "prompt": "list the open PRs", "run_in_background": True}
+        ti.update(extra)
+        return self.fire(tool="Agent", tool_input=ti)
+
+    def test_an_unnamed_explore_or_plan_call_is_not_warned(self):
+        for kind in ("Explore", "Plan"):
+            self.assertEqual(self.spawn(subagent_type=kind), "", kind)
+
+    def test_it_is_still_logged_as_read_only(self):
+        self.spawn(subagent_type="Explore")
+        self.assertEqual([(l["tool"], l.get("kind")) for l in self.log_lines()],
+                         [("Agent", "read-only-subagent")])
+
+    def test_it_spends_none_of_the_warning_budget(self):
+        self.spawn(subagent_type="Explore")
+        self.assertIn("Dispatch it to a worker", self.fire("touch f"))
+
+    def test_a_general_purpose_call_is_warned_as_before(self):
+        self.assertIn("Dispatch it to a worker", self.spawn(subagent_type="general-purpose"))
+        self.assertNotIn("kind", self.log_lines()[0])
+
+    def test_a_call_with_no_type_is_warned_as_before(self):
+        self.assertIn("Dispatch it to a worker", self.spawn())
+
+    def test_a_named_explore_call_is_still_a_teammate(self):
+        self.assertIn("agent-teams teammate", self.spawn(subagent_type="Explore", name="scout"))
+        self.assertNotIn("kind", self.log_lines()[0])
+
+
 class AgentTeams(GuardCase):
     """A named Agent call in a boss starts an agent-teams teammate.
 
