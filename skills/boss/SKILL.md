@@ -1188,6 +1188,15 @@ Three sources. Turn all three on.
    work of yours is still running, and it goes silent the moment the objective is
    `met` or `paused`. `boss-goal check` reports whether it is armed.
 
+   Every Stop of a boss session leaves one line in `pm/.pulse/<sid>.silence.log`
+   (rotated at 1 MB): the time, the track, and the gate that held the pulse back
+   (`stop-hook-active`, `no-track`, `no-goal`, `objective-closed`,
+   `background-tasks`, `rate-gate`, `open-question`, `nothing-to-say`) or
+   `fired` with its actions, plus the idle workers and unassigned items when
+   known. A session that is not a boss is not logged. `boss-pulse.py why <track>`
+   counts the last day's Stops per gate and gives the last firing, so a silence
+   can be explained afterwards instead of argued.
+
    When it fires, **act — do not acknowledge it.** Dispatch the top item, or park
    the idle worker with a condition the pulse can check, and stop. "Parked on
    purpose" in words is an idle team: on 2026-10-30 a boss said it 174

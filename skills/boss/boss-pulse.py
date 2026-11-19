@@ -52,6 +52,7 @@ import park  # noqa: E402
 import policy  # noqa: E402
 import pulse  # noqa: E402
 import registry  # noqa: E402
+import silence_log  # noqa: E402
 import tracker  # noqa: E402
 
 MIN_GAP_S = 60          # never twice inside a minute
@@ -382,43 +383,54 @@ def commit(sid, now, fired):
 # ------------------------------------------------------------------ main
 
 def main():
+    if sys.argv[1:2] == ["why"]:
+        if len(sys.argv) != 3:
+            print("usage: boss-pulse.py why <track>", file=sys.stderr)
+            return 2
+        print(silence_log.why(sys.argv[2]))
+        return 0
     try:
         payload = json.load(sys.stdin)
     except (ValueError, OSError):
         return 0
     if payload.get("hook_event_name") != "Stop":
         return 0
-    if payload.get("stop_hook_active"):
-        return 0                                  # never stack on another block
 
     sid = payload.get("session_id") or ""
     if not boss_store.is_boss(sid):
-        return 0                                  # not a boss
+        return 0                                  # not a boss: nothing of ours to log
     track = boss_store.track_of(sid)
+
+    def held(gate, **details):
+        silence_log.record(sid, track, gate, **details)
+        return 0
+
+    if payload.get("stop_hook_active"):
+        return held("stop-hook-active")           # never stack on another block
     if not track:
-        return 0                                  # no track claimed yet, or not a plain name
+        return held("no-track")                   # no track claimed yet, or not a plain name
 
     body = read_goal(track)
     if body is None:
-        return 0                                  # opt-in: no objective, no pulse
+        return held("no-goal")                    # opt-in: no objective, no pulse
     if not objective.is_open(body):
-        return 0                                  # paused, or met
+        return held("objective-closed")           # paused, or met
 
     # "Session is done" vs "session is paused waiting for background work" — the
     # runtime hands us the difference, so use it instead of guessing.
     for t in payload.get("background_tasks") or []:
         if (t.get("status") or "").lower() in ("running", "pending"):
-            return 0
+            return held("background-tasks")
 
     now, st = gate(sid)
     if now is None:
-        return 0
+        return held("rate-gate")
 
     # Already asking? Then the boss is visibly waiting and needs no push. This
     # is also what stops the check looping: a pending question ends the turn
     # differently, and the registry says so.
     if question_pending(sid):
-        return 0
+        return held("open-question")
 
     idle, size = team(sid)
     fired = dict(st.get("rungs") or {})
@@ -435,15 +447,18 @@ def main():
         outcome=objective.section(body, "Outcome"), unmet=objective.unmet(body),
         next_items=objective.next_items(body), parks=woken)
     decision = pulse.decide(facts)
+    unassigned = len(ready) if source else len(facts.next_items)
     if decision is None:
-        return 0                                  # team busy, nothing overdue
+        # team busy, nothing overdue
+        return held("nothing-to-say", idle=len(idle), unassigned=unassigned)
 
     print(json.dumps({"hookSpecificOutput": {
         "hookEventName": "Stop",
         "additionalContext": pulse.render(facts, decision),
     }}))
     commit(sid, now, decision.fired)
-    return 0
+    return held("fired", idle=len(idle), unassigned=unassigned,
+                actions=",".join(a.kind for a in decision.actions))
 
 
 if __name__ == "__main__":
