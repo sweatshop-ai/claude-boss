@@ -11,6 +11,7 @@
 
 **Claimed by:** Suki 2026-11-19 15:34
 
-**Status:** in-progress
+**Status:** done
 
-- [ ] Test first: a provisional GO on a base with no deploy.json prints the path and the ready JSON for that base
+- [x] Test first: a provisional GO on a base with no deploy.json prints the path and the ready JSON for that base
+  - Evidence: PR sweatshop-ai/claude-boss#158 merged (`boss_merge.py` round 1, provisional); test `test_a_missing_deploy_json_refusal_names_the_file_and_the_ready_json` failed on the old message, passed after; `pytest skills/boss/test_boss_merge.py` 196 passed; CI pytest success (total_count 1); resolved path `/home/tiroir/Projects/boss-plugin-wt/suki/skills/boss/boss_merge.py`.
