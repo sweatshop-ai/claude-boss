@@ -11,9 +11,9 @@
 
 **Claimed by:** Rafael (2026-11-19)
 
-**Status:** in-progress
+**Status:** done (PR 159, merge eeb789b, 2026-11-19)
 
-- [ ] Test first: a review answer with only MINOR findings and `VERDICT: GO` is a GO; the brief carries the tag and diff-first rules
-- [ ] Ticket 46 done and merged in the same PR
-- [ ] Skill texts and the global CLAUDE.md say the rule
-- [ ] PR merged to main with green CI and one review round
+- [x] Test first: a review answer with only MINOR findings and `VERDICT: GO` is a GO; the brief carries the tag and diff-first rules
+- [x] Ticket 46 done and merged in the same PR
+- [x] Skill texts and the global CLAUDE.md say the rule
+- [x] PR merged to main with green CI and one review round
