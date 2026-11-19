@@ -382,7 +382,7 @@ your one-task rule and the 150k split fire first.
 broadcast is the most expensive thing you can do; it should be rare and
 deliberate.
 
-### 3. Span of control. No limit, a 8 GB memory floor.
+### 3. Span of control. No limit, an 8 GB memory floor.
 
 **Run as many workers as there is ready work** (the owner, 2026-11-19: a cap only
 spends slower). The pulse asks for one spawn per ready ticket beyond the idle
@@ -613,9 +613,9 @@ just finished a related task gets the follow-up. Otherwise pick an idle worker a
 
 **With a ticket graph, dispatch the whole frontier.** When the objective names
 `## Tickets`, the pulse lists every ready ticket. Give one to each idle worker in
-the same turn, not one per turn; when ready tickets outnumber idle workers and the
-spawn for the rest (no limit but the memory floor). Claim each ticket before its dispatch goes
-out: `python3 ${CLAUDE_PLUGIN_ROOT}/skills/hand-to-boss/frontier.py claim <source>
+the same turn, not one per turn; when ready tickets outnumber idle workers,
+spawn for the rest (no limit but the memory floor). Claim each ticket before its dispatch
+goes out: `python3 ${CLAUDE_PLUGIN_ROOT}/skills/hand-to-boss/frontier.py claim <source>
 <NN> <worker>` (a folder gets a `**Claimed by:**` line, committed by path; a
 `gh:` source gets a `worker:<name>` label). When a ticket closes, run
 `boss-goal check <track>`: it re-reads the graph, so the tickets it unblocked are

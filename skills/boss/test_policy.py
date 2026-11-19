@@ -80,7 +80,7 @@ QUOTES = {
         "the %s split fire first" % k(policy.WORKER_SPLIT),
         "They show up below %s too" % k(policy.WORKER_SPLIT),
         "A worker crossing %s is asked" % k(policy.WORKER_SPLIT),
-        "### 3. Span of control. No limit, a %d GB memory floor." % policy.MEMORY_FLOOR_GB,
+        "### 3. Span of control. No limit, an %d GB memory floor." % policy.MEMORY_FLOOR_GB,
         "less than %d GB of `MemAvailable`" % policy.MEMORY_FLOOR_GB,
         "at least %s GB" % policy.WORKER_MIN_GB,
         "start with %d background\n   subagents, at most %d" % (policy.BURST_START, policy.BURST_MAX),

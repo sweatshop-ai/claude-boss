@@ -14,7 +14,7 @@ from pathlib import Path
 
 import policy
 
-GB = 1024 * 1024  # in kB
+KB_PER_GB = 1024 * 1024
 
 
 def mem_available_kb(path="/proc/meminfo"):
@@ -26,18 +26,18 @@ def mem_available_kb(path="/proc/meminfo"):
 
 def worker_cost_kb(rss_kb):
     """The mean of the workers' resident sizes, never under the minimum."""
-    least = int(policy.WORKER_MIN_GB * GB)
+    least = int(policy.WORKER_MIN_GB * KB_PER_GB)
     return max(least, sum(rss_kb) // len(rss_kb)) if rss_kb else least
 
 
 def refusal(avail_kb, rss_kb):
     """Why a spawn is refused, with the numbers, or None when it fits."""
     cost = worker_cost_kb(rss_kb)
-    if avail_kb - cost >= policy.MEMORY_FLOOR_GB * GB:
+    if avail_kb - cost >= policy.MEMORY_FLOOR_GB * KB_PER_GB:
         return None
     return ("not spawning: %.1f GB free, a new worker costs about %.1f GB, and the %d GB floor "
-            "would not hold (%.1f GB left)" % (avail_kb / GB, cost / GB, policy.MEMORY_FLOOR_GB,
-                                              (avail_kb - cost) / GB))
+            "would not hold (%.1f GB left)" % (avail_kb / KB_PER_GB, cost / KB_PER_GB, policy.MEMORY_FLOOR_GB,
+                                              (avail_kb - cost) / KB_PER_GB))
 
 
 def _rss_kb(pid):
