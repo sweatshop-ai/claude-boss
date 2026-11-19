@@ -410,7 +410,7 @@ free memory and the floor.
 
 A track may cap itself with a line `Workers: N - <reason>` in its goal file. The
 pulse honours N only when a reason is written, and shows it ("team 3 of 3: one
-change at a time on the plans-live box"). Without a reason the field is ignored
+change at a time on the production box"). Without a reason the field is ignored
 and the pulse says so. Every worker's report still lands in your context, so keep
 reports short and let workers coordinate peer-to-peer through `/team` while you
 handle dispatch, review and escalation.

@@ -575,9 +575,9 @@ class Frontier(PulseCase):
             (self.issues / ("%02d-x.md" % n)).write_text(ticket("%02d" % n, "T%d" % n))
         self.goal_with_tickets(self.issues)
         path = self.tmp / "pm" / (TRACK + ".goal.md")
-        path.write_text(path.read_text() + "\nWorkers: 3 - one at a time on the plans-live box\n")
+        path.write_text(path.read_text() + "\nWorkers: 3 - one at a time on the production box\n")
         out = self.pulse_with_team([], size=1)
-        self.assertIn("Spawn 2 more workers (team 3 of 3: one at a time on the plans-live box)", out)
+        self.assertIn("Spawn 2 more workers (team 3 of 3: one at a time on the production box)", out)
 
     def test_a_workers_line_without_a_reason_is_ignored_and_says_so(self):
         for n in range(1, 6):
