@@ -6,7 +6,9 @@ Calibration, part of A: for one week the owner notes the `/usage` percentage twi
 
 **Blocked by:** 49 (decision 5A order)
 
-**Status:** ready-for-agent
+**Claimed by:** Saskia 2026-11-19 16:19
+
+**Status:** in-progress
 
 - [ ] Test first: the script's counts on a small fixture of transcript lines match a hand count
 - [ ] Timer installed and enabled; one run posts to #claude-ops (message permalink in the report)
