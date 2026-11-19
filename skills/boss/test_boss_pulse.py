@@ -264,6 +264,50 @@ class Frontier(PulseCase):
         self.assertIn("IDLE NOW, yours: Cy (w:1.2)", out)
         self.assertNotIn("Ada", out.split("IDLE NOW")[1].splitlines()[0])
 
+    def with_gh(self, answer):
+        import park
+        old, park.gh_run = park.gh_run, lambda args, timeout: answer
+        self.addCleanup(setattr, park, "gh_run", old)
+
+    def test_a_worker_parked_on_the_ci_of_its_pr_is_not_idle_until_ci_ends(self):
+        self.graph_one_done_one_open()
+        self.park("Ada", "ci:acme/app#5")
+        self.with_gh(json.dumps({"state": "OPEN", "statusCheckRollup": [
+            {"__typename": "CheckRun", "status": "IN_PROGRESS"}]}))
+        self.assertEqual(self.pulse_with_team([("Ada", "w:1.0")], 2), "")
+
+    def test_a_park_on_ci_wakes_when_the_checks_have_concluded(self):
+        self.graph_one_done_one_open()
+        self.park("Ada", "ci:acme/app#5")
+        self.with_gh(json.dumps({"state": "OPEN", "statusCheckRollup": [
+            {"__typename": "CheckRun", "status": "COMPLETED"}]}))
+        out = self.pulse_with_team([("Ada", "w:1.0")], 2)
+        self.assertIn("Ada's wait is over (CI of acme/app#5 finished, or the PR is no longer open): dispatch it", out)
+
+    def test_a_park_on_a_merge_wakes_when_the_pr_is_merged(self):
+        self.graph_one_done_one_open()
+        self.park("Ada", "pr:acme/app#5-merged")
+        self.with_gh(json.dumps({"state": "MERGED", "statusCheckRollup": []}))
+        out = self.pulse_with_team([("Ada", "w:1.0")], 2)
+        self.assertIn("Ada's wait is over (acme/app#5 merged or closed): dispatch it", out)
+
+    def test_a_gh_failure_leaves_the_park_holding(self):
+        self.graph_one_done_one_open()
+        self.park("Ada", "ci:acme/app#5")
+        self.with_gh("not json")
+        self.assertEqual(self.pulse_with_team([("Ada", "w:1.0")], 2), "")
+
+    def test_ready_work_beside_a_worker_waiting_on_its_pr_is_spawned_not_given_to_it(self):
+        for n in ("01", "02"):
+            (self.issues / ("%s-x.md" % n)).write_text(ticket(n, "T" + n))
+        self.goal_with_tickets(self.issues)
+        self.park("Ada", "ci:acme/app#5")
+        self.with_gh(json.dumps({"state": "OPEN", "statusCheckRollup": [
+            {"__typename": "CheckRun", "status": "QUEUED"}]}))
+        out = self.pulse_with_team([("Ada", "w:1.0")], size=1)
+        self.assertIn("Spawn 2 more workers", out)
+        self.assertNotIn("IDLE NOW", out)
+
     def test_every_idle_worker_gets_a_ready_ticket(self):
         for n, name in (("01", "API"), ("02", "UI"), ("03", "Docs")):
             (self.issues / ("%s-x.md" % n)).write_text(ticket(n, name))

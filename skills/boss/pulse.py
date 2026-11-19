@@ -179,8 +179,9 @@ def _fix_graph(facts, action):
 def _woken_line(w):
     kind, _, target = w.event.partition(":")
     if w.state == "over":
-        what = {"ticket": "ticket %s done", "worker": "%s finished",
-                "owner": "%s answered"}.get(kind, "%s happened") % target
+        what = {"ticket": "ticket %s done", "worker": "%s finished", "owner": "%s answered",
+                "pr": "%s merged or closed", "ci": "CI of %s finished, or the PR is no longer open"}.get(
+                    kind, "%s happened") % (target.removesuffix("-merged") if kind == "pr" else target)
         return "%s's wait is over (%s): dispatch it" % (w.worker, what)
     return "%s has waited %d h on %s: dispatch, re-park or retire" % (
         w.worker, park.TTL_S // 3600, w.event)
