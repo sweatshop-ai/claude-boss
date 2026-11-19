@@ -5,7 +5,7 @@ NEXT item. The boss marks each NEXT item a worker is on with `(→ Name)`; the p
 without a mark as unassigned and gives the same advice as with a graph: idle worker plus
 unassigned item means dispatch, more unassigned items than idle workers means spawn (within
 ticket 02's rules). A mark naming a worker that no longer exists counts as unassigned and the
-pulse names it. This replaces the bare "dispatch NEXT" line that left plans-live at 3 workers on
+pulse names it. This replaces the bare "dispatch NEXT" line that left a production box at 3 workers on
 2026-11-16 and cuts the "NEXT empty or stale" noise when NEXT holds marked items. Update the
 boss SKILL.md where it describes NEXT.
 
