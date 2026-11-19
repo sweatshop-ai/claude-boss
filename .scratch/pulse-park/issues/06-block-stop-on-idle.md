@@ -13,10 +13,10 @@ dispatch or park resets the count. A worker idle with no unassigned work and no 
 
 **Claimed by:** Anahita 2026-11-19 18:26
 
-**Status:** in-progress
+**Status:** done (PR 166, CI and review pending merge)
 
-- [ ] Idle unparked worker plus unassigned work: the Stop hook blocks with a reason naming both
-- [ ] A validly parked worker does not block
-- [ ] The fourth consecutive block for the same idle set is skipped and logged
-- [ ] Idle, no work, no park: no block, the text says retire
-- [ ] The concierge is never counted as an idle worker
+- [x] Idle unparked worker plus unassigned work: the Stop hook blocks with a reason naming both -- `test_idle_unparked_worker_and_unassigned_ticket_block_the_stop` (skills/boss/test_pulse_block.py, PR 166): output `decision: block`, reason has `IDLE: Ada` and the item; log line `blocked`
+- [x] A validly parked worker does not block -- `test_a_checked_park_lets_the_stop_through`: park on busy Bo gives no block; once Bo is idle it blocks again
+- [x] The fourth consecutive block for the same idle set is skipped and logged -- `test_the_block_lets_go_after_three_and_logs_it`: block x3, then `block-let-go` x2 in the silence log (the let-go still prints the ordinary pulse text)
+- [x] Idle, no work, no park: no block, the text says retire -- `test_idle_with_no_work_and_no_park_is_told_to_retire_without_a_block`: no `decision`, text says retire
+- [x] The concierge is never counted as an idle worker -- existing `test_an_idle_concierge_is_not_an_idle_worker` (test_boss_pulse.py) passes on the merged tree: `team()` still excludes the concierge
