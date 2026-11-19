@@ -233,7 +233,7 @@ class Frontier(PulseCase):
             encoding="utf-8")
         out = self.pulse_with_team([], size=1, names=["Ada"])
         self.assertIn("UNASSIGNED in NEXT: 3 of 4; marks naming a worker that is gone: Zed", out)
-        self.assertIn("Spawn 3 more workers (team 1 of 12) and dispatch the unassigned NEXT items", out)
+        self.assertIn("Spawn up to 3 more workers (team 1 of 12) and dispatch the unassigned NEXT items", out)
 
     def test_a_github_graph_is_read_from_its_cache(self):
         """GitHub is too slow for a 5 s Stop hook: the pulse reads the last

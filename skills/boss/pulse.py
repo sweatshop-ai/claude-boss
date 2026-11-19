@@ -69,21 +69,28 @@ def _marked(entry):
     return [n.strip() for m in MARK_RE.findall(entry) for n in m.split(",") if n.strip()]
 
 
-def unassigned(items, workers):
+def unassigned(items, workers, idle=()):
     """(the NEXT items no live worker is marked on, the marks naming a worker that is gone).
 
     The boss writes `(→ Name)` on a NEXT item a worker is on. An item without
     a mark, or whose mark names a worker that is not live, is unassigned.
+    A mark naming an idle worker makes the item unassigned too, but is not
+    called gone: that worker is not on it.
     `workers` None: the roster could not be read, so no mark is called gone."""
     live = None if workers is None else {w.casefold() for w in workers}
+    resting = {w.casefold() for w in idle}
     free, gone = [], []
     for entry in _entries(items):
         names = _marked(entry)
         stale = [] if live is None else [n for n in names if n.casefold() not in live]
-        if not names or stale:
+        if not names or stale or any(n.casefold() in resting for n in names):
             free.append(entry)
         gone += [n for n in stale if n not in gone]
     return free, gone
+
+
+def _idle_names(facts):
+    return [n for n, _ in facts.idle]
 
 
 def _more_workers(demand, facts):
@@ -95,7 +102,7 @@ def _more_workers(demand, facts):
 def decide(facts):
     # More ready tickets than idle workers, and room left in the team.
     spawn = _more_workers(len(facts.ready), facts) if not facts.broken else 0
-    free = [] if facts.source else unassigned(facts.next_items, facts.workers)[0]
+    free = [] if facts.source else unassigned(facts.next_items, facts.workers, _idle_names(facts))[0]
     spawn_next = (_more_workers(len(free), facts)
                   if not facts.source and facts.workers is not None else 0)
     if (not facts.idle and not facts.rungs and not facts.blockers and not facts.broken
@@ -161,8 +168,8 @@ def _spawn(facts, action):
 
 
 def _spawn_next(facts, action):
-    return ("Spawn %d more worker%s (team %d of %d) and dispatch the unassigned "
-            "NEXT items to them." % (
+    return ("Spawn up to %d more worker%s (team %d of %d) and dispatch the unassigned "
+            "NEXT items to them; none for an item that waits on work in progress." % (
                 action.n, "s" if action.n > 1 else "", facts.size, policy.BOSS_SPAN))
 
 
@@ -204,7 +211,7 @@ def render(facts, decision):
         lines.append("NEXT, in priority order:")
         lines += ["  " + item[:160] for item in facts.next_items[:6]]
         if not facts.source:
-            free, gone = unassigned(facts.next_items, facts.workers)
+            free, gone = unassigned(facts.next_items, facts.workers, _idle_names(facts))
             total = len(_entries(facts.next_items))
             tail = "; marks naming a worker that is gone: " + ", ".join(gone) if gone else ""
             if (total and total != len(free)) or gone:

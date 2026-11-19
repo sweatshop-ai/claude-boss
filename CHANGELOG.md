@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- **The pulse reads who works on which NEXT item on a track without a ticket graph (pulse-park ticket 05).** The boss marks an item `(→ Name)`; the pulse counts the items with no mark, or a mark naming a worker that is gone, as unassigned and says so (`UNASSIGNED in NEXT: n of m; marks naming a worker that is gone: ...`). Idle worker and unassigned item: dispatch; more unassigned items than idle workers: a new `spawn-next n` action asks for the difference, within the team's room. `refill-next` is no longer said while NEXT holds marked items. A track with a graph still uses the graph and ignores the marks. `team()` in `boss-pulse.py` returns a third value, the names of all live workers (`None` when the roster cannot be read, and no mark is called gone then).
+- **The pulse reads who works on which NEXT item on a track without a ticket graph (pulse-park ticket 05).** The boss marks an item `(→ Name)`; the pulse counts the items with no mark, or a mark naming a worker that is gone, as unassigned and says so (`UNASSIGNED in NEXT: n of m; marks naming a worker that is gone: ...`). Idle worker and unassigned item: dispatch; more unassigned items than idle workers: a new `spawn-next n` action asks for the difference, within the team's room. `refill-next` is no longer said while NEXT holds marked items. A mark naming an idle worker counts as unassigned too (that worker is not on it). A track with a graph still uses the graph and ignores the marks. `team()` in `boss-pulse.py` returns a third value, the names of all live workers (`None` when the roster cannot be read, and no mark is called gone then).
 
 ## 0.27.0
 

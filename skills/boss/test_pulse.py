@@ -66,6 +66,16 @@ class Decide(unittest.TestCase):
         self.assertEqual(pulse.unassigned(items, ["Ada", "Bo"]),
                          (["2. b", "4. d wrapped line of d", "5. e"], []))
 
+    def test_a_mark_naming_an_idle_worker_is_unassigned_but_not_gone(self):
+        items = ["1. a (→ Ada)", "2. b (→ Bo)"]
+        self.assertEqual(pulse.unassigned(items, ["Ada", "Bo"], idle=["Ada"]),
+                         (["1. a (→ Ada)"], []))
+
+    def test_an_idle_worker_with_every_item_marked_to_itself_is_still_dispatched(self):
+        d = pulse.decide(pulse.Facts(track="demo", size=1, idle=[("Ada", "w:1.0")],
+                                     workers=("Ada",), next_items=["- a (→ Ada)"]))
+        self.assertEqual(kinds(d), ["dispatch-next", "refill-next"])
+
     def test_a_mark_on_a_wrapped_line_belongs_to_its_item(self):
         items = ["1. a long item", "   that wraps (→ Ada)", "2. b"]
         self.assertEqual(pulse.unassigned(items, ["Ada"]), (["2. b"], []))
@@ -187,8 +197,8 @@ class Render(unittest.TestCase):
         lines = self.say(size=1, workers=("Ada",),
                          next_items=["- a (→ Ada)", "- b (→ Zed)", "- c"])
         self.assertIn("UNASSIGNED in NEXT: 2 of 3; marks naming a worker that is gone: Zed", lines)
-        self.assertIn("1. Spawn 2 more workers (team 1 of %d) and dispatch the unassigned "
-                      "NEXT items to them." % SPAN, lines)
+        self.assertIn("1. Spawn up to 2 more workers (team 1 of %d) and dispatch the unassigned "
+                      "NEXT items to them; none for an item that waits on work in progress." % SPAN, lines)
 
     def test_parked_must_name_what_each_idle_worker_waits_on(self):
         text = "\n".join(self.say(idle=[("Ada", "w:1.0")]))
