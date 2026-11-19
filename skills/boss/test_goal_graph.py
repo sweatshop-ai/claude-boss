@@ -140,6 +140,20 @@ class OnlyTheBlock(GoalCase):
         self.assertEqual(text.split("\n")[:a[0]], typed.split("\n")[:b[0]])
         self.assertEqual(text.split("\n")[a[1] + 1:], typed.split("\n")[b[1] + 1:])
 
+    def test_a_stray_start_marker_above_the_block_takes_nothing_with_it(self):
+        stray = goal_graph.START + "\nowner text\n"
+        self.write_goal(goal(self.issues).replace("## Outcome", stray + "## Outcome"))
+        self.update()                                    # the block goes under the stray marker
+        before = self.text()
+        t = self.issues / "03-claim.md"
+        t.write_text(t.read_text().replace("ready-for-agent", "done"))
+        self.update(now=NOW + 60)
+        text = self.text()
+        self.assertIn("owner text", text)
+        self.assertIn("Ship the thing.", text)
+        self.assertEqual(text.count(goal_graph.START), before.count(goal_graph.START))
+        self.assertIn('t03["03 · A claim updates the graph<br/>done"]', text)
+
     def test_a_write_against_a_changed_file_is_not_made(self):
         self.write_goal(goal(self.issues))
         self.assertFalse(goal_graph._write_if_same(self.path, "something else", "new"))
@@ -184,6 +198,9 @@ class GitHub(GoalCase):
         self.assertIn("Ticket source unreadable at 11:01: gh: HTTP 502", text)
         with mock.patch.object(boss_store, "refresh_frontier", return_value="gh: HTTP 502"):
             self.assertEqual(goal_graph.update(TRACK, now=NOW + 120, cfg=self.cfg), "unchanged")
+        with mock.patch.object(boss_store, "refresh_frontier", return_value="<!-- x -->"):
+            goal_graph.update(TRACK, now=NOW + 180, cfg=self.cfg)
+        self.assertNotIn("<!-- x", self.text())
 
 
 class Callers(GoalCase):

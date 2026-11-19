@@ -35,7 +35,8 @@ Command line (exit 0, also when a track cannot be read, which goes to stderr;
 2 on a bad call):
 
     goal_graph.py track <track>     update one track, print written or unchanged
-    goal_graph.py source <source>   update every open track whose tickets are <source>
+    goal_graph.py source <source>   update every open track whose tickets are <source>,
+                                    reading a GitHub graph again whatever its cache's age
     goal_graph.py sweep             update every open track
 """
 import fcntl
@@ -143,7 +144,7 @@ def block(out, now, error=None, old=None):
     else:
         kept = _old_diagram(old or [])
         line = "Ticket source unreadable at %s: %s" % (
-            time.strftime("%H:%M", time.localtime(now)), " ".join(str(error).split())[:300])
+            time.strftime("%H:%M", time.localtime(now)), _label(str(error))[:300])
         body = kept + ([""] if kept else []) + [line]
     return [START] + body + [END]
 
@@ -168,12 +169,22 @@ def _timeless(lines):
 
 
 def _span(lines):
-    """(start, end) indices of the marker lines, or None when there is no whole block."""
-    s = next((i for i, ln in enumerate(lines) if START_RE.match(ln)), None)
-    if s is None:
-        return None
-    e = next((i for i in range(s + 1, len(lines)) if END_RE.match(lines[i])), None)
-    return None if e is None else (s, e)
+    """(start, end) indices of the marker lines, or None when there is no whole block.
+
+    The first end marker with the start marker nearest above it, both outside a
+    code fence: a stray start marker higher up (a section half deleted, a fenced
+    example) never takes the owner's text between it and the block with it."""
+    s, fenced = None, False
+    for i, ln in enumerate(lines):
+        if ln.lstrip().startswith("```"):
+            fenced = not fenced
+        elif fenced:
+            continue
+        elif START_RE.match(ln):
+            s = i
+        elif END_RE.match(ln) and s is not None:
+            return s, i
+    return None
 
 
 def place(text, make):
@@ -204,7 +215,7 @@ def place(text, make):
 
 # ------------------------------------------------------------------ reading
 
-def read(source, track, fetch=True, cfg=None):
+def read(source, track, fetch=True, cfg=None, stale=GH_STALE_S):
     """(frontier output, error) for a source; (None, None) for a GitHub graph nobody
     has read yet. A folder is read now, as frontier.py reads it; a GitHub graph from
     the cache the pulse keeps, read again first when `fetch` and the cache is older
@@ -213,7 +224,7 @@ def read(source, track, fetch=True, cfg=None):
         failed = None
         if fetch:
             _, _, age = boss_store.cached_frontier(track, source, cfg)
-            if age is None or age > GH_STALE_S:
+            if age is None or age > stale:
                 try:
                     failed = boss_store.refresh_frontier(track, source, pulse.FRONTIER_PY, GH_READ_S, cfg)
                 except (subprocess.SubprocessError, OSError) as exc:
@@ -251,7 +262,7 @@ def _write_if_same(path, expected, text):
         tmp.unlink(missing_ok=True)
 
 
-def update(track, fetch=True, now=None, cfg=None):
+def update(track, fetch=True, now=None, cfg=None, stale=GH_STALE_S):
     """Bring one track's graph up to date. Returns "written"; "unchanged"; "deferred"
     when the goal changed under the write (its source moved, or its text changed
     twice), for the next run; or "none" (no goal, no Tickets source, or a GitHub
@@ -268,7 +279,7 @@ def update(track, fetch=True, now=None, cfg=None):
         return "none"
     if not source:
         return "none"
-    out, error = read(source, track, fetch=fetch, cfg=cfg)
+    out, error = read(source, track, fetch=fetch, cfg=cfg, stale=stale)
     if out is None and error is None:
         return "none"
     at = time.time() if now is None else now
@@ -323,13 +334,14 @@ def main(argv):
     elif cmd == "source" and len(argv) == 2:
         tracks = [t for t, s in _open_tracks() if _same_source(s, argv[1])]
     elif cmd == "sweep" and len(argv) == 1:
-        tracks = [t for t, _ in _open_tracks()]
+        # folders first: they take milliseconds, a GitHub graph up to GH_READ_S
+        tracks = [t for t, s in sorted(_open_tracks(), key=lambda ts: ts[1].startswith("gh:"))]
     else:
         print(next(p for p in __doc__.split("\n\n") if "goal_graph.py track" in p), file=sys.stderr)
         return 2
     for track in tracks:
         try:
-            result = update(track)
+            result = update(track, stale=0 if cmd == "source" else GH_STALE_S)
         except Exception as exc:            # one bad track never stops the others
             print("goal_graph: %s: %s" % (track, exc), file=sys.stderr)
             continue

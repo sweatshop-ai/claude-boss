@@ -12,5 +12,6 @@ Documentation=file://@ROOT@/routines/boss-goal-graph.md
 Type=oneshot
 ExecStart=@ROOT@/routines/boss-goal-graph.sh
 Environment=CLAUDE_CONFIG_DIR=@CFG@
-# Folder tickets are read in milliseconds; a GitHub graph read is capped at 30 s.
-TimeoutStartSec=60
+# Folder tickets are read in milliseconds, first; a GitHub graph read is capped at 30 s
+# each, so a few slow GitHub tracks delay the next run rather than get killed mid-write.
+TimeoutStartSec=300
