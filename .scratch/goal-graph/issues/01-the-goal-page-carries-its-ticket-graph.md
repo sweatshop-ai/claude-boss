@@ -14,8 +14,12 @@ file changes on disk, merging a save from the page paragraph by paragraph (SPEC 
 
 ## The fixed rules
 
-1. **Place.** One section `## Ticket graph`, right after `## Tickets`. Inside it, one block between
-   `<!-- ticket-graph:start -->` and `<!-- ticket-graph:end -->`. A goal without `## Tickets` gets none.
+1. **Place.** One section `## Ticket graph` at the top of the page: right after the `# Objective` H1 and
+   its `_Status: …_` line when there is one, before `## Outcome`, so the graph is the first thing seen
+   (Thierry, 2026-11-19). Inside it, one block between `<!-- ticket-graph:start -->` and
+   `<!-- ticket-graph:end -->`. A goal without `## Tickets` gets none. Readers that look sections up by
+   heading (`boss-goal`, agentview `context.track_card`) must still find Outcome and Done when; a test
+   holds that.
 2. **Ownership.** Only the generator writes between the markers. The start marker says so in one line;
    anything typed there is overwritten at the next write. Nothing outside the markers is ever touched.
 3. **Form.** ```` ```mermaid ```` `flowchart LR`. One node per ticket, id `t<num>`, in ticket order; label
@@ -50,7 +54,7 @@ template: Thierry edits the goal page, and sheaf merges his save with this write
 
 ## Done when
 
-- [ ] A goal with `## Tickets` has `## Ticket graph` with the block; one without is left alone
+- [ ] A goal with `## Tickets` has `## Ticket graph` with the block at the top, before `## Outcome`; one without is left alone
 - [ ] A fixture frontier gives a block equal byte for byte to a checked-in expected file (all four states,
       one external blocker, one ticket blocked by two)
 - [ ] An unchanged frontier writes nothing (mtime unchanged); a changed state rewrites only the block,
