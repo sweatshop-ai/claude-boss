@@ -31,6 +31,8 @@ class PulseCase(unittest.TestCase):
         (self.tmp / "pm/.boss-sessions" / self.sid).write_text(TRACK + "\n")
         self.goal(open_=True)
         self.tracker(blockers="")
+        self.meminfo = self.tmp / "meminfo"
+        self.meminfo.write_text("MemAvailable:   67108864 kB\n")     # 64 GB free: the floor holds
 
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
@@ -57,7 +59,7 @@ class PulseCase(unittest.TestCase):
     def stop(self, sid=None):
         payload = {"session_id": sid or self.sid, "hook_event_name": "Stop",
                    "stop_hook_active": False}
-        env = dict(os.environ, CLAUDE_CONFIG_DIR=str(self.tmp))
+        env = dict(os.environ, CLAUDE_CONFIG_DIR=str(self.tmp), BOSS_MEMINFO=str(self.meminfo))
         res = subprocess.run([sys.executable, str(PULSE)], input=json.dumps(payload),
                              capture_output=True, text=True, env=env, timeout=20)
         self.assertEqual(res.returncode, 0, res.stderr)
@@ -176,7 +178,7 @@ class Frontier(PulseCase):
         return self.tmp / "pm/.pulse" / ("%s.%s.frontier.json" % (
             TRACK, hashlib.sha1(source.encode()).hexdigest()[:10]))
 
-    def pulse_with_team(self, idle, size, holding=False, statuses=None):
+    def pulse_with_team(self, idle, size, holding=False, statuses=None, memshort=""):
         """Run main() in-process with a stand-in for the tmux roster."""
         import contextlib
         import importlib.util
@@ -190,6 +192,7 @@ class Frontier(PulseCase):
             mod.team = lambda sid: (idle, size)
             mod.concierge_holding = lambda sid: holding
             mod.worker_statuses = lambda sid: dict(statuses or {})
+            mod.memory_short = lambda sid: memshort
             payload = {"session_id": self.sid, "hook_event_name": "Stop", "stop_hook_active": False}
             out, stdin = io.StringIO(), sys.stdin
             sys.stdin = io.StringIO(json.dumps(payload))
@@ -255,6 +258,55 @@ class Frontier(PulseCase):
         self.park("Ada", "ticket:12", age_s=2 * 3600 + 60)
         out = self.pulse_with_team([("Ada", "w:1.0")], 2)
         self.assertIn("Ada has waited 2 h on ticket:12: dispatch, re-park or retire", out)
+
+    SHORT = ("not spawning: 6.0 GB free, a new worker costs about 1.0 GB, and the 8 GB floor "
+             "would not hold (5.0 GB left)")
+
+    def one_ready_one_busy(self):
+        (self.issues / "12-ui.md").write_text(ticket("12", "UI", claimed="Cy 2026-11-19 10:00",
+                                                      status="in-progress"))
+        (self.issues / "13-docs.md").write_text(ticket("13", "Docs"))
+        self.goal_with_tickets(self.issues)
+
+    def silence_lines(self):
+        return (self.tmp / "pm/.pulse" / (self.sid + ".silence.log")).read_text().splitlines()
+
+    def test_a_refused_spawn_with_two_parked_workers_names_the_one_parked_longest(self):
+        self.one_ready_one_busy()
+        self.park("Ada", "ticket:12", age_s=20 * 60)
+        self.park("Bea", "ticket:12", age_s=95 * 60)
+        out = self.pulse_with_team([("Ada", "w:1.0"), ("Bea", "w:1.1")], 3, memshort=self.SHORT)
+        self.assertIn("Retire Bea (parked 1 h 35 min on ticket:12)", out)
+        self.assertNotIn("Retire Ada", out)
+        self.assertIn(self.SHORT, out)
+        self.assertNotIn("Spawn 1", out)
+
+    def test_a_refused_spawn_with_nobody_parked_is_silent_and_logs_free_memory_and_floor(self):
+        self.one_ready_one_busy()
+        out = self.pulse_with_team([], 1, memshort=self.SHORT)
+        self.assertEqual(out, "")
+        line = self.silence_lines()[-1].split("\t")
+        self.assertEqual(line[2], "memory-short")
+        self.assertIn("6.0 GB free", line[-1])
+        self.assertIn("8 GB floor", line[-1])
+
+    def test_enough_memory_spawns_as_before(self):
+        self.one_ready_one_busy()
+        self.park("Bea", "ticket:12", age_s=95 * 60)
+        out = self.pulse_with_team([("Bea", "w:1.1")], 2)
+        self.assertIn("Spawn 1", out)
+        self.assertNotIn("Retire", out)
+
+    def test_the_retired_workers_park_stays_recorded(self):
+        import park
+        self.one_ready_one_busy()
+        self.park("Bea", "ticket:12", age_s=95 * 60)
+        self.pulse_with_team([("Bea", "w:1.1")], 2, memshort=self.SHORT)
+        self.assertEqual(park.read_parks(TRACK, self.tmp)["Bea"].event, "ticket:12")
+        # Bea is retired, gone from the roster: the pulse neither crashes nor wakes the park
+        out = self.pulse_with_team([], 1, memshort=self.SHORT)
+        self.assertEqual(out, "")
+        self.assertEqual(park.read_parks(TRACK, self.tmp)["Bea"].event, "ticket:12")
 
     def test_an_idle_worker_without_a_park_is_still_named_beside_a_parked_one(self):
         self.graph_one_done_one_open()

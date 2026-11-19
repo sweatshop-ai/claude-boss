@@ -16,6 +16,7 @@ actions, in the order the boss is told to take them:
     wake            an idle worker's park is over or expired: dispatch, re-park or retire it
     dispatch-ready  one READY ticket per idle worker
     spawn n         n more workers for the READY tickets left over
+    retire-parked   memory is short for that spawn: retire the longest-parked worker, retry once
     dispatch-next   no ticket graph, or one with nothing READY: one NEXT item
                     per idle worker
     refill-next     ... and refill NEXT if it is empty or stale
@@ -37,11 +38,13 @@ FRONTIER_PY = Path(__file__).resolve().parent.parent / "hand-to-boss" / "frontie
 # cap, cap_reason: the goal file's `Workers: N - <reason>` (cap None without the line);
 # N holds only with a reason.
 # parks: the Woken parks of idle workers (a park still waiting keeps its worker out of `idle`).
+# parked: the idle workers whose park still holds, as Woken with state `waiting`.
+# memshort: why a spawn would be refused now (memfloor.refusal), "" when it would fit.
 Facts = namedtuple(
     "Facts",
     "track idle size rungs fired blockers source ready broken outcome unmet next_items decided"
-    " cap cap_reason parks",
-    defaults=((), 0, (), {}, (), "", (), None, "", (), (), (), None, "", ()))
+    " cap cap_reason parks parked memshort",
+    defaults=((), 0, (), {}, (), "", (), None, "", (), (), (), None, "", (), (), ""))
 # An idle worker's park that no longer holds: state `over` (its event happened) or `expired`.
 Woken = namedtuple("Woken", "worker event state minutes")
 # A blocker line whose rung has come due: key into `fired`, the rung, minutes
@@ -51,14 +54,38 @@ Decision = namedtuple("Decision", "actions overdue fired")
 Action = namedtuple("Action", "kind n", defaults=(None,))
 
 
-def decide(facts):
+def _spawn_wanted(facts):
+    """How many more workers the ready tickets ask for (memory not yet counted)."""
     # More ready tickets than idle workers: one new worker for each. No team limit
     # but the one the track wrote with a reason; the spawn path checks memory.
     spawn = len(facts.ready) - len(facts.idle) if not facts.broken else 0
     if facts.cap is not None and facts.cap_reason:
         spawn = min(spawn, facts.cap - facts.size)
+    return spawn
+
+
+def longest_parked(facts):
+    """The Woken of the worker that has waited longest on a park that does not call for a
+    dispatch (still waiting, or expired), or None. An `over` park is dispatched, not retired."""
+    held = [w for w in list(facts.parked) + list(facts.parks) if w.state in ("waiting", "expired")]
+    return max(held, key=lambda w: w.minutes) if held else None
+
+
+def shortfall(facts):
+    """The memory refusal when a spawn is wanted, memory is short and nobody is parked to
+    retire: the pulse starts nobody and logs this. None otherwise."""
+    if facts.memshort and _spawn_wanted(facts) > 0 and not longest_parked(facts):
+        return facts.memshort
+    return None
+
+
+def decide(facts):
+    spawn = _spawn_wanted(facts)
+    retire = False
+    if spawn > 0 and facts.memshort:
+        retire, spawn = longest_parked(facts) is not None, 0
     if (not facts.idle and not facts.rungs and not facts.blockers and not facts.broken
-            and spawn <= 0):
+            and spawn <= 0 and not retire):
         return None                               # team busy, nothing overdue
     overdue = list(facts.rungs[:3])
     fired = dict(facts.fired)
@@ -77,6 +104,8 @@ def decide(facts):
                 actions.append(Action("dispatch-ready"))
             if spawn > 0:
                 actions.append(Action("spawn", spawn))
+            if retire:
+                actions.append(Action("retire-parked", _spawn_wanted(facts)))
             # A graph whose open tickets all wait on someone is not an empty
             # backlog: the side work lives in NEXT, so hand that out instead.
             if facts.idle and not facts.ready and facts.next_items:
@@ -135,6 +164,19 @@ def _spawn(facts, action):
             "remaining READY tickets to them." % (action.n, "s" if action.n > 1 else "", team))
 
 
+def _retire_parked(facts, action):
+    w = longest_parked(facts)
+    waited = "%d h %d min" % divmod(w.minutes, 60) if w.minutes >= 60 else "%d min" % w.minutes
+    return ("Memory is short for the %d more worker%s the READY tickets ask for (%s). Retire "
+            "%s (parked %s on %s), the longest-parked: `boss-lifecycle.sh retire <pane> "
+            "--require-idle --kill`, its pane from `boss-lifecycle.sh list --mine`. Keep its park "
+            "(do not `--clear` it) and write on its Tracker line that it was retired for memory "
+            "and waits on %s, so its work is picked up when that happens. Then retry the spawn "
+            "once; if it is refused again, start nobody and carry on: this is not a blocker."
+            % (action.n, "s" if action.n > 1 else "", facts.memshort, w.worker, waited,
+               w.event, w.event))
+
+
 def _dispatch_next(facts, action):
     return ("Dispatch NEXT items to the idle workers, one each, top first; "
             "skip an item that waits on work still in progress (P6: match "
@@ -151,7 +193,7 @@ def _run_rung(facts, action):
 
 
 SAY = {"ask": _ask, "fix-graph": _fix_graph, "wake": _wake, "dispatch-ready": _dispatch_ready,
-       "spawn": _spawn, "dispatch-next": _dispatch_next, "refill-next": _refill_next,
+       "spawn": _spawn, "retire-parked": _retire_parked, "dispatch-next": _dispatch_next, "refill-next": _refill_next,
        "run-rung": _run_rung}
 
 
