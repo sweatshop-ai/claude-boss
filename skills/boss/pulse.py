@@ -17,12 +17,16 @@ actions, in the order the boss is told to take them:
     spawn n         n more workers for the READY tickets left over
     dispatch-next   no ticket graph, or one with nothing READY: one NEXT item
                     per idle worker
+    spawn-next n    no ticket graph: n more workers for the NEXT items no
+                    worker is marked `(→ Name)` on, left over
     refill-next     ... and refill NEXT if it is empty or stale
     run-rung n      post the due rung n (the first overdue one)
 """
+import re
 from collections import namedtuple
 from pathlib import Path
 
+import objective
 import policy
 
 FRONTIER_PY = Path(__file__).resolve().parent.parent / "hand-to-boss" / "frontier.py"
@@ -32,10 +36,13 @@ FRONTIER_PY = Path(__file__).resolve().parent.parent / "hand-to-boss" / "frontie
 # source: the ticket graph, "" for none; ready: "NN title"; broken: its error.
 # outcome, unmet, next_items: from the objective, for the text only.
 # decided: blockers the owner has answered; shown, never asked again.
+# workers: the names of all its live workers, to tell a NEXT mark from a stale one;
+# None when the roster could not be read, and no mark is called stale then.
 Facts = namedtuple(
     "Facts",
-    "track idle size rungs fired blockers source ready broken outcome unmet next_items decided",
-    defaults=((), 0, (), {}, (), "", (), None, "", (), (), ()))
+    "track idle size rungs fired blockers source ready broken outcome unmet next_items decided"
+    " workers",
+    defaults=((), 0, (), {}, (), "", (), None, "", (), (), (), None))
 # A blocker line whose rung has come due: key into `fired`, the rung, minutes
 # since its T+0, the line.
 Rung = namedtuple("Rung", "key rung minutes line")
@@ -43,12 +50,41 @@ Decision = namedtuple("Decision", "actions overdue fired")
 Action = namedtuple("Action", "kind n", defaults=(None,))
 
 
+MARK_RE = re.compile(r"\(→\s*([^)]*?)\s*\)")
+
+
+def unassigned(items, workers):
+    """(the NEXT items no live worker is marked on, the marks naming a worker that is gone).
+
+    The boss writes `(→ Name)` on a NEXT item a worker is on. An item without
+    a mark, or whose mark names no live worker, is unassigned. A wrapped or
+    nested line belongs to the item above it."""
+    live = None if workers is None else {w.casefold() for w in workers}
+    free, gone = [], []
+    for item in items:
+        if not objective.ITEM_RE.match(item):
+            continue
+        names = [n for n in MARK_RE.findall(item) if n]
+        stale = [] if live is None else [n for n in names if n.casefold() not in live]
+        if not names or stale:
+            free.append(item)
+        gone += [n for n in stale if n not in gone]
+    return free, gone
+
+
+def _more_workers(demand, facts):
+    """How many workers to add for `demand` open items: those the idle ones
+    cannot take, and room left in the team."""
+    return min(demand - len(facts.idle), policy.BOSS_SPAN - facts.size)
+
+
 def decide(facts):
     # More ready tickets than idle workers, and room left in the team.
-    spawn = (min(len(facts.ready) - len(facts.idle), policy.BOSS_SPAN - facts.size)
-             if not facts.broken else 0)
+    spawn = _more_workers(len(facts.ready), facts) if not facts.broken else 0
+    free = [] if facts.source else unassigned(facts.next_items, facts.workers)[0]
+    spawn_next = _more_workers(len(free), facts) if not facts.source else 0
     if (not facts.idle and not facts.rungs and not facts.blockers and not facts.broken
-            and spawn <= 0):
+            and spawn <= 0 and spawn_next <= 0):
         return None                               # team busy, nothing overdue
     overdue = list(facts.rungs[:3])
     fired = dict(facts.fired)
@@ -68,8 +104,14 @@ def decide(facts):
         # backlog: the side work lives in NEXT, so hand that out instead.
         if facts.idle and not facts.ready and facts.next_items:
             actions += [Action("dispatch-next"), Action("refill-next")]
-    elif facts.idle:
-        actions += [Action("dispatch-next"), Action("refill-next")]
+    else:
+        marked = any(MARK_RE.search(i) for i in facts.next_items)
+        if facts.idle and (free or not facts.next_items):
+            actions.append(Action("dispatch-next"))
+        if spawn_next > 0:
+            actions.append(Action("spawn-next", spawn_next))
+        if facts.idle and not marked:
+            actions.append(Action("refill-next"))
     if facts.rungs:
         actions.append(Action("run-rung", facts.rungs[0].rung))
     return Decision(actions, overdue, fired)
@@ -103,6 +145,12 @@ def _spawn(facts, action):
                 action.n, "s" if action.n > 1 else "", facts.size, policy.BOSS_SPAN))
 
 
+def _spawn_next(facts, action):
+    return ("Spawn %d more worker%s (team %d of %d) and dispatch the unassigned "
+            "NEXT items to them." % (
+                action.n, "s" if action.n > 1 else "", facts.size, policy.BOSS_SPAN))
+
+
 def _dispatch_next(facts, action):
     return ("Dispatch NEXT items to the idle workers, one each, top first; "
             "skip an item that waits on work still in progress (P6: match "
@@ -119,7 +167,7 @@ def _run_rung(facts, action):
 
 
 SAY = {"ask": _ask, "fix-graph": _fix_graph, "dispatch-ready": _dispatch_ready,
-       "spawn": _spawn, "dispatch-next": _dispatch_next, "refill-next": _refill_next,
+       "spawn": _spawn, "dispatch-next": _dispatch_next, "spawn-next": _spawn_next, "refill-next": _refill_next,
        "run-rung": _run_rung}
 
 
@@ -139,6 +187,13 @@ def render(facts, decision):
     if facts.next_items and (facts.broken or not facts.source or not facts.ready):
         lines.append("NEXT, in priority order:")
         lines += ["  " + item[:160] for item in facts.next_items[:6]]
+        if not facts.source:
+            free, gone = unassigned(facts.next_items, facts.workers)
+            total = sum(1 for i in facts.next_items if objective.ITEM_RE.match(i))
+            if total and total != len(free) or gone:
+                lines.append("UNASSIGNED in NEXT: %d of %d%s" % (
+                    len(free), total,
+                    "; marks naming a worker that is gone: " + ", ".join(gone) if gone else ""))
     lines.append("")
 
     if facts.idle:

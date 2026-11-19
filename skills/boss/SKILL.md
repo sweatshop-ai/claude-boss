@@ -437,7 +437,7 @@ boss-goal status <track> open|paused|met "<note>"
 | **Constraints** | what this track must not do |
 | **Pause when** | what genuinely needs the owner |
 | **Tickets** | optional: the ticket graph this track works, a folder (`/abs/path/issues`) or `gh:owner/repo#N`; when set, its frontier replaces Next |
-| **Next, in priority order** | what an idle worker gets, without anyone being asked |
+| **Next, in priority order** | what an idle worker gets, without anyone being asked. On a track without a ticket graph, mark each item a worker is on with `(→ Name)`: the pulse counts the items without a mark as unassigned, tells idle workers to take them, asks for one more worker per item left over, and names a mark whose worker no longer exists (that item counts as unassigned too). With a ticket graph the marks are ignored |
 
 **Write it at session start from what the owner asked for.** They give an outcome in
 a sentence; deriving the fields is your job.

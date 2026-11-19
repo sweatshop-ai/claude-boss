@@ -61,6 +61,43 @@ class Decide(unittest.TestCase):
                                      size=1, next_items=["- #188 fix the reopen"]))
         self.assertEqual(kinds(d), ["dispatch-next", "refill-next"])
 
+    def test_next_with_five_items_two_marked_has_three_unassigned(self):
+        items = ["1. a (→ Ada)", "2. b", "3. c (→ Bo)", "4. d", "   wrapped line of d", "5. e"]
+        self.assertEqual(pulse.unassigned(items, ["Ada", "Bo"]),
+                         (["2. b", "4. d", "5. e"], []))
+
+    def test_a_mark_naming_a_retired_worker_is_unassigned_and_named(self):
+        items = ["1. a (→ Ada)", "2. b (→ Zed)"]
+        self.assertEqual(pulse.unassigned(items, ["Ada"]), (["2. b (→ Zed)"], ["Zed"]))
+
+    def test_no_idle_worker_and_three_unassigned_items_ask_for_three_spawns(self):
+        d = pulse.decide(pulse.Facts(track="demo", size=2, workers=("Ada", "Bo"),
+                                     next_items=["- a (→ Ada)", "- b (→ Bo)", "- c", "- d", "- e"]))
+        self.assertEqual(d.actions, [pulse.Action("spawn-next", 3)])
+
+    def test_the_idle_workers_take_unassigned_items_before_a_spawn(self):
+        d = pulse.decide(pulse.Facts(track="demo", size=2, idle=[("Ada", "w:1.0")],
+                                     workers=("Ada", "Bo"),
+                                     next_items=["- a", "- b (→ Bo)", "- c"]))
+        self.assertEqual(d.actions, [pulse.Action("dispatch-next"), pulse.Action("spawn-next", 1)])
+
+    def test_next_with_every_item_marked_to_a_live_worker_is_silence(self):
+        self.assertIsNone(pulse.decide(pulse.Facts(
+            track="demo", size=2, workers=("Ada", "Bo"), next_items=["- a (→ Ada)", "- b (→ Bo)"])))
+
+    def test_marked_items_do_not_make_the_pulse_ask_to_refill_next(self):
+        d = pulse.decide(pulse.Facts(track="demo", size=2, idle=[("Ada", "w:1.0")],
+                                     workers=("Ada", "Bo"), next_items=["- a", "- b (→ Bo)"]))
+        self.assertEqual(kinds(d), ["dispatch-next"])
+
+    def test_with_a_graph_the_marks_are_ignored(self):
+        d = pulse.decide(pulse.Facts(track="demo", source="issues", size=1, workers=("Ada",),
+                                     next_items=["- a", "- b", "- c"]))
+        self.assertIsNone(d)
+        d = pulse.decide(pulse.Facts(track="demo", source="issues", idle=[("Ada", "w:1.0")],
+                                     size=1, workers=("Ada",), next_items=["- a (→ Ada)"]))
+        self.assertEqual(kinds(d), ["dispatch-next", "refill-next"])
+
     def test_a_broken_graph_is_fixed_before_anything_is_dispatched(self):
         d = pulse.decide(pulse.Facts(track="demo", source="issues", idle=[("Ada", "w:1.0")],
                                      ready=["01 API", "02 UI"], broken="cycle"))
@@ -124,6 +161,13 @@ class Render(unittest.TestCase):
         self.assertIn("READY NOW: none", lines)
         self.assertIn("NEXT, in priority order:", lines)
         self.assertIn("  - #188 fix the reopen", lines)
+
+    def test_unassigned_items_and_gone_workers_are_said(self):
+        lines = self.say(size=1, workers=("Ada",),
+                         next_items=["- a (→ Ada)", "- b (→ Zed)", "- c"])
+        self.assertIn("UNASSIGNED in NEXT: 2 of 3; marks naming a worker that is gone: Zed", lines)
+        self.assertIn("1. Spawn 2 more workers (team 1 of %d) and dispatch the unassigned "
+                      "NEXT items to them." % SPAN, lines)
 
     def test_parked_must_name_what_each_idle_worker_waits_on(self):
         text = "\n".join(self.say(idle=[("Ada", "w:1.0")]))
