@@ -379,8 +379,9 @@ about 90k of working room before the next one. That is enough for most tickets.
 For a ticket that must hold many files or a long log at once (a cross-module
 refactor, a migration, a hard bug across several layers), spawn its worker with
 `--autocompact 200k`: one compaction in the middle of such a ticket loses more
-than the extra context costs. Do not raise it for a worker that merely runs long;
-the one-task rule restarts it between tickets.
+than the extra context costs. Such a worker lets your one-task rule and
+the 150k split fire first; at 120k the compaction comes before either. Do not raise
+it for a worker that merely runs long: the one-task rule restarts it between tickets.
 
 ### 2. Broadcasts. They cost N times one message.
 
