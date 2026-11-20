@@ -154,6 +154,10 @@ class Sections(unittest.TestCase):
         # Codex: section() strips, so `  - detail` lost its indent and counted.
         self.assertEqual(objective.next_count("## Next, in priority order\n  - detail\n1. real\n"), 1)
 
+    def test_next_count_agrees_with_the_pulse_on_prose_and_placeholders(self):
+        self.assertEqual(objective.next_count("## Next, in priority order\nFix it\nand test.\nShip.\n"), 2)
+        self.assertEqual(objective.next_count("## Next, in priority order\nNone.\n"), 0)
+
     def test_unmet_is_the_unticked_criteria(self):
         self.assertEqual(objective.unmet(GOAL), ["`gh pr view 3` says MERGED"])
 
