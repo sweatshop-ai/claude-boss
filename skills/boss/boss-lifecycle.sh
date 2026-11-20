@@ -294,9 +294,21 @@ cmd_spawn() {
   # The check and the launch are one step across every boss on the machine: two bosses
   # reading the same MemAvailable would both pass. The lock is held until the new worker has
   # grown to the size check estimated for it (memfloor.py settle, at most 30 s), since a starting claude has
-  # taken little of it yet. One lock per user, whatever CLAUDE_CONFIG_DIR a boss runs under.
+  # taken little of it yet. One lock per user, whatever CLAUDE_CONFIG_DIR a boss runs under;
+  # a spawn queued behind another boss gives up after BOSS_SPAWN_LOCK_WAIT seconds (60), inside a tool timeout.
   if [[ -z "$ROLE" ]]; then
-    exec {memlock}>>"${BOSS_SPAWN_LOCK:-${XDG_RUNTIME_DIR:-/tmp}/claude-boss-spawn-$(id -u).lock}" && flock "$memlock" || die "spawn refused (cannot take the spawn lock)"
+    local lockfile=${BOSS_SPAWN_LOCK:-} wait=${BOSS_SPAWN_LOCK_WAIT:-60}
+    if [[ -z "$lockfile" ]]; then
+      # No runtime dir: a private per-user directory, never a predictable name in a shared /tmp.
+      local lockdir=${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}/claude-boss-$(id -u)}
+      mkdir -p -m 0700 "$lockdir" 2>/dev/null || true
+      [[ -d "$lockdir" && ! -L "$lockdir" && -O "$lockdir" && "$(stat -c %a "$lockdir")" == 700 ]] \
+        || die "spawn refused (lock directory $lockdir is not private to this user)"
+      lockfile=$lockdir/claude-boss-spawn-$(id -u).lock
+    fi
+    exec {memlock}>>"$lockfile" || die "spawn refused (cannot open the spawn lock $lockfile)"
+    flock -w "$wait" "$memlock" \
+      || die "spawn refused (another boss is spawning: waited $wait s for the spawn lock; try again shortly)"
     python3 "$(dirname "${BASH_SOURCE[0]}")/memfloor.py" check --boss "$BOSS_PANE" || die "spawn refused (memory floor)"
   fi
 

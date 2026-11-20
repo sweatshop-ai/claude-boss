@@ -6,6 +6,7 @@ Run: python3 skills/boss/test_park.py
 Every case points the config directory at its own throwaway directory.
 """
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -321,6 +322,7 @@ class Cli(unittest.TestCase):
         self.assertNotIn("parked", r.stdout)
         self.assertIn("boss-park", r.stderr)
 
+    @unittest.skipIf(os.geteuid() == 0, "root ignores the directory mode, so no write fails here")
     def test_a_clear_that_cannot_be_written_fails_loudly(self):
         self.assertEqual(self.run_cli("demo", "Ada", "--until", "ticket:12").returncode, 0)
         f = self.cfg / "pm" / ".pulse"
