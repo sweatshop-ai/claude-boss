@@ -7,7 +7,7 @@
 # reports — goes through SendMessage/ListAgents, never through this script.
 #
 # Usage:
-#   boss-lifecycle.sh spawn <project-dir> [name-hint] [--model <name>] [--concierge]
+#   boss-lifecycle.sh spawn <project-dir> [name-hint] [--model <name>] [--autocompact <size>] [--concierge]
 #   boss-lifecycle.sh claim <pane-id> [name] [--concierge]
 #   boss-lifecycle.sh retire <pane-id> [--kill] [--require-idle [--expect-session S] [--expect-last U] [--wait-idle SECONDS [--stop-shells]]
 #   boss-lifecycle.sh restart <pane-id> [--require-idle [--expect-session S] [--expect-last U] [--wait-idle SECONDS] [--stop-shells]]
@@ -39,6 +39,9 @@ SHELL_CMDS='^(bash|zsh|fish|sh|dash)$'
 # --force and --model <name> may appear anywhere; strip them before the
 # subcommand sees the args. MODEL selects the model the worker runs on:
 # see "Choosing a worker's model" in SKILL.md — the criterion is NOT task size.
+# --autocompact <size> (100k..1M, as claude takes it) moves that worker's
+# compaction off the owner's global autoCompactWindow: a later one for a ticket
+# that has to hold many files at once. See "1. Context" in SKILL.md.
 # --require-idle, --expect-session <id> and --expect-last <uuid> are the
 # require-idle restart path (see retire_require_idle); --force does not relax them.
 # --wait-idle <seconds> turns the busy refusal into a timer: see retire_require_idle.
@@ -46,6 +49,7 @@ SHELL_CMDS='^(bash|zsh|fish|sh|dash)$'
 # still has background work running; --force does not imply it.
 FORCE=""
 MODEL=""
+AUTOCOMPACT=""
 ROLE=""
 REQUIRE_IDLE=""
 STOP_SHELLS=""
@@ -62,6 +66,8 @@ for _a in "$@"; do
   elif [[ "$_a" == "--concierge" ]]; then ROLE=concierge
   elif [[ "$_a" == "--model" ]]; then _want=MODEL
   elif [[ "$_a" == --model=* ]]; then MODEL="${_a#--model=}"
+  elif [[ "$_a" == "--autocompact" ]]; then _want=AUTOCOMPACT
+  elif [[ "$_a" == --autocompact=* ]]; then AUTOCOMPACT="${_a#--autocompact=}"
   elif [[ "$_a" == "--expect-session" ]]; then _want=EXPECT_SESSION
   elif [[ "$_a" == "--expect-last" ]]; then _want=EXPECT_LAST
   elif [[ "$_a" == "--wait-idle" ]]; then _want=WAIT_IDLE
@@ -70,6 +76,27 @@ done
 if [[ -n "$_want" ]]; then printf '%s\n' "an option needs a value" >&2; exit 1; fi
 if [[ -z "$REQUIRE_IDLE" && ( -n "$EXPECT_SESSION" || -n "$EXPECT_LAST" || -n "$WAIT_IDLE" || -n "$STOP_SHELLS" ) ]]; then
   printf '%s\n' "--expect-session / --expect-last / --wait-idle / --stop-shells only apply with --require-idle" >&2; exit 1
+fi
+# Checked here against claude's own rule (auto, or 100k..1M; a bare number
+# under 1000 means thousands): a value claude refuses made it exit in the new
+# pane, and spawn waited 30 s and left that pane behind.
+if [[ "${AUTOCOMPACT,,}" == auto ]]; then AUTOCOMPACT=auto; fi
+if [[ -n "$AUTOCOMPACT" && "${AUTOCOMPACT,,}" != auto ]]; then
+  _ac_ok=""
+  if [[ "${AUTOCOMPACT,,}" =~ ^([0-9]{1,7})([km]?)$ ]]; then
+    _n=$((10#${BASH_REMATCH[1]}))
+    case "${BASH_REMATCH[2]}" in
+      k) _n=$((_n * 1000)) ;;
+      m) _n=$((_n * 1000000)) ;;
+      *) if (( _n < 1000 )); then _n=$((_n * 1000)); fi ;;
+    esac
+    if (( _n >= 100000 && _n <= 1000000 )); then _ac_ok=1; fi
+    # Sent and stamped in one plain form (0100K -> 100k), which claude takes.
+    AUTOCOMPACT="$((10#${BASH_REMATCH[1]}))${BASH_REMATCH[2]}"
+  fi
+  if [[ -z "$_ac_ok" ]]; then
+    printf '%s\n' "--autocompact takes auto or a size from 100k to 1M, got \"$AUTOCOMPACT\"" >&2; exit 1
+  fi
 fi
 if [[ -n "$WAIT_IDLE" && ! "$WAIT_IDLE" =~ ^[0-9]+$ ]]; then
   printf '%s\n' "--wait-idle takes a number of seconds" >&2; exit 1
@@ -87,6 +114,9 @@ if [[ -n "$WAIT_IDLE" ]]; then
   RETRY_EVERY=$(awk -v e="$RETRY_EVERY" 'BEGIN { print (e < 1) ? 1 : e }')
 fi
 set -- ${_args[@]+"${_args[@]}"}
+if [[ -n "$AUTOCOMPACT" && "${1:-}" != spawn ]]; then
+  printf '%s\n' "--autocompact only applies to spawn: restart and move keep the window stamped on the pane" >&2; exit 1
+fi
 if [[ -n "$ROLE" && "${1:-}" != spawn && "${1:-}" != claim ]]; then
   printf '%s\n' "--concierge only applies to spawn and claim: a worker must not get AskUserQuestion" >&2; exit 1
 fi
@@ -260,6 +290,9 @@ launch_claude() {
   if [[ "$r" == concierge ]]; then m="${m:-sonnet}"; fi
   m="${m:-$WORKER_MODEL_DEFAULT}"
   cmd="$cmd --model ${m@Q} --effort ${WORKER_EFFORT_DEFAULT@Q}"
+  # A compaction window given at spawn is on the pane too, so a restart keeps it.
+  local ac="${AUTOCOMPACT:-$(pane_prop "$pane" '#{@worker_autocompact}' 2>/dev/null || true)}"
+  if [[ -n "$ac" ]]; then cmd="$cmd --autocompact ${ac@Q}"; fi
   # Only the boss asks the owner. A worker's AskUserQuestion rings the chime
   # for a pane nobody watches and stalls its ticket; without the tool, a
   # blocker goes to the boss by SendMessage (Thierry, 2026-10-30). The concierge
@@ -327,6 +360,7 @@ cmd_spawn() {
 
   claim_pane "$pane"
   if [[ -n "$MODEL" ]]; then tmux set-option -p -t "$pane" @worker_model "$MODEL"; fi
+  if [[ -n "$AUTOCOMPACT" ]]; then tmux set-option -p -t "$pane" @worker_autocompact "$AUTOCOMPACT"; fi
 
   # The plugin names the session at SessionStart; give it a moment, then either
   # adopt that name or, if a hint was given, set it THROUGH the plugin so both
@@ -567,6 +601,7 @@ cmd_retire() {
     printf 'killed %s\n' "$pane"
   else
     tmux set-option -pu -t "$pane" @worker_role 2>/dev/null || true
+    tmux set-option -pu -t "$pane" @worker_autocompact 2>/dev/null || true   # a ticket's window, not the pane's
     tmux set-option -pu -t "$pane" @custom_title 2>/dev/null || true   # the "[concierge]" label goes with the role
     printf 'retired %s (pane kept)\n' "$pane"
   fi
@@ -580,8 +615,10 @@ cmd_restart() {
   dir=$(pane_prop "$pane" '#{pane_current_path}')
   local keep; keep=$(agent_name "$pane")
   ROLE=$(pane_prop "$pane" '#{@worker_role}' 2>/dev/null || true)
+  AUTOCOMPACT=$(pane_prop "$pane" '#{@worker_autocompact}' 2>/dev/null || true)
   cmd_retire "$pane" >/dev/null
   if [[ -n "$ROLE" ]]; then tmux set-option -p -t "$pane" @worker_role "$ROLE"; fi
+  if [[ -n "$AUTOCOMPACT" ]]; then tmux set-option -p -t "$pane" @worker_autocompact "$AUTOCOMPACT"; fi
   local sid; sid=$(preassign_name "$keep")
   launch_claude "$pane" "$dir" "$sid"
   # A recycled worker keeps its name: the owner tracks the pane by the name on it,
@@ -604,8 +641,10 @@ cmd_move() {
   local pane; pane=$(resolve_pane "$target")
   local keep; keep=$(agent_name "$pane")
   ROLE=$(pane_prop "$pane" '#{@worker_role}' 2>/dev/null || true)
+  AUTOCOMPACT=$(pane_prop "$pane" '#{@worker_autocompact}' 2>/dev/null || true)
   cmd_retire "$pane" >/dev/null
   if [[ -n "$ROLE" ]]; then tmux set-option -p -t "$pane" @worker_role "$ROLE"; fi
+  if [[ -n "$AUTOCOMPACT" ]]; then tmux set-option -p -t "$pane" @worker_autocompact "$AUTOCOMPACT"; fi
   local sid; sid=$(preassign_name "$keep")
   launch_claude "$pane" "$dir" "$sid"
   if [[ -n "$keep" && "$keep" != "-" && -z "$sid" ]]; then
@@ -638,5 +677,5 @@ case "${1:-}" in
   move)    shift; cmd_move "$@" ;;
   list)    shift; cmd_list "$@" ;;
   ctx)     shift; python3 "$PANES_PY" "$@" ;;
-  *) die "usage: $(basename "$0") {spawn <dir> [name] [--model M] [--concierge] | claim <pane> [name] [--concierge] | retire <pane> [--kill] | restart <pane> | move <pane> <dir> | list [--mine] | ctx [pane]} [--force] [--require-idle [--expect-session S] [--expect-last U] [--wait-idle SECONDS] [--stop-shells]]" ;;
+  *) die "usage: $(basename "$0") {spawn <dir> [name] [--model M] [--autocompact S] [--concierge] | claim <pane> [name] [--concierge] | retire <pane> [--kill] | restart <pane> | move <pane> <dir> | list [--mine] | ctx [pane]} [--force] [--require-idle [--expect-session S] [--expect-last U] [--wait-idle SECONDS] [--stop-shells]]" ;;
 esac
