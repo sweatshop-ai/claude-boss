@@ -3,6 +3,7 @@
 ## Unreleased
 
 - **The pulse counts a NEXT written as plain prose.** `_entries()` dropped an unbulleted first line, so with every worker busy that entry never entered the unassigned list and `spawn-next` was not emitted. A NEXT with no bullet is now read as prose: a line joins the one above until a sentence ends, and each sentence is an item; where bullets exist, a line above the first is still an intro. Prose now also counts as work for the idle Stop block and for retiring. A placeholder (`none`, `nothing queued`, `n/a`, `-`, any case, optional final period) is no work and does not block a Stop. `boss-goal check`'s `next-count` uses the same reader, so both agree.
+- **A park on an owner question obeys the two-hour limit and fails loudly (Codex NO-GO on #164).** An unreadable tracker no longer keeps an `owner:` park "waiting" past its age (the pulse), `boss-park --list` agrees with the pulse (unreadable is waiting, never over), and a park or clear that cannot be written exits 1 with the error instead of printing parked/cleared.
 
 ## 0.30.3
 
