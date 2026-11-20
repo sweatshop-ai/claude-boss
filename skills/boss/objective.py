@@ -290,7 +290,10 @@ def next_items(text: str) -> list:
 ITEM_RE = re.compile(r"^(\d+[.)]|[-*+])\s")
 
 
-PLACEHOLDER_RE = re.compile(r"^(none|nothing queued|n/a|-)\.?$", re.I)
+# A placeholder may carry a reason after a punctuation mark ("Nothing queued; waiting on the owner.");
+# "None of the tickets are done" has no mark after the word and stays work.
+PLACEHOLDER_RE = re.compile(r"^(?:(?:none|nothing queued|n/a)(?:[.;:,]\s*.*|\s+[—–-]\s.*)?|-\.?)$", re.I)
+NEW_ITEM_RE = re.compile(r"^[A-Z0-9]")      # in prose a line opening so starts an item, a lowercase one continues
 SENTENCE_END_RE = re.compile(r"[.!?]$")
 OWNER_MARK_RE = re.compile(r"\((?:→|->)[^)]*\)\s*$")
 
@@ -312,7 +315,8 @@ def entries(items) -> list:
             starts = bool(ITEM_RE.match(ln))
         else:
             last = found[-1].rstrip() if found else ""
-            starts = not found or bool(OWNER_MARK_RE.search(last) or SENTENCE_END_RE.search(last))
+            starts = (not found or bool(OWNER_MARK_RE.search(last) or SENTENCE_END_RE.search(last)
+                                         or NEW_ITEM_RE.match(ln.lstrip())))
         if starts:
             found.append(ln)
         elif found:

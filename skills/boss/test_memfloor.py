@@ -6,6 +6,7 @@ Run: python3 skills/boss/test_memfloor.py
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -85,6 +86,27 @@ class Settling(unittest.TestCase):
             now[0] += s
         self.assertFalse(memfloor.settle(200, 3, lambda: 1, poll=1, clock=lambda: now[0], sleep=sleep))
         self.assertEqual(now[0], 3)
+
+    def test_settle_ends_once_the_tree_is_up_and_has_stopped_growing(self):
+        sizes = iter([0, 10, 50, 120] + [120] * 40)
+        slept = []
+        self.assertTrue(memfloor.settle(10 ** 9, 30, lambda: next(sizes), sleep=slept.append))
+        self.assertLess(len(slept), 12)     # the timeout would be 60 polls
+
+    def test_settle_does_not_end_on_a_tree_that_is_not_up(self):
+        now = [0.0]
+        def sleep(s):
+            now[0] += s
+        self.assertFalse(memfloor.settle(10 ** 9, 5, lambda: 0, clock=lambda: now[0], sleep=sleep))
+        self.assertEqual(now[0], 5)
+
+    def test_settle_on_a_real_long_lived_tree_ends_well_before_the_timeout(self):
+        tree = subprocess.Popen(["sh", "-c", "sleep 60 & wait"])
+        self.addCleanup(lambda: (subprocess.run(["pkill", "-P", str(tree.pid)]), tree.kill(), tree.wait()))
+        time.sleep(0.3)
+        t0 = time.monotonic()
+        self.assertTrue(memfloor.settle(10 ** 9, 30, lambda: memfloor.tree_rss_kb(str(tree.pid))))
+        self.assertLess(time.monotonic() - t0, 10)
 
 
 if __name__ == "__main__":

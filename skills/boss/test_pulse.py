@@ -172,6 +172,22 @@ class Decide(unittest.TestCase):
             self.assertFalse(d.block, text)
             self.assertNotIn("spawn-next", kinds(d), text)
 
+    def test_short_prose_lines_without_a_full_stop_are_separate_items_in_either_order(self):
+        for lines in (["Ticket 12", "Ticket 13"], ["12 first", "13 second"], ["Fix it", "Ticket 13"]):
+            self.assertEqual(pulse.unassigned(lines, ["Ada"]), (lines, []), lines)
+        self.assertEqual(pulse.unassigned(["Ticket 13", "Fix it"], ["Ada"]), (["Ticket 13", "Fix it"], []))
+
+    def test_a_placeholder_followed_by_a_reason_is_no_work(self):
+        for text in ("Nothing queued; waiting on the owner.", "None, the owner decides.",
+                     "n/a - waiting on the owner", "- None: all parked."):
+            d = pulse.decide(pulse.Facts(track="demo", size=1, idle=[("Ada", "w:1.0")],
+                                         workers=("Ada",), next_items=[text]))
+            self.assertFalse(d.block, text)
+            self.assertNotIn("spawn-next", kinds(d), text)
+        d = pulse.decide(pulse.Facts(track="demo", size=1, idle=[("Ada", "w:1.0")],
+                                     workers=("Ada",), next_items=["None of the tickets are done, fix 12"]))
+        self.assertTrue(d.block)
+
     def test_a_placeholder_beside_a_busy_team_asks_for_no_spawn(self):
         self.assertIsNone(pulse.decide(pulse.Facts(track="demo", size=1, workers=("Ada",),
                                                    next_items=["Nothing queued."])))

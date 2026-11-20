@@ -10,7 +10,7 @@ current workers, at least policy.WORKER_MIN_GB. BOSS_MEMINFO names another
 meminfo file (tests). boss-lifecycle.sh spawn runs it.
 
 settle waits, at most --timeout seconds, until the process tree under PID is as
-large as check estimated it: a starting worker has taken only a part of its memory,
+large as check estimated it or has stopped growing: a starting worker has taken only a part of its memory,
 and the next boss's check would count the rest as free. spawn holds its lock until then.
 """
 import os
@@ -90,14 +90,25 @@ def tree_rss_kb(pid):
     return sum(rss.get(p, 0) for p in seen)
 
 
+LEVEL_POLLS = 4         # polls without growth that end a settle: 2 s at the default poll
+
+
 def settle(want_kb, timeout, rss_of, poll=0.5, clock=time.monotonic, sleep=time.sleep):
-    """True once rss_of() reaches want_kb, False when timeout seconds pass first."""
+    """True once rss_of() reaches want_kb, or the tree is up and has not grown for LEVEL_POLLS
+    polls (the estimate is a mean, a worker may stop below it); False when timeout seconds pass first."""
     end = clock() + timeout
-    while rss_of() < want_kb:
+    last, level = 0, 0
+    while True:
+        rss = rss_of()
+        if rss >= want_kb:
+            return True
+        level = level + 1 if 0 < rss <= last * 1.02 else 0
+        if level >= LEVEL_POLLS:
+            return True
+        last = rss
         if clock() >= end:
             return False
         sleep(poll)
-    return True
 
 
 def main(argv):

@@ -706,6 +706,66 @@ class RestartKeepsName(unittest.TestCase):
         self.assertEqual(len(self.launches()), 1, done)
         self.assertEqual(sorted(d[2] == 0 for d in done), [False, True], done)
 
+    def spawn_env(self, **extra):
+        (self.tmp / "cmd").write_text("bash\n")
+        env = dict(os.environ, PATH="%s:%s" % (self.tmp / "bin", os.environ["PATH"]), TMUX="stub",
+                   TMUX_PANE="%1", STUB_DIR=str(self.tmp), STUB_ROW="w-sid\tidle\tpin1",
+                   BOSS_MEMINFO=self.meminfo(40), CLAUDE_CONFIG_DIR=str(self.tmp))
+        env.update(extra)
+        return env
+
+    def run_spawn(self, env, timeout=60):
+        return subprocess.run(["bash", str(self.tmp / "boss-lifecycle.sh"), "spawn", str(self.tmp)],
+                              env=env, capture_output=True, text=True, timeout=timeout)
+
+    def test_spawn_passes_its_boss_pane_to_settle(self):
+        # settle reads the boss's own worker costs; without --boss it measures the wrong fleet.
+        (self.tmp / "memfloor.py").write_text(
+            "import sys\nopen(%r, 'a').write(' '.join(sys.argv[1:]) + '\\n')\n" % str(self.tmp / "memfloor-args"))
+        r = self.run_spawn(self.spawn_env(BOSS_SPAWN_LOCK=str(self.tmp / "spawn.lock")))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        calls = (self.tmp / "memfloor-args").read_text().splitlines()
+        settle = [c for c in calls if c.startswith("settle ")]
+        self.assertEqual(len(settle), 1, calls)
+        self.assertIn("--boss %1 ", settle[0] + " ")
+
+    def test_a_spawn_queued_behind_another_boss_gives_up_with_a_message(self):
+        import fcntl
+        lock = self.tmp / "spawn.lock"
+        with open(lock, "w") as held:
+            fcntl.flock(held, fcntl.LOCK_EX)
+            r = self.run_spawn(self.spawn_env(BOSS_SPAWN_LOCK=str(lock), BOSS_SPAWN_LOCK_WAIT="1"), timeout=20)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("another boss is spawning", r.stderr)
+        self.assertIn("waited 1 s", r.stderr)
+        calls = (self.tmp / "calls").read_text() if (self.tmp / "calls").exists() else ""
+        self.assertNotIn("split-window", calls)
+
+    def test_without_a_runtime_dir_the_lock_sits_in_a_private_per_user_directory(self):
+        tmpdir = self.tmp / "tmpdir"
+        tmpdir.mkdir()
+        env = self.spawn_env(TMPDIR=str(tmpdir))
+        env.pop("XDG_RUNTIME_DIR", None)
+        env.pop("BOSS_SPAWN_LOCK", None)
+        r = self.run_spawn(env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        made = list(tmpdir.iterdir())
+        self.assertEqual([m.name for m in made], ["claude-boss-%d" % os.getuid()], made)
+        self.assertEqual(made[0].stat().st_mode & 0o777, 0o700)
+        self.assertEqual(made[0].stat().st_uid, os.getuid())
+        self.assertEqual([f.name for f in made[0].iterdir()], [f"claude-boss-spawn-{os.getuid()}.lock"])
+
+    def test_a_lock_directory_open_to_others_is_refused(self):
+        tmpdir = self.tmp / "tmpdir"
+        (tmpdir / ("claude-boss-%d" % os.getuid())).mkdir(parents=True, mode=0o755)
+        os.chmod(tmpdir / ("claude-boss-%d" % os.getuid()), 0o755)
+        env = self.spawn_env(TMPDIR=str(tmpdir))
+        env.pop("XDG_RUNTIME_DIR", None)
+        env.pop("BOSS_SPAWN_LOCK", None)
+        r = self.run_spawn(env)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("not private", r.stderr)
+
     def test_a_restarted_concierge_is_still_a_concierge(self):
         (self.tmp / "role").write_text("concierge\n")
         r, _ = self.run_restart()
