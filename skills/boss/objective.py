@@ -292,6 +292,7 @@ ITEM_RE = re.compile(r"^(\d+[.)]|[-*+])\s")
 
 PLACEHOLDER_RE = re.compile(r"^(none|nothing queued|n/a|-)\.?$", re.I)
 SENTENCE_END_RE = re.compile(r"[.!?]$")
+OWNER_MARK_RE = re.compile(r"\((?:→|->)[^)]*\)\s*$")
 
 
 def entries(items) -> list:
@@ -299,7 +300,7 @@ def entries(items) -> list:
 
     With bullets, a line above the first one is an intro and a line below
     one belongs to it. A NEXT with no bullet is plain prose: a line goes
-    on the one above until that ends a sentence (. ! ?). A placeholder
+    on the one above until that ends a sentence (. ! ?) or carries a worker mark. A placeholder
     ("none", "nothing queued", "n/a", "-") is no work."""
     items = list(items)
     bulleted = any(ITEM_RE.match(ln) for ln in items)
@@ -310,7 +311,8 @@ def entries(items) -> list:
         if bulleted:
             starts = bool(ITEM_RE.match(ln))
         else:
-            starts = not found or bool(SENTENCE_END_RE.search(found[-1]))
+            last = found[-1].rstrip() if found else ""
+            starts = not found or bool(OWNER_MARK_RE.search(last) or SENTENCE_END_RE.search(last))
         if starts:
             found.append(ln)
         elif found:

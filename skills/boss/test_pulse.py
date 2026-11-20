@@ -160,6 +160,11 @@ class Decide(unittest.TestCase):
                              ["Ada"]),
             (["Fix the reopen bug and then add a regression test.", "Ship it."], []))
 
+    def test_a_marked_prose_item_does_not_swallow_the_next_line(self):
+        d = pulse.decide(pulse.Facts(track="demo", size=1, workers=("Ada",),
+                                     next_items=["Fix the reopen bug. (→ Ada)  ", "Write the docs"]))
+        self.assertEqual(d.actions, [pulse.Action("spawn-next", 1)])
+
     def test_a_placeholder_next_is_no_work_and_does_not_block_an_idle_stop(self):
         for text in ("none", "None.", "Nothing queued", "N/A", "-", "- none"):
             d = pulse.decide(pulse.Facts(track="demo", size=1, idle=[("Ada", "w:1.0")],
