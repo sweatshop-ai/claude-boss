@@ -162,6 +162,7 @@ case "$1" in
       '#{@boss_pane}') echo '' ;;
       '#{pane_current_command}') cat "$STUB_DIR/cmd" ;;
       '#{@worker_role}') cat "$STUB_DIR/role" 2>/dev/null ;;
+      '#{@worker_autocompact}') cat "$STUB_DIR/autocompact" 2>/dev/null ;;
       '#{pane_pid}') cat "$STUB_DIR/panepid" 2>/dev/null ;;
       *) echo '' ;;
     esac ;;
@@ -765,6 +766,41 @@ class RestartKeepsName(unittest.TestCase):
         r = self.run_spawn(env)
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("not private", r.stderr)
+
+    def spawn_with(self, *extra):
+        (self.tmp / "cmd").write_text("bash\n")
+        env = dict(os.environ, PATH="%s:%s" % (self.tmp / "bin", os.environ["PATH"]), TMUX="stub",
+                   TMUX_PANE="%1", STUB_DIR=str(self.tmp), STUB_ROW="w-sid\tidle\tpin1",
+                   BOSS_MEMINFO=self.meminfo(64), CLAUDE_CONFIG_DIR=str(self.tmp))
+        return subprocess.run(["bash", str(self.tmp / "boss-lifecycle.sh"), "spawn", str(self.tmp)] + list(extra),
+                              env=env, capture_output=True, text=True, timeout=60)
+
+    def test_a_worker_spawned_with_autocompact_starts_with_it_and_keeps_it(self):
+        # A large ticket gets a later compaction than the owner's global window.
+        r = self.spawn_with("--autocompact", "200k")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        launch = self.launches()
+        self.assertEqual(len(launch), 1)
+        self.assertIn("--autocompact '200k'", launch[0])
+        self.assertIn("set-option -p -t %5 @worker_autocompact 200k",
+                      (self.tmp / "calls").read_text())
+
+    def test_a_worker_spawned_without_autocompact_follows_the_global_window(self):
+        r = self.spawn_with()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("--autocompact", self.launches()[0])
+
+    def test_an_autocompact_that_is_not_a_size_is_refused(self):
+        r = self.spawn_with("--autocompact", "lots")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("--autocompact", r.stderr)
+        self.assertFalse(self.launches() if (self.tmp / "calls").exists() else [])
+
+    def test_a_restarted_worker_keeps_its_autocompact(self):
+        (self.tmp / "autocompact").write_text("200k\n")
+        r, _ = self.run_restart()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("--autocompact '200k'", self.launches()[0])
 
     def test_a_restarted_concierge_is_still_a_concierge(self):
         (self.tmp / "role").write_text("concierge\n")

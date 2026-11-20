@@ -210,6 +210,7 @@ machinery that watches your team can see it.
 ```bash
 boss-start [track]                                        # the owner runs this: opus, medium, autocompact 200k
 boss-lifecycle.sh spawn <project-dir> [name] [--model M]  # prints pane id + name; M defaults to opus, effort medium
+boss-lifecycle.sh spawn <dir> --autocompact 200k           # a later compaction for a large ticket; kept on restart
 boss-lifecycle.sh spawn <dir> --concierge                 # holds your questions to the owner; sonnet
 boss-lifecycle.sh claim <pane-id> [name] [--concierge]    # adopt a worker; --concierge re-marks a restarted concierge
 boss-lifecycle.sh retire <pane-id> [--kill]               # refuses if BUSY
@@ -372,8 +373,14 @@ track into the marker; the tracker is what the compaction summary cannot lose.
 Open blockers listed there are still live — resume their ladders from the
 recorded T+0.
 
-Workers compact at the owner's global `autoCompactWindow` (200k since 2026-11-15);
-your one-task rule and the 150k split fire first.
+Workers compact at the owner's global `autoCompactWindow` (120k since 2026-11-20).
+A compaction leaves about 26k (median of 412 on 17–20 November), so a worker has
+about 90k of working room before the next one. That is enough for most tickets.
+For a ticket that must hold many files or a long log at once (a cross-module
+refactor, a migration, a hard bug across several layers), spawn its worker with
+`--autocompact 200k`: one compaction in the middle of such a ticket loses more
+than the extra context costs. Do not raise it for a worker that merely runs long;
+the one-task rule restarts it between tickets.
 
 ### 2. Broadcasts. They cost N times one message.
 
