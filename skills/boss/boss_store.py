@@ -282,8 +282,10 @@ def read_json(f):
     return st if isinstance(st, dict) else {}
 
 
-def update_json(f, fn):
-    """`update_state`'s round trip on any JSON object file under `pm/.pulse/`: same lock, same atomic write."""
+def update_json(f, fn, strict=False):
+    """`update_state`'s round trip on any JSON object file under `pm/.pulse/`: same lock, same atomic write.
+
+    A failed write is swallowed (the state is a cache) unless `strict`, which raises the OSError."""
     lock = None
     try:
         f.parent.mkdir(parents=True, exist_ok=True)
@@ -310,6 +312,8 @@ def update_json(f, fn):
                     os.unlink(tmp)
                 except OSError:
                     pass
+            if strict:
+                raise
         return new
     finally:
         if lock is not None:
