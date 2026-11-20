@@ -144,6 +144,43 @@ class Decide(unittest.TestCase):
                                      workers=("Ada",), next_items=["Fix the reopen bug"]))
         self.assertEqual(kinds(d), ["dispatch-next", "refill-next"])
 
+    def test_a_busy_team_with_an_unbulleted_first_item_asks_for_a_spawn(self):
+        d = pulse.decide(pulse.Facts(track="demo", size=1, workers=("Ada",),
+                                     next_items=["Fix the reopen bug"]))
+        self.assertEqual(d.actions, [pulse.Action("spawn-next", 1)])
+
+    def test_an_intro_line_above_the_bullets_is_not_an_item(self):
+        d = pulse.decide(pulse.Facts(track="demo", size=2, workers=("Ada", "Bo"),
+                                     next_items=["Work these top-down:", "- a (→ Ada)", "- b (→ Bo)"]))
+        self.assertIsNone(d)
+
+    def test_a_prose_sentence_wrapped_over_two_lines_is_one_item(self):
+        self.assertEqual(
+            pulse.unassigned(["Fix the reopen bug and then", "add a regression test.", "Ship it."],
+                             ["Ada"]),
+            (["Fix the reopen bug and then add a regression test.", "Ship it."], []))
+
+    def test_a_marked_prose_item_does_not_swallow_the_next_line(self):
+        d = pulse.decide(pulse.Facts(track="demo", size=1, workers=("Ada",),
+                                     next_items=["Fix the reopen bug. (→ Ada)  ", "Write the docs"]))
+        self.assertEqual(d.actions, [pulse.Action("spawn-next", 1)])
+
+    def test_a_placeholder_next_is_no_work_and_does_not_block_an_idle_stop(self):
+        for text in ("none", "None.", "Nothing queued", "N/A", "-", "- none"):
+            d = pulse.decide(pulse.Facts(track="demo", size=1, idle=[("Ada", "w:1.0")],
+                                         workers=("Ada",), next_items=[text]))
+            self.assertFalse(d.block, text)
+            self.assertNotIn("spawn-next", kinds(d), text)
+
+    def test_a_placeholder_beside_a_busy_team_asks_for_no_spawn(self):
+        self.assertIsNone(pulse.decide(pulse.Facts(track="demo", size=1, workers=("Ada",),
+                                                   next_items=["Nothing queued."])))
+
+    def test_a_prose_item_blocks_an_idle_stop(self):
+        d = pulse.decide(pulse.Facts(track="demo", size=1, idle=[("Ada", "w:1.0")],
+                                     workers=("Ada",), next_items=["Fix the reopen bug"]))
+        self.assertTrue(d.block)
+
     def test_an_unreadable_roster_does_not_ask_for_spawns(self):
         self.assertIsNone(pulse.decide(pulse.Facts(track="demo", next_items=["- a", "- b"])))
 

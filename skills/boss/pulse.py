@@ -69,15 +69,7 @@ Action = namedtuple("Action", "kind n", defaults=(None,))
 MARK_RE = re.compile(r"\((?:→|->)\s*([^)]*?)\s*\)")
 
 
-def _entries(items):
-    """The NEXT list items, each with its wrapped and nested lines joined on."""
-    entries = []
-    for line in items:
-        if objective.ITEM_RE.match(line):
-            entries.append(line)
-        elif entries:
-            entries[-1] += " " + line.strip()
-    return entries
+_entries = objective.entries
 
 
 def _marked(entry):
@@ -210,11 +202,9 @@ def decide(facts):
     work = open_work(facts)
     woken = {w.worker for w in facts.parks}
     resting = [n for n in _idle_names(facts) if n not in woken]
-    # Prose in NEXT, not a list, may still be work, and a ticket graph may hold open tickets
-    # that wait on others: retire only on a NEXT list whose items are all marked busy,
-    # or, beside a refill, as the fallback when the refill finds nothing.
-    if resting and not work and not facts.broken and not facts.source and (
-            _entries(facts.next_items) or not facts.next_items):
+    # A ticket graph may hold open tickets that wait on others: retire only where NEXT
+    # holds no unassigned work (prose counts, a placeholder such as "none" does not).
+    if resting and not work and not facts.broken and not facts.source:
         actions.append(Action("retire"))
     if facts.rungs:
         actions.append(Action("run-rung", facts.rungs[0].rung))

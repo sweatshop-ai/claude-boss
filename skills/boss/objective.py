@@ -290,10 +290,40 @@ def next_items(text: str) -> list:
 ITEM_RE = re.compile(r"^(\d+[.)]|[-*+])\s")
 
 
+PLACEHOLDER_RE = re.compile(r"^(none|nothing queued|n/a|-)\.?$", re.I)
+SENTENCE_END_RE = re.compile(r"[.!?]$")
+OWNER_MARK_RE = re.compile(r"\((?:→|->)[^)]*\)\s*$")
+
+
+def entries(items) -> list:
+    """The NEXT work items, each with its wrapped and nested lines joined on.
+
+    With bullets, a line above the first one is an intro and a line below
+    one belongs to it. A NEXT with no bullet is plain prose: a line goes
+    on the one above until that ends a sentence (. ! ?) or carries a worker mark. A placeholder
+    ("none", "nothing queued", "n/a", "-") is no work."""
+    items = list(items)
+    bulleted = any(ITEM_RE.match(ln) for ln in items)
+    found = []
+    for ln in items:
+        if not ln.strip():
+            continue
+        if bulleted:
+            starts = bool(ITEM_RE.match(ln))
+        else:
+            last = found[-1].rstrip() if found else ""
+            starts = not found or bool(OWNER_MARK_RE.search(last) or SENTENCE_END_RE.search(last))
+        if starts:
+            found.append(ln)
+        elif found:
+            found[-1] += " " + ln.strip()
+    return [e for e in found
+            if not PLACEHOLDER_RE.match(ITEM_RE.sub("", e, count=1).strip())]
+
+
 def next_count(text: str) -> int:
-    """How many items `## Next` queues: lines that start a list item at the margin.
-    A wrapped or nested line belongs to the item above it."""
-    return sum(1 for ln in next_items(text) if ITEM_RE.match(ln))
+    """How many items `## Next` queues, counted as the pulse counts them."""
+    return len(entries(next_items(text)))
 
 
 def set_next(text: str, body: str) -> str:
