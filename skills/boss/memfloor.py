@@ -2,14 +2,21 @@
 """The memory floor: a spawn must leave policy.MEMORY_FLOOR_GB of MemAvailable free.
 
     memfloor.py check [--boss PANE] [--meminfo FILE]
+    memfloor.py settle --pid PID [--boss PANE] [--timeout SECONDS]
 
 Exit 0 when the new worker fits, 1 with the refusal on stderr when it would
 not. The new worker is estimated as the mean resident size of the boss's
 current workers, at least policy.WORKER_MIN_GB. BOSS_MEMINFO names another
 meminfo file (tests). boss-lifecycle.sh spawn runs it.
+
+settle waits, at most --timeout seconds, until the process tree under PID is as
+large as check estimated it: a starting worker has taken only a part of its memory,
+and the next boss's check would count the rest as free. spawn holds its lock until then.
 """
 import os
+import subprocess
 import sys
+import time
 from pathlib import Path
 
 import policy
@@ -63,11 +70,47 @@ def boss_worker_rss(boss_pane):
     return [r for r in rss if r]
 
 
+def tree_rss_kb(pid):
+    """Resident kB of PID and everything under it."""
+    try:
+        out = subprocess.run(["ps", "-eo", "pid=,ppid=,rss="], capture_output=True, text=True, timeout=5).stdout
+    except (OSError, subprocess.SubprocessError):
+        return 0
+    rows = [tuple(int(x) for x in line.split()) for line in out.splitlines() if len(line.split()) == 3]
+    kids = {}
+    for p, pp, r in rows:
+        kids.setdefault(pp, []).append(p)
+    rss = {p: r for p, _, r in rows}
+    seen, todo = set(), [int(pid)]
+    while todo:
+        p = todo.pop()
+        if p not in seen:
+            seen.add(p)
+            todo.extend(kids.get(p, []))
+    return sum(rss.get(p, 0) for p in seen)
+
+
+def settle(want_kb, timeout, rss_of, poll=0.5, clock=time.monotonic, sleep=time.sleep):
+    """True once rss_of() reaches want_kb, False when timeout seconds pass first."""
+    end = clock() + timeout
+    while rss_of() < want_kb:
+        if clock() >= end:
+            return False
+        sleep(poll)
+    return True
+
+
 def main(argv):
-    if not argv or argv[0] != "check":
-        print("usage: memfloor.py check [--boss PANE] [--meminfo FILE]", file=sys.stderr)
+    if not argv or argv[0] not in ("check", "settle"):
+        print("usage: memfloor.py check|settle ...", file=sys.stderr)
         return 2
     opt = dict(zip(argv[1::2], argv[2::2]))
+    if argv[0] == "settle":
+        if not (opt.get("--pid") or "").isdigit():
+            return 0
+        rss = boss_worker_rss(opt["--boss"]) if opt.get("--boss") else []
+        settle(worker_cost_kb(rss), float(opt.get("--timeout", 30)), lambda: tree_rss_kb(opt["--pid"]))
+        return 0
     rss = boss_worker_rss(opt["--boss"]) if opt.get("--boss") else []
     try:
         avail = mem_available_kb(opt.get("--meminfo") or os.environ.get("BOSS_MEMINFO") or "/proc/meminfo")
