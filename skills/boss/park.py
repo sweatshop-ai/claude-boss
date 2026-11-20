@@ -49,6 +49,7 @@ Park = namedtuple("Park", "worker event since retired", defaults=(False,))
 # What the pulse sees: ticket numbers the frontier reports done, {worker name: status} of the
 # boss's live workers, the lines under Open blockers.
 # `prs(repo, number)` is the GitHub lookup (pr_lookup): {"state", "ci_done"} or None when unknown.
+# `blockers` is None when the tracker could not be read: an owner park is then never over.
 World = namedtuple("World", "done workers blockers prs", defaults=(frozenset(), {}, (), None))
 
 
@@ -62,6 +63,8 @@ def _worker(target, world):
 
 
 def _owner(target, world):
+    if world.blockers is None:              # tracker unread: no blocker line proves nothing
+        return False
     pat = re.compile(r"(?<![\w-])%s(?![\w-])" % re.escape(target))
     return not any(pat.search(line) for line in world.blockers)
 
@@ -193,7 +196,7 @@ def _update(track, fn, cfg):
     path = boss_store.parks_path(track, cfg)
     if path is None:
         raise ValueError("not a track name: %r" % track)
-    return boss_store.update_json(path, fn)
+    return boss_store.update_json(path, fn, strict=True)
 
 
 def set_park(track, worker, event, now=None, cfg=None):
@@ -241,8 +244,9 @@ def state(p, now, world):
 
 
 def open_blocker_lines(track, cfg=None):
+    """The lines under Open blockers; None when the tracker is missing or unreadable."""
     body = boss_store.read_tracker(track, cfg)
-    return tuple(tracker.blocker_lines(body)) if body else ()
+    return None if body is None else tuple(tracker.blocker_lines(body))
 
 
 def _usage():
@@ -283,7 +287,7 @@ def main(argv):
             return 0
         if len(rest) == 3 and rest[1] == "--until":
             kind, target = parse_event(rest[2])
-            if kind == "owner" and _owner(target, World(blockers=open_blocker_lines(track))):
+            if kind == "owner" and _owner(target, World(blockers=open_blocker_lines(track) or ())):
                 raise ValueError("no open blocker of %s names %s: write the question on its "
                                  "line under Open blockers first" % (track, target))
             set_park(track, rest[0], "%s:%s" % (kind, target))
@@ -292,6 +296,9 @@ def main(argv):
     except ValueError as exc:
         print("boss-park: %s" % exc, file=sys.stderr)
         return 2
+    except OSError as exc:
+        print("boss-park: nothing was written: %s" % exc, file=sys.stderr)
+        return 1
     return _usage()
 
 

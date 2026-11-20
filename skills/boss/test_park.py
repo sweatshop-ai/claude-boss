@@ -302,6 +302,34 @@ class Cli(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertNotIn("Ada", self.run_cli("demo", "--list").stdout)
 
+    def test_the_list_calls_an_owner_park_waiting_when_the_tracker_is_unreadable(self):
+        self.assertEqual(self.run_cli("demo", "Ada", "--until", "owner:q7").returncode, 0)
+        (self.cfg / "pm" / "demo.md").unlink()
+        out = self.run_cli("demo", "--list").stdout
+        self.assertIn("waiting", out)
+        self.assertNotIn("over", out)
+
+    def test_the_list_expires_an_owner_park_even_when_the_tracker_is_unreadable(self):
+        park.set_park("demo", "Ada", "owner:q7", now=1, cfg=self.cfg)
+        (self.cfg / "pm" / "demo.md").unlink()
+        self.assertIn("expired", self.run_cli("demo", "--list").stdout)
+
+    def test_a_park_that_cannot_be_written_fails_loudly(self):
+        (self.cfg / "pm" / ".pulse").write_text("a file where the directory should be")
+        r = self.run_cli("demo", "Ada", "--until", "ticket:12")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertNotIn("parked", r.stdout)
+        self.assertIn("boss-park", r.stderr)
+
+    def test_a_clear_that_cannot_be_written_fails_loudly(self):
+        self.assertEqual(self.run_cli("demo", "Ada", "--until", "ticket:12").returncode, 0)
+        f = self.cfg / "pm" / ".pulse"
+        f.chmod(0o500)
+        self.addCleanup(f.chmod, 0o700)
+        r = self.run_cli("demo", "Ada", "--clear")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertNotIn("cleared", r.stdout)
+
     def test_a_bad_event_exits_2_and_lists_the_allowed_ones(self):
         r = self.run_cli("demo", "Ada", "--until", "14:30")
         self.assertEqual(r.returncode, 2)
