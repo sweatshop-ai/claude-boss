@@ -39,6 +39,11 @@ Three rules are borrowed from those handoffs and hold here:
   summarised into the brief; the boss reads the plan.
 - **Redact.** No key, password, token or personal data in the brief. A credential
   is named by the path of the file that holds it.
+- **A role, never a first name, in a public repo.** The brief, and any edit you
+  make to the tickets, is committed next to them. When that repo is public
+  (`gh repo view <owner/repo> --json visibility`), a person holding a blocker or
+  a device is "the owner", "the client" or "the reviewer", never by name: a
+  public-tree guard fails every PR on it, and the commit stays in the history.
 - **Suggested skills.** The brief closes with the skills the boss and its workers
   will need.
 
@@ -72,7 +77,7 @@ that holds the `issues/` folder, and fill every `{{placeholder}}`:
   the plan or tickets cite; every code repo the tickets touch, with its base
   branch. Absolute paths, each one checked with `ls`.
 - **Frontier**: the `frontier.py` output verbatim. For each external blocker, the
-  person or team holding it and where it was asked, from the ticket text and the
+  person or team holding it (by role in a public repo) and where it was asked, from the ticket text and the
   conversation. Unknown is written as "not yet asked", never guessed.
 - **Staffing**: the models from the arguments; the worktree root (beside the repo,
   `<repo>-wt/<worker>`, unless the repo's rules say otherwise).
