@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- **The pulse counts a NEXT entry written as plain prose when it comes first.** `_entries()` dropped an unbulleted first line, so with every worker busy that entry never entered the unassigned list and `spawn-next` was not emitted.
+- **The pulse counts a NEXT written as plain prose.** `_entries()` dropped an unbulleted first line, so with every worker busy that entry never entered the unassigned list and `spawn-next` was not emitted. A NEXT with no bullet is now read line by line; where bullets exist, a line above the first is still an intro.
 
 ## 0.30.3
 

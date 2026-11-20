@@ -70,12 +70,18 @@ MARK_RE = re.compile(r"\((?:→|->)\s*([^)]*?)\s*\)")
 
 
 def _entries(items):
-    """The NEXT list items, each with its wrapped and nested lines joined on."""
+    """The NEXT list items, each with its wrapped and nested lines joined on.
+
+    A NEXT with no bulleted item at all is plain prose: each line is an item.
+    Where bullets exist, a line above the first one is an intro, not work."""
+    items = list(items)
+    if not any(objective.ITEM_RE.match(line) for line in items):
+        return [line for line in items if line.strip()]
     entries = []
     for line in items:
-        if objective.ITEM_RE.match(line) or not entries:
+        if objective.ITEM_RE.match(line):
             entries.append(line)
-        else:
+        elif entries:
             entries[-1] += " " + line.strip()
     return entries
 

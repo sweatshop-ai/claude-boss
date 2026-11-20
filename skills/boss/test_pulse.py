@@ -146,8 +146,13 @@ class Decide(unittest.TestCase):
 
     def test_a_busy_team_with_an_unbulleted_first_item_asks_for_a_spawn(self):
         d = pulse.decide(pulse.Facts(track="demo", size=1, workers=("Ada",),
-                                     next_items=["Fix the reopen bug", "- b (→ Ada)"]))
+                                     next_items=["Fix the reopen bug"]))
         self.assertEqual(d.actions, [pulse.Action("spawn-next", 1)])
+
+    def test_an_intro_line_above_the_bullets_is_not_an_item(self):
+        d = pulse.decide(pulse.Facts(track="demo", size=2, workers=("Ada", "Bo"),
+                                     next_items=["Work these top-down:", "- a (→ Ada)", "- b (→ Bo)"]))
+        self.assertIsNone(d)
 
     def test_an_unreadable_roster_does_not_ask_for_spawns(self):
         self.assertIsNone(pulse.decide(pulse.Facts(track="demo", next_items=["- a", "- b"])))
