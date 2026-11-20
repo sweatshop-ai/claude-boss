@@ -790,17 +790,45 @@ class RestartKeepsName(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertNotIn("--autocompact", self.launches()[0])
 
-    def test_an_autocompact_that_is_not_a_size_is_refused(self):
-        r = self.spawn_with("--autocompact", "lots")
-        self.assertNotEqual(r.returncode, 0)
-        self.assertIn("--autocompact", r.stderr)
-        self.assertFalse(self.launches() if (self.tmp / "calls").exists() else [])
+    def test_an_autocompact_claude_would_refuse_is_refused_before_a_pane_is_made(self):
+        # claude takes 100k..1M or auto; anything else made it exit in the new pane,
+        # and spawn waited 30 s and left the pane behind.
+        for bad in ("lots", "0", "50k", "99", "5m", "2000k", "1000001"):
+            r = self.spawn_with("--autocompact", bad)
+            self.assertNotEqual(r.returncode, 0, bad)
+            self.assertIn("--autocompact", r.stderr)
+            calls = (self.tmp / "calls").read_text() if (self.tmp / "calls").exists() else ""
+            self.assertNotIn("split-window", calls, bad)
+
+    def test_autocompact_takes_what_claude_takes(self):
+        for good, sent in (("--autocompact=200k", "200k"), ("100k", "100k"), ("1M", "1M"),
+                           ("200", "200"), ("150000", "150000"), ("auto", "auto")):
+            (self.tmp / "calls").unlink(missing_ok=True)
+            args = [good] if good.startswith("--") else ["--autocompact", good]
+            r = self.spawn_with(*args)
+            self.assertEqual(r.returncode, 0, (good, r.stderr))
+            self.assertIn("--autocompact '%s'" % sent, self.launches()[0])
+
+    def test_autocompact_only_applies_to_spawn(self):
+        # restart and move would launch with it but keep the old stamp.
+        for args in (["restart", "%5"], ["move", "%5", str(self.tmp)], ["retire", "%5"]):
+            r = self.run_lifecycle(*args, "--autocompact", "200k")
+            self.assertNotEqual(r.returncode, 0, args)
+            self.assertIn("--autocompact only applies to spawn", r.stderr)
+
+    def test_a_retired_pane_loses_its_autocompact(self):
+        r = self.run_lifecycle("retire", "%5", row="w-sid\tidle\tpin1")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("set-option -pu -t %5 @worker_autocompact", (self.tmp / "calls").read_text())
 
     def test_a_restarted_worker_keeps_its_autocompact(self):
         (self.tmp / "autocompact").write_text("200k\n")
-        r, _ = self.run_restart()
+        r, calls = self.run_restart()
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("--autocompact '200k'", self.launches()[0])
+        # restart retires first, and retire clears the stamp: it must be put back.
+        unset = calls.index("set-option -pu -t %5 @worker_autocompact")
+        self.assertIn("set-option -p -t %5 @worker_autocompact 200k", calls[unset:])
 
     def test_a_restarted_concierge_is_still_a_concierge(self):
         (self.tmp / "role").write_text("concierge\n")

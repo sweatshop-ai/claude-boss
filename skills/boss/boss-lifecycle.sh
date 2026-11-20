@@ -77,8 +77,23 @@ if [[ -n "$_want" ]]; then printf '%s\n' "an option needs a value" >&2; exit 1; 
 if [[ -z "$REQUIRE_IDLE" && ( -n "$EXPECT_SESSION" || -n "$EXPECT_LAST" || -n "$WAIT_IDLE" || -n "$STOP_SHELLS" ) ]]; then
   printf '%s\n' "--expect-session / --expect-last / --wait-idle / --stop-shells only apply with --require-idle" >&2; exit 1
 fi
-if [[ -n "$AUTOCOMPACT" && ! "$AUTOCOMPACT" =~ ^[0-9]+[kKmM]?$ ]]; then
-  printf '%s\n' "--autocompact takes a size such as 200k or 1m" >&2; exit 1
+# Checked here against claude's own rule (auto, or 100k..1M; a bare number
+# under 1000 means thousands): a value claude refuses made it exit in the new
+# pane, and spawn waited 30 s and left that pane behind.
+if [[ -n "$AUTOCOMPACT" && "${AUTOCOMPACT,,}" != auto ]]; then
+  _ac_ok=""
+  if [[ "${AUTOCOMPACT,,}" =~ ^([0-9]{1,7})([km]?)$ ]]; then
+    _n=$((10#${BASH_REMATCH[1]}))
+    case "${BASH_REMATCH[2]}" in
+      k) _n=$((_n * 1000)) ;;
+      m) _n=$((_n * 1000000)) ;;
+      *) if (( _n < 1000 )); then _n=$((_n * 1000)); fi ;;
+    esac
+    if (( _n >= 100000 && _n <= 1000000 )); then _ac_ok=1; fi
+  fi
+  if [[ -z "$_ac_ok" ]]; then
+    printf '%s\n' "--autocompact takes auto or a size from 100k to 1M, got \"$AUTOCOMPACT\"" >&2; exit 1
+  fi
 fi
 if [[ -n "$WAIT_IDLE" && ! "$WAIT_IDLE" =~ ^[0-9]+$ ]]; then
   printf '%s\n' "--wait-idle takes a number of seconds" >&2; exit 1
@@ -96,6 +111,9 @@ if [[ -n "$WAIT_IDLE" ]]; then
   RETRY_EVERY=$(awk -v e="$RETRY_EVERY" 'BEGIN { print (e < 1) ? 1 : e }')
 fi
 set -- ${_args[@]+"${_args[@]}"}
+if [[ -n "$AUTOCOMPACT" && "${1:-}" != spawn ]]; then
+  printf '%s\n' "--autocompact only applies to spawn: restart and move keep the window stamped on the pane" >&2; exit 1
+fi
 if [[ -n "$ROLE" && "${1:-}" != spawn && "${1:-}" != claim ]]; then
   printf '%s\n' "--concierge only applies to spawn and claim: a worker must not get AskUserQuestion" >&2; exit 1
 fi
@@ -580,6 +598,7 @@ cmd_retire() {
     printf 'killed %s\n' "$pane"
   else
     tmux set-option -pu -t "$pane" @worker_role 2>/dev/null || true
+    tmux set-option -pu -t "$pane" @worker_autocompact 2>/dev/null || true   # a ticket's window, not the pane's
     tmux set-option -pu -t "$pane" @custom_title 2>/dev/null || true   # the "[concierge]" label goes with the role
     printf 'retired %s (pane kept)\n' "$pane"
   fi
@@ -593,8 +612,10 @@ cmd_restart() {
   dir=$(pane_prop "$pane" '#{pane_current_path}')
   local keep; keep=$(agent_name "$pane")
   ROLE=$(pane_prop "$pane" '#{@worker_role}' 2>/dev/null || true)
+  AUTOCOMPACT=$(pane_prop "$pane" '#{@worker_autocompact}' 2>/dev/null || true)
   cmd_retire "$pane" >/dev/null
   if [[ -n "$ROLE" ]]; then tmux set-option -p -t "$pane" @worker_role "$ROLE"; fi
+  if [[ -n "$AUTOCOMPACT" ]]; then tmux set-option -p -t "$pane" @worker_autocompact "$AUTOCOMPACT"; fi
   local sid; sid=$(preassign_name "$keep")
   launch_claude "$pane" "$dir" "$sid"
   # A recycled worker keeps its name: the owner tracks the pane by the name on it,
@@ -617,8 +638,10 @@ cmd_move() {
   local pane; pane=$(resolve_pane "$target")
   local keep; keep=$(agent_name "$pane")
   ROLE=$(pane_prop "$pane" '#{@worker_role}' 2>/dev/null || true)
+  AUTOCOMPACT=$(pane_prop "$pane" '#{@worker_autocompact}' 2>/dev/null || true)
   cmd_retire "$pane" >/dev/null
   if [[ -n "$ROLE" ]]; then tmux set-option -p -t "$pane" @worker_role "$ROLE"; fi
+  if [[ -n "$AUTOCOMPACT" ]]; then tmux set-option -p -t "$pane" @worker_autocompact "$AUTOCOMPACT"; fi
   local sid; sid=$(preassign_name "$keep")
   launch_claude "$pane" "$dir" "$sid"
   if [[ -n "$keep" && "$keep" != "-" && -z "$sid" ]]; then
