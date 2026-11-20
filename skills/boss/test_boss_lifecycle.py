@@ -668,7 +668,7 @@ class RestartKeepsName(unittest.TestCase):
 
     def meminfo(self, gb):
         f = self.tmp / "meminfo"
-        f.write_text("MemAvailable:   %d kB\n" % (gb * 1024 * 1024))
+        f.write_text("MemAvailable:   %d kB\n" % int(gb * 1024 * 1024))
         return str(f)
 
     def test_a_spawn_under_the_memory_floor_is_refused_before_a_pane_is_made(self):
@@ -683,6 +683,26 @@ class RestartKeepsName(unittest.TestCase):
         self.assertIn("8 GB floor", r.stderr)
         calls = (self.tmp / "calls").read_text() if (self.tmp / "calls").exists() else ""
         self.assertNotIn("split-window", calls)
+
+    def test_two_concurrent_spawns_serialise_on_the_memory_floor(self):
+        # Room for one worker above the floor. Without a lock both bosses read the
+        # same MemAvailable and both pass; held from check to launch, the second
+        # reads what the first's worker took and is refused (Codex, #163 round 5).
+        (self.tmp / "cmd").write_text("bash\n")
+        meminfo = Path(self.meminfo(8.5))
+        tmux = self.tmp / "bin" / "tmux"
+        launch = 'if [[ "$*" == *" --model "* ]]; then'
+        tmux.write_text(tmux.read_text().replace(
+            launch, launch + ' echo "MemAvailable: 8388608 kB" > "%s";' % meminfo))
+        env = dict(os.environ, PATH="%s:%s" % (self.tmp / "bin", os.environ["PATH"]), TMUX="stub",
+                   TMUX_PANE="%1", STUB_DIR=str(self.tmp), STUB_ROW="w-sid\tidle\tpin1",
+                   BOSS_MEMINFO=str(meminfo), CLAUDE_CONFIG_DIR=str(self.tmp))
+        cmd = ["bash", str(self.tmp / "boss-lifecycle.sh"), "spawn", str(self.tmp)]
+        procs = [subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                 for _ in range(2)]
+        done = [p.communicate(timeout=60) + (p.returncode,) for p in procs]
+        self.assertEqual(len(self.launches()), 1, done)
+        self.assertEqual(sorted(d[2] == 0 for d in done), [False, True], done)
 
     def test_a_restarted_concierge_is_still_a_concierge(self):
         (self.tmp / "role").write_text("concierge\n")

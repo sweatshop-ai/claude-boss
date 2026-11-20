@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **The memory floor check and the worker launch are one locked step (2026-11-20).** Two bosses could read the same MemAvailable, both pass, and together breach the floor; `spawn` now holds a flock under the config dir's `pm/.pulse` from the check until claude is started.
+
 ## 0.30.3
 
 - **hand-to-boss also keeps private organisation names and private clone URLs out of a public repo (2026-11-20).** After 0.30.2 the same brief still carried a private org's name, in a clone URL and in a quoted guardrail.

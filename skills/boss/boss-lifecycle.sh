@@ -279,7 +279,7 @@ launch_claude() {
 }
 
 cmd_spawn() {
-  local dir=${1:-} hint=${2:-}
+  local dir=${1:-} hint=${2:-} memlock=
   [[ -n "$dir" ]] || die "usage: spawn <project-dir> [name-hint]"
   [[ -d "$dir" ]] || die "not a directory: $dir"
   dir=$(cd "$dir" && pwd)
@@ -291,7 +291,11 @@ cmd_spawn() {
 
   # The memory floor: no worker limit, but never below policy.MEMORY_FLOOR_GB free. A
   # concierge is exempt: it holds the owner's questions and is the cheapest session there is.
+  # The check and the launch are one step across every boss on the machine: two bosses
+  # reading the same MemAvailable would both pass. The lock is held until claude is started.
   if [[ -z "$ROLE" ]]; then
+    local lockdir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/pm/.pulse"
+    mkdir -p "$lockdir" && exec {memlock}>"$lockdir/spawn.lock" && flock "$memlock" || die "spawn refused (cannot take the spawn lock)"
     python3 "$(dirname "${BASH_SOURCE[0]}")/memfloor.py" check --boss "$BOSS_PANE" || die "spawn refused (memory floor)"
   fi
 
@@ -302,6 +306,7 @@ cmd_spawn() {
   if [[ -n "$ROLE" ]]; then tmux set-option -p -t "$pane" @worker_role "$ROLE"; fi
   local sid; sid=$(preassign_name "$hint")
   launch_claude "$pane" "$dir" "$sid"
+  if [[ -n "${memlock:-}" ]]; then exec {memlock}>&-; fi
 
   claim_pane "$pane"
   if [[ -n "$MODEL" ]]; then tmux set-option -p -t "$pane" @worker_model "$MODEL"; fi
