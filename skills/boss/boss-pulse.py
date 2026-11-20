@@ -135,21 +135,17 @@ def woken_parks(sid, track, idle, done, tracker_text):
             if p.event.startswith("worker:"):
                 workers[p.event.partition(":")[2]] = "busy"
     world = park.World(done=frozenset(done), workers=workers, prs=park.pr_lookup(track),
-                       blockers=tuple(tracker.blocker_lines(tracker_text)) if tracker_text else ())
+                       blockers=tuple(tracker.blocker_lines(tracker_text)) if tracker_text is not None else None)
     now = time.time()
     free, woken, waiting = [], [], []
     for p in parks.values():
-        if (p.retired and not (p.event.startswith("owner:") and tracker_text is None)
-                and park.state(p, now, world) != "waiting"):
+        if p.retired and park.state(p, now, world) != "waiting":
             woken.append(pulse.Woken(p.worker, p.event, "retired", int((now - p.since) / 60)))
     kept = {p.worker for p in parks.values() if p.retired}    # `--retire` would refuse these names
     just_retired = any(p.retired and now - p.retired < park.RETIRE_GAP_S for p in parks.values())
     for name, coord in idle:
         p = parks.get(name)
-        if p and tracker_text is None and p.event.startswith("owner:"):
-            st = "waiting"                  # tracker unread: no blocker line proves nothing
-        else:
-            st = park.state(p, now, world) if p else None
+        st = park.state(p, now, world) if p else None
         if st == "waiting":
             if name not in kept:
                 waiting.append(pulse.Woken(name, p.event, st, int((now - p.since) / 60)))

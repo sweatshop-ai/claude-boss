@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **A park on an owner question obeys the two-hour limit and fails loudly (Codex NO-GO on #164).** An unreadable tracker no longer keeps an `owner:` park "waiting" past its age (the pulse), `boss-park --list` agrees with the pulse (unreadable is waiting, never over), and a park or clear that cannot be written exits 1 with the error instead of printing parked/cleared.
+
 ## 0.30.3
 
 - **hand-to-boss also keeps private organisation names and private clone URLs out of a public repo (2026-11-20).** After 0.30.2 the same brief still carried a private org's name, in a clone URL and in a quoted guardrail.
