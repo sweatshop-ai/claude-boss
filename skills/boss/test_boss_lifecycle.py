@@ -687,7 +687,8 @@ class RestartKeepsName(unittest.TestCase):
     def test_two_concurrent_spawns_serialise_on_the_memory_floor(self):
         # Room for one worker above the floor. Without a lock both bosses read the
         # same MemAvailable and both pass; held from check to launch, the second
-        # reads what the first's worker took and is refused (Codex, #163 round 5).
+        # reads what the first's worker took and is refused (Codex, #163 round 5). The stub takes
+        # the memory at launch; that the lock outlasts the worker's growth is Settling in test_memfloor.
         (self.tmp / "cmd").write_text("bash\n")
         meminfo = Path(self.meminfo(8.5))
         tmux = self.tmp / "bin" / "tmux"
@@ -696,7 +697,8 @@ class RestartKeepsName(unittest.TestCase):
             launch, launch + ' echo "MemAvailable: 8388608 kB" > "%s";' % meminfo))
         env = dict(os.environ, PATH="%s:%s" % (self.tmp / "bin", os.environ["PATH"]), TMUX="stub",
                    TMUX_PANE="%1", STUB_DIR=str(self.tmp), STUB_ROW="w-sid\tidle\tpin1",
-                   BOSS_MEMINFO=str(meminfo), CLAUDE_CONFIG_DIR=str(self.tmp))
+                   BOSS_MEMINFO=str(meminfo), CLAUDE_CONFIG_DIR=str(self.tmp),
+                   BOSS_SPAWN_LOCK=str(self.tmp / "spawn.lock"))
         cmd = ["bash", str(self.tmp / "boss-lifecycle.sh"), "spawn", str(self.tmp)]
         procs = [subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
                  for _ in range(2)]

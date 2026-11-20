@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- **The memory floor check and the worker launch are one locked step (2026-11-20).** Two bosses could read the same MemAvailable, both pass, and together breach the floor; `spawn` now holds a flock under the config dir's `pm/.pulse` from the check until claude is started.
+- **The memory floor check and the worker launch are one locked step (2026-11-20).** Two bosses could read the same MemAvailable, both pass, and together breach the floor; `spawn` now holds a flock under the config dir's `pm/.pulse` from the check until the new worker has grown to its estimated size (30 s at most), one lock per user whatever the config dir.
 
 ## 0.30.3
 

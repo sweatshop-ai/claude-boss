@@ -74,3 +74,18 @@ class Reading(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Settling(unittest.TestCase):
+    def test_settle_waits_until_the_worker_has_grown_to_its_cost(self):
+        sizes = iter([10, 50, 200, 200])
+        slept = []
+        self.assertTrue(memfloor.settle(200, 30, lambda: next(sizes), sleep=slept.append))
+        self.assertEqual(len(slept), 2)
+
+    def test_settle_gives_up_after_the_timeout(self):
+        now = [0.0]
+        def sleep(s):
+            now[0] += s
+        self.assertFalse(memfloor.settle(200, 3, lambda: 1, poll=1, clock=lambda: now[0], sleep=sleep))
+        self.assertEqual(now[0], 3)
