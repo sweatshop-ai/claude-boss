@@ -80,6 +80,7 @@ fi
 # Checked here against claude's own rule (auto, or 100k..1M; a bare number
 # under 1000 means thousands): a value claude refuses made it exit in the new
 # pane, and spawn waited 30 s and left that pane behind.
+if [[ "${AUTOCOMPACT,,}" == auto ]]; then AUTOCOMPACT=auto; fi
 if [[ -n "$AUTOCOMPACT" && "${AUTOCOMPACT,,}" != auto ]]; then
   _ac_ok=""
   if [[ "${AUTOCOMPACT,,}" =~ ^([0-9]{1,7})([km]?)$ ]]; then
@@ -90,6 +91,8 @@ if [[ -n "$AUTOCOMPACT" && "${AUTOCOMPACT,,}" != auto ]]; then
       *) if (( _n < 1000 )); then _n=$((_n * 1000)); fi ;;
     esac
     if (( _n >= 100000 && _n <= 1000000 )); then _ac_ok=1; fi
+    # Sent and stamped in one plain form (0100K -> 100k), which claude takes.
+    AUTOCOMPACT="$((10#${BASH_REMATCH[1]}))${BASH_REMATCH[2]}"
   fi
   if [[ -z "$_ac_ok" ]]; then
     printf '%s\n' "--autocompact takes auto or a size from 100k to 1M, got \"$AUTOCOMPACT\"" >&2; exit 1

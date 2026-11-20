@@ -801,8 +801,9 @@ class RestartKeepsName(unittest.TestCase):
             self.assertNotIn("split-window", calls, bad)
 
     def test_autocompact_takes_what_claude_takes(self):
-        for good, sent in (("--autocompact=200k", "200k"), ("100k", "100k"), ("1M", "1M"),
-                           ("200", "200"), ("150000", "150000"), ("auto", "auto")):
+        for good, sent in (("--autocompact=200k", "200k"), ("100k", "100k"), ("1M", "1m"),
+                           ("200", "200"), ("150000", "150000"), ("auto", "auto"),
+                           ("AUTO", "auto"), ("0100K", "100k")):
             (self.tmp / "calls").unlink(missing_ok=True)
             args = [good] if good.startswith("--") else ["--autocompact", good]
             r = self.spawn_with(*args)
