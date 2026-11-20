@@ -72,10 +72,6 @@ class Reading(unittest.TestCase):
             self.assertEqual(r.returncode, 0, r.stderr)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class Settling(unittest.TestCase):
     def test_settle_waits_until_the_worker_has_grown_to_its_cost(self):
         sizes = iter([10, 50, 200, 200])
@@ -89,3 +85,8 @@ class Settling(unittest.TestCase):
             now[0] += s
         self.assertFalse(memfloor.settle(200, 3, lambda: 1, poll=1, clock=lambda: now[0], sleep=sleep))
         self.assertEqual(now[0], 3)
+
+
+if __name__ == "__main__":
+    unittest.main()
+
