@@ -73,9 +73,9 @@ def _entries(items):
     """The NEXT list items, each with its wrapped and nested lines joined on."""
     entries = []
     for line in items:
-        if objective.ITEM_RE.match(line):
+        if objective.ITEM_RE.match(line) or not entries:
             entries.append(line)
-        elif entries:
+        else:
             entries[-1] += " " + line.strip()
     return entries
 

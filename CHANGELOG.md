@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **The pulse counts a NEXT entry written as plain prose when it comes first.** `_entries()` dropped an unbulleted first line, so with every worker busy that entry never entered the unassigned list and `spawn-next` was not emitted.
+
 ## 0.30.3
 
 - **hand-to-boss also keeps private organisation names and private clone URLs out of a public repo (2026-11-20).** After 0.30.2 the same brief still carried a private org's name, in a clone URL and in a quoted guardrail.
