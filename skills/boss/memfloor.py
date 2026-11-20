@@ -108,7 +108,8 @@ def main(argv):
     if argv[0] == "settle":
         if not (opt.get("--pid") or "").isdigit():
             return 0
-        settle(worker_cost_kb([]), float(opt.get("--timeout", 30)), lambda: tree_rss_kb(opt["--pid"]))
+        rss = boss_worker_rss(opt["--boss"]) if opt.get("--boss") else []
+        settle(worker_cost_kb(rss), float(opt.get("--timeout", 30)), lambda: tree_rss_kb(opt["--pid"]))
         return 0
     rss = boss_worker_rss(opt["--boss"]) if opt.get("--boss") else []
     try:

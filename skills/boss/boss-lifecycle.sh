@@ -293,10 +293,10 @@ cmd_spawn() {
   # concierge is exempt: it holds the owner's questions and is the cheapest session there is.
   # The check and the launch are one step across every boss on the machine: two bosses
   # reading the same MemAvailable would both pass. The lock is held until the new worker has
-  # grown to the least a worker costs (memfloor.py settle, at most 30 s), since a starting claude has
+  # grown to the size check estimated for it (memfloor.py settle, at most 30 s), since a starting claude has
   # taken little of it yet. One lock per user, whatever CLAUDE_CONFIG_DIR a boss runs under.
   if [[ -z "$ROLE" ]]; then
-    exec {memlock}>>"${BOSS_SPAWN_LOCK:-/tmp/claude-boss-spawn-$(id -u).lock}" && flock "$memlock" || die "spawn refused (cannot take the spawn lock)"
+    exec {memlock}>>"${BOSS_SPAWN_LOCK:-${XDG_RUNTIME_DIR:-/tmp}/claude-boss-spawn-$(id -u).lock}" && flock "$memlock" || die "spawn refused (cannot take the spawn lock)"
     python3 "$(dirname "${BASH_SOURCE[0]}")/memfloor.py" check --boss "$BOSS_PANE" || die "spawn refused (memory floor)"
   fi
 
@@ -308,7 +308,7 @@ cmd_spawn() {
   local sid; sid=$(preassign_name "$hint")
   launch_claude "$pane" "$dir" "$sid"
   if [[ -n "$memlock" ]]; then
-    python3 "$(dirname "${BASH_SOURCE[0]}")/memfloor.py" settle \
+    python3 "$(dirname "${BASH_SOURCE[0]}")/memfloor.py" settle --boss "$BOSS_PANE" \
       --pid "$(pane_prop "$pane" '#{pane_pid}' 2>/dev/null || true)" --timeout "${BOSS_SPAWN_SETTLE:-30}" || true
     exec {memlock}>&-
   fi
