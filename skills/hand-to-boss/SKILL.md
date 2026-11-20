@@ -44,6 +44,9 @@ Three rules are borrowed from those handoffs and hold here:
   (`gh repo view <owner/repo> --json visibility`), a person holding a blocker or
   a device is "the owner", "the client" or "the reviewer", never by name: a
   public-tree guard fails every PR on it, and the commit stays in the history.
+  The same holds for a private organisation's name and a private repo's clone
+  URL, also inside a quoted guardrail: write "a private repo (ask the owner for
+  its URL)" and leave the name out of the quote.
 - **Suggested skills.** The brief closes with the skills the boss and its workers
   will need.
 

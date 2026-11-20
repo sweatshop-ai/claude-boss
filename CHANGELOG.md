@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.30.3
+
+- **hand-to-boss also keeps private organisation names and private clone URLs out of a public repo (2026-11-20).** After 0.30.2 the same brief still carried a private org's name, in a clone URL and in a quoted guardrail.
+
 ## 0.30.2
 
 - **hand-to-boss names a role, never a first name, in a public repo (2026-11-20).** A brief and three blocker lines written into the public sheaf repo carried the owner's first name; its public-tree guard then failed every open PR, while main's CI skipped the `.scratch`-only commits. `SKILL.md` now asks for the repo's visibility and, when it is public, for "the owner", "the client" or "the reviewer" in the brief and in any ticket line it writes.
