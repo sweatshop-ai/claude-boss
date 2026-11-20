@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.30.2
+
+- **hand-to-boss names a role, never a first name, in a public repo (2026-11-20).** A brief and three blocker lines written into the public sheaf repo carried the owner's first name; its public-tree guard then failed every open PR, while main's CI skipped the `.scratch`-only commits. `SKILL.md` now asks for the repo's visibility and, when it is public, for "the owner", "the client" or "the reviewer" in the brief and in any ticket line it writes.
+
 ## 0.30.1
 
 - **A boss tells the owner only a blocker, a decision, or the answer to their question (the owner, 2026-11-20).** New section "What you say to the owner" in `SKILL.md`: routine progress (merges, workers waiting or done, tickets updated, parks) goes to the tracker, the goal page and `team-line`, with at most one line in the chat; an answer answers the question asked, without the state of the track; no closing "nothing is open for you", since `team-line --n 0` says it. The pulse text and the compaction restore were read and never asked for a summary, so they are unchanged. Incident: `references/incidents.md`.
