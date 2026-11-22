@@ -21,8 +21,8 @@ Exit codes:
 
 The CI condition holds on every path, whatever the round (ticket merge-flow 03): once the record allows the merge,
 `read_checks` on the live head must answer green, with the base's `required_checks` when the deploy list has them, or
-the merge is refused as `ci-not-green` (3), under --dry-run too. Rule 2 below reads the same checks itself and is not
-read twice.
+the merge is refused as `ci-not-green` (3), under --dry-run too. Rule 2 below (alone or with --merged-base-since) reads
+the same checks itself, with its stricter conditions, and they are not read twice.
 
 The rounds are the files `boss_review.py` keeps under $CLAUDE_CONFIG_DIR/pm/reviews/<owner>/<repo>/pr<N>/. They
 are walked from the highest number down and the first one that decides, decides: anything the walk meets and cannot
@@ -87,6 +87,7 @@ EXIT_MERGED, EXIT_USAGE, EXIT_REFUSED, EXIT_DEPLOYING, EXIT_MERGE_FAILED, EXIT_G
 DOCS_PATHS = ("README.md", "CHANGELOG.md", "docs/*.md")     # what counts as docs: nothing an agent acts on
 INSTRUCTION_NAMES = ("skill.md", "agents.md", "claude.md")      # compared in lower case, on the file's own name
 INSTRUCTION_DIRS = ("skills", "commands", "agents", "hooks", ".claude", ".github")
+DOCS_TESTS_REASON = "provisional-go-docs-tests-only"     # rule 2 read the checks itself: the gate does not read them again
 GREEN = ("success", "neutral", "skipped")       # a check run's conclusions that do not block a merge
 
 ALERT_TIMEOUT = 20      # seconds, as codex_blocker's
@@ -627,7 +628,7 @@ def docs_tests_only(seen: Pr, got: Decision, deploy: Deploy, repo: str, io_timeo
     why = docs_tests_problem(own.files, seen.head, deploy, repo, io_timeout)
     if why:
         return stay(why)
-    return Decision(EXIT_MERGED, "provisional-go-docs-tests-only", got.round, got.kind), ""
+    return Decision(EXIT_MERGED, DOCS_TESTS_REASON, got.round, got.kind), ""
 
 
 def merged_base(rounds: list[Round], since: str, seen: Pr, deploy: Deploy, owner: tuple[str, int], repo: str,
@@ -683,7 +684,7 @@ def merged_base(rounds: list[Round], since: str, seen: Pr, deploy: Deploy, owner
         why = docs_tests_problem(tuple(own_at[seen.head]), seen.head, deploy, repo, io_timeout)
         if why:
             return got, "deploy list %s; docs/tests-only rule: %s" % (deploy.state, why)
-        return Decision(EXIT_MERGED, "provisional-go-docs-tests-only-merged-base", got.round, got.kind), ""
+        return Decision(EXIT_MERGED, DOCS_TESTS_REASON + "-merged-base", got.round, got.kind), ""
     return Decision(EXIT_MERGED, got.reason + "-merged-base", got.round, got.kind), ""
 
 
@@ -759,7 +760,7 @@ def merge(repo: str, pr: int, *, dry_run: bool = False, since: str | None = None
             return finish(got.exit, got.reason, "refused", note)
         # every path needs the head's CI done and green (2026-11-22: two PRs merged on a GO while their only check
         # was still queued); rule 2 has just read the same head's checks with its own required list, so not twice
-        if not got.reason.startswith("provisional-go-docs-tests-only"):
+        if not got.reason.startswith(DOCS_TESTS_REASON):
             green, why = read_checks(repo, seen.head, io_timeout, deploy.required_checks or ())
             if not green:
                 return finish(EXIT_REFUSED, "ci-not-green", "refused", why)

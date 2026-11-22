@@ -1005,8 +1005,10 @@ their GO while their only check was still queued. `ci-not-green` is not a refusa
 `--dry-run` on every open PR of your track (the branches of your workers: `gh pr list --repo R --state open --json
 number,headRefName`) whose base the gate may merge, and run the gate for real on each one that exits 0. Do not
 wait for the worker's "ready" message: a PR with its GO and green CI waits for nobody. Exit 3 `ci-not-green`
-means CI is still running or red: leave it; the worker is parked on `ci:` and fixes a red run. Any other refusal
-goes back to the worker as an instruction to get the right review. The worker still reports when its PR is
+means CI is still running or red: leave it; the worker is parked on `ci:` and fixes a red run. `no-round` on a PR
+whose head moved after its GO only by test fixes or a merge of the base is not a missing review: run the gate with
+`--test-only-since` or `--merged-base-since` and the GO'd head, as below. Any other refusal goes back to the worker as
+an instruction to get the right review. The worker still reports when its PR is
 ready, and after the merge you tell it, and it ticks the ticket and deletes its branch (P8 item 6). A PR whose
 base deploys goes to the desk (below), never through this loop. `boss-run` refuses a merge typed
 by hand under the hard rule `PR merge outside boss_merge`. The gate has three limits. A `gh pr merge` typed by hand

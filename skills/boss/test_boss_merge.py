@@ -1882,18 +1882,13 @@ class WaivedRoundFromWaive(FromTheWriters, Gate, test_waiver.Base):
         self.assertEqual(json.loads(path.read_text())["kind"], "waived")
         self.assertGateOn("waived")
 
-
-if __name__ == "__main__":
-    unittest.main()
-
-
 class CiGate(Base):
     """Every path to a merge needs every check run of the live head completed and green (ci-not-green, exit 3)."""
 
     def checks_calls(self):
         return [c.argv[1] for c in self.gh_calls("api") if "/check-runs" in c.argv[1]]
 
-    def not_green(self, checks, *, dry_run=False, **kw):
+    def not_green(self, *, dry_run=False, **kw):
         code = self.run_gate(dry_run=dry_run, **kw)
         self.assertEqual(code, bm.EXIT_REFUSED, self.err)
         self.assertEqual(self.merges(), [])
@@ -1910,7 +1905,7 @@ class CiGate(Base):
                                   {"name": "b", "status": "in_progress", "conclusion": None}]}))):
             with self.subTest(label):
                 self.gh.configure(checks=[{"raw": answer}])
-                self.not_green(answer)
+                self.not_green()
 
     def test_red_none_unlisted_or_unreadable_checks_never_merge(self):
         self.put(1)
@@ -1922,12 +1917,12 @@ class CiGate(Base):
                              ("not json", {"raw": "nope"}), ("gh failed", {"rc": 1, "err": "boom"})):
             with self.subTest(label):
                 self.gh.configure(checks=[entry])
-                self.not_green(entry)
+                self.not_green()
 
     def test_the_dry_run_says_ci_not_green_too(self):
         self.put(1)
         self.gh.configure(checks=[{"raw": checks_answer(None, status="queued")}])
-        self.not_green(None, dry_run=True)
+        self.not_green(dry_run=True)
 
     def test_the_checks_read_are_those_of_the_live_head(self):
         self.put(1)
@@ -1937,20 +1932,34 @@ class CiGate(Base):
     def test_a_provisional_go_on_a_listed_base_needs_green_checks(self):
         self.put(1, kind="provisional", reviewer="opus")
         self.gh.configure(checks=[{"raw": checks_answer(None, status="in_progress")}])
-        self.not_green(None)
+        self.not_green()
 
     def test_the_required_checks_of_the_deploy_list_hold_on_every_path(self):
         self.put(1)
         conf = dict(GOOD_DEPLOY, required_checks=["build"])
         self.gh.configure(api=[{"raw": deploy_answer(conf)}], checks=[{"raw": checks_answer("success")}])
-        self.not_green(None)
+        self.not_green()
         self.assertIn("required check 'build'", self.err)
+
+    def test_a_waived_go_on_a_listed_base_needs_green_checks(self):
+        self.put(1, kind="waived")
+        self.gh.configure(checks=[{"raw": checks_answer("failure")}])
+        self.not_green()
+
+    def test_the_docs_tests_only_rule_with_a_merged_base_reads_the_checks_once(self):
+        self.put(1, head_sha=SINCE, kind="provisional", reviewer="opus")
+        both = compare_answer("tests/a.py", status="diverged")
+        self.gh.configure(api=[{"raw": deploy_answer(DEPLOYING)}, {"raw": merge_compare("x.py")}, {"raw": both},
+                               {"raw": both}, {"raw": compare_answer("src/other.py", status="diverged")}])
+        self.assertEqual(self.run_gate(merged_since=SINCE), 0, self.err)
+        self.assertEqual(self.last()["reason"], "provisional-go-docs-tests-only-merged-base")
+        self.assertEqual(len(self.checks_calls()), 1)
 
     def test_the_test_only_exception_needs_green_checks(self):
         self.put(1, head_sha=SINCE)
         self.gh.configure(api=[{"raw": deploy_answer(GOOD_DEPLOY)}, {"raw": compare_answer("tests/a.py")}],
                           checks=[{"raw": checks_answer(None, status="queued")}])
-        self.not_green(None, since=SINCE)
+        self.not_green(since=SINCE)
 
     def test_the_merged_base_exception_needs_green_checks(self):
         self.put(1, head_sha=SINCE)
@@ -1958,7 +1967,7 @@ class CiGate(Base):
         self.gh.configure(api=[{"raw": deploy_answer(GOOD_DEPLOY)}, {"raw": merge_compare("x.py")}, {"raw": own},
                                {"raw": own}, {"raw": compare_answer("src/other.py", status="diverged")}],
                           checks=[{"raw": checks_answer(None, status="in_progress")}])
-        self.not_green(None, merged_since=SINCE)
+        self.not_green(merged_since=SINCE)
 
     def test_the_docs_tests_only_rule_reads_the_checks_once(self):
         self.put(1, kind="provisional", reviewer="opus")
@@ -1971,3 +1980,7 @@ class CiGate(Base):
         self.assertEqual(self.run_gate(), 3, self.err)
         self.assertEqual(self.last()["reason"], "no-go")
         self.assertEqual(self.checks_calls(), [])
+
+
+if __name__ == "__main__":
+    unittest.main()
