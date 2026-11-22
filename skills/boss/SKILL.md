@@ -847,6 +847,9 @@ concerned — invisibly.
 > `run_in_background`, not a `pgrep` loop; a task you started and no longer need
 > is stopped before you report, and one you still wait on (CI) is named in it.
 >
+> When your PR has its GO and green CI, say so: I merge it through the gate on my next pulse,
+> even before your message arrives, and then tell you; you tick the ticket and delete your branch.
+>
 > When you report a PR of yours that is open and you are waiting on its CI, park yourself on
 > it first: `boss-park <track> <your name> --until ci:<owner/repo>#<N>` (waiting on its review
 > or merge instead: `--until pr:<owner/repo>#<N>-merged`).
@@ -992,7 +995,23 @@ exists only in a message**, whoever produced it.
 `python3 ${CLAUDE_PLUGIN_ROOT}/skills/boss/boss_merge.py --repo OWNER/REPO --pr N`; `--dry-run` decides without
 merging, `--merged-base-since SHA` (the head of the last GO) allows a head that is that head plus a merge of the base when none of the PR's own files differ (not together with the next flag), and `--test-only-since SHA`, the head of the last GO, allows fixes after it that touch only the repo's test paths (`test_paths` in `.boss/deploy.json`; `*` crosses `/`, so anchor a pattern to a directory: `tests/*`, not `*test_*.py`). Its exit
 codes: 0 merged, 3 and 4 refused, 5 failed or unverified (the merge or the check after it), 7 a read failed. A
-refusal (3 or 4) is an instruction to get the right review, not to work around it. `boss-run` refuses a merge typed
+refusal (3 or 4) is an instruction to get the right review, not to work around it. **On every path the gate also
+reads the head's check runs** (merge-flow ticket 03): any run queued, in progress or red, none at all, more than
+listed, a `required_checks` name of `.boss/deploy.json` missing, a read that fails, or a deploy list that cannot be
+read or is invalid (its `required_checks` cannot be known), and it refuses with `ci-not-green` (3), under `--dry-run`
+too, also for a docs/tests-only PR under rule 2. A GO is no longer enough by itself: on 2026-11-22 two PRs merged on
+their GO while their only check was still queued. `ci-not-green` is not a refusal to argue with; wait for the run.
+
+**Merge on the pulse, not on the worker's word.** On every pulse, and whenever you look at the team, run the gate's
+`--dry-run` on every open PR of your track (the branches of your workers: `gh pr list --repo R --state open --json
+number,headRefName`) whose base the gate may merge, and run the gate for real on each one that exits 0. Do not
+wait for the worker's "ready" message: a PR with its GO and green CI waits for nobody. Exit 3 `ci-not-green`
+means CI is still running or red: leave it; the worker is parked on `ci:` and fixes a red run. `no-round` on a PR
+whose head moved after its GO only by test fixes or a merge of the base is not a missing review: run the gate with
+`--test-only-since` or `--merged-base-since` and the GO'd head, as below. Any other refusal goes back to the worker as
+an instruction to get the right review. The worker still reports when its PR is
+ready, and after the merge you tell it, and it ticks the ticket and deletes its branch (P8 item 6). A PR whose
+base deploys goes to the desk (below), never through this loop. `boss-run` refuses a merge typed
 by hand under the hard rule `PR merge outside boss_merge`. The gate has three limits. A `gh pr merge` typed by hand
 in a worker's or the owner's own shell is outside the gate, and only branch protection on the repo closes that, which
 the plugin cannot set. A base retargeted between the check and the merge is detected after the fact (exit 5,
@@ -1249,7 +1268,9 @@ Three sources. Turn all three on.
    counts the last day's Stops per gate and gives the last firing, so a silence
    can be explained afterwards instead of argued.
 
-   When it fires, **act — do not acknowledge it.** Dispatch the top item, or park
+   When it fires, **act — do not acknowledge it.** First run the merge gate's `--dry-run`
+   on every open PR of your track and merge the ones that pass (P13/P14, "Merge on the pulse").
+   Then dispatch the top item, or park
    the idle worker with a condition the pulse can check, and stop. "Parked on
    purpose" in words is an idle team: on 2026-10-30 a boss said it 174
    times while four side tickets sat unstaffed, because its ticket graph showed

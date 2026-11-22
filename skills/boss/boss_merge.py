@@ -12,11 +12,19 @@ Exit codes:
     0 merged (under --dry-run: would be allowed)
     2 usage, the PR is not the one asked for, or it is not open
     3 refused: no usable GO on the live head (none, a NO-GO, a record that cannot be read, or a provisional
-      or waived GO that a later round supersedes)
+      or waived GO that a later round supersedes), or `ci-not-green`: the head's check runs are not all completed
+      and green (none, one queued, running or red, more than listed, a `required_checks` name missing, or no read)
     4 refused: a provisional or waived GO on a branch not listed as non-deploying
     5 `gh pr merge` failed, or the check after it did (not merged, base changed, unverified), or the line that
       announces the merge could not be written (nothing merged then)
     7 a `gh` read failed, or the PR's lock could not be taken
+
+The CI condition holds on every path, whatever the round (ticket merge-flow 03): once the record allows the merge,
+`read_checks` on the live head must answer green, with the base's `required_checks` when the deploy list has them, or
+the merge is refused as `ci-not-green` (3), under --dry-run too. A deploy list that cannot be read or is invalid
+refuses the same way, since the `required_checks` it may hold cannot be known (a missing one declares none). Rule 2
+below needs `required_checks` declared and leaves the checks themselves to this condition, so red CI on a docs/tests-only
+PR is `ci-not-green` too, not a refusal of its review.
 
 The rounds are the files `boss_review.py` keeps under $CLAUDE_CONFIG_DIR/pm/reviews/<owner>/<repo>/pr<N>/. They
 are walked from the highest number down and the first one that decides, decides: anything the walk meets and cannot
@@ -81,6 +89,7 @@ EXIT_MERGED, EXIT_USAGE, EXIT_REFUSED, EXIT_DEPLOYING, EXIT_MERGE_FAILED, EXIT_G
 DOCS_PATHS = ("README.md", "CHANGELOG.md", "docs/*.md")     # what counts as docs: nothing an agent acts on
 INSTRUCTION_NAMES = ("skill.md", "agents.md", "claude.md")      # compared in lower case, on the file's own name
 INSTRUCTION_DIRS = ("skills", "commands", "agents", "hooks", ".claude", ".github")
+DOCS_TESTS_REASON = "provisional-go-docs-tests-only"
 GREEN = ("success", "neutral", "skipped")       # a check run's conclusions that do not block a merge
 
 ALERT_TIMEOUT = 20      # seconds, as codex_blocker's
@@ -592,18 +601,15 @@ def files_problem(files: tuple, deploy: Deploy) -> str | None:
     return "not docs or tests: " + ", ".join(stray[:5]) if stray else None
 
 
-def docs_tests_problem(files: tuple, head: str, deploy: Deploy, repo: str, io_timeout: float) -> str | None:
-    """Why the PR is not a docs/tests-only PR with all its CI green on `head` (rule 2's conditions), None when it is.
-    `files` are the PR's own files against its base."""
+def docs_tests_problem(files: tuple, deploy: Deploy) -> str | None:
+    """Why the PR is not a docs/tests-only PR (rule 2's conditions on the deploy list and the files), None when it is.
+    `files` are the PR's own files against its base. Its CI is the gate's own condition on every path (`ci-not-green`),
+    read in `merge` with the `required_checks` this insists on."""
     if deploy.test_paths is None:
         return "no test_paths in the deploy list"
     if not deploy.required_checks:
         return "no required_checks in the deploy list (the check runs that exist now do not say all of CI has run)"
-    why = files_problem(files, deploy)
-    if why:
-        return why
-    green, why = read_checks(repo, head, io_timeout, deploy.required_checks)
-    return None if green else why
+    return files_problem(files, deploy)
 
 
 def docs_tests_only(seen: Pr, got: Decision, deploy: Deploy, repo: str, io_timeout: float) -> tuple[Decision, str]:
@@ -614,14 +620,14 @@ def docs_tests_only(seen: Pr, got: Decision, deploy: Deploy, repo: str, io_timeo
         return got, "deploy list %s; docs/tests-only rule: %s" % (deploy.state, note)
 
     if deploy.test_paths is None or not deploy.required_checks:       # before any read: the rule cannot pass
-        return stay(docs_tests_problem((), seen.head, deploy, repo, io_timeout))
+        return stay(docs_tests_problem((), deploy))
     own = read_compare(repo, seen.base_sha, seen.head, io_timeout, OWN_STATUSES)
     if own.problem:
         return stay("%s: %s" % (own.problem, own.note))
-    why = docs_tests_problem(own.files, seen.head, deploy, repo, io_timeout)
+    why = docs_tests_problem(own.files, deploy)
     if why:
         return stay(why)
-    return Decision(EXIT_MERGED, "provisional-go-docs-tests-only", got.round, got.kind), ""
+    return Decision(EXIT_MERGED, DOCS_TESTS_REASON, got.round, got.kind), ""
 
 
 def merged_base(rounds: list[Round], since: str, seen: Pr, deploy: Deploy, owner: tuple[str, int], repo: str,
@@ -674,10 +680,10 @@ def merged_base(rounds: list[Round], since: str, seen: Pr, deploy: Deploy, owner
     if clash:
         return refuse("pr-file-changed-on-base", "the base changed it since %s: %s" % (since[:12], ", ".join(sorted(set(clash))[:5])))
     if docs_tests:      # the PR's files are the same at both heads, so the GO'd head's own files are the live head's
-        why = docs_tests_problem(tuple(own_at[seen.head]), seen.head, deploy, repo, io_timeout)
+        why = docs_tests_problem(tuple(own_at[seen.head]), deploy)
         if why:
             return got, "deploy list %s; docs/tests-only rule: %s" % (deploy.state, why)
-        return Decision(EXIT_MERGED, "provisional-go-docs-tests-only-merged-base", got.round, got.kind), ""
+        return Decision(EXIT_MERGED, DOCS_TESTS_REASON + "-merged-base", got.round, got.kind), ""
     return Decision(EXIT_MERGED, got.reason + "-merged-base", got.round, got.kind), ""
 
 
@@ -751,6 +757,15 @@ def merge(repo: str, pr: int, *, dry_run: bool = False, since: str | None = None
             note += "; " + MISSING_DEPLOY_HINT % (seen.base, json.dumps({"version": 1, "non_deploying": [seen.base]}))
         if got.exit != EXIT_MERGED:
             return finish(got.exit, got.reason, "refused", note)
+        # every path needs the head's CI done and green (2026-11-22: two PRs merged on a GO while their only check
+        # was still queued). A deploy list that could not be read or is invalid may hold required_checks nobody can
+        # see, so only a valid list, or none at all, says which checks must have run
+        if deploy.state not in ("ok", "missing"):
+            return finish(EXIT_REFUSED, "ci-not-green", "refused",
+                          "deploy list %s: its required_checks cannot be known" % deploy.state)
+        green, why = read_checks(repo, seen.head, io_timeout, deploy.required_checks or ())
+        if not green:
+            return finish(EXIT_REFUSED, "ci-not-green", "refused", why)
         queued = queue_problem(repo, pr, seen.base, io_timeout, line)       # before the dry run too: it must say what the merge would
         if queued:
             return finish(EXIT_GH_READ if queued[0] == "gh-read-failed" else EXIT_REFUSED, queued[0], "refused", queued[1])

@@ -119,7 +119,12 @@ if argv[0] == "api" and "/git/ref/heads/" in argv[1]:       # the base branch's 
     state = patched(e)
     sys.stdout.write(e["raw"] if "raw" in e else json.dumps({"object": {"sha": state["baseSha"]}}))
     finish(e)
-if argv[0] == "api" and "/commits/" in argv[1] and "/check-runs" not in argv[1]:     # the merge commit's parents
+if argv[0] == "api" and "/check-runs" in argv[1]:       # the head's check runs: one green run unless a test says
+    e = entry("checks")
+    sys.stdout.write(e.get("raw", json.dumps({"total_count": 1, "check_runs": [
+        {"name": "ci0", "status": "completed", "conclusion": "success"}]})))
+    finish(e)
+if argv[0] == "api" and "/commits/" in argv[1]:     # the merge commit's parents
     e = entry("commit")
     state = patched(e)
     sys.stdout.write(e["raw"] if "raw" in e else json.dumps({"parents": [{"sha": state["mergeParent"]}, {"sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]}))
@@ -635,15 +640,17 @@ class DeployList(Base):
         self.answer(raw=deploy_answer({"version": 1, "non_deploying": ["release/1.0"]}))
         self.put(1, kind="waived", base="release/1.0")
         self.assertEqual(self.run_gate(dry_run=True), 0, self.err)
-        (call,) = self.gh_calls("api")
+        call, checks = self.gh_calls("api")
         self.assertEqual(call.argv, ["api", "repos/%s/contents/.boss/deploy.json?ref=release%%2F1.0" % REPO])
+        self.assertIn("/check-runs", checks.argv[1])
 
     def test_odd_branch_names_are_encoded_whole(self):
         self.gh.set_pr(baseRefName="a b#c?d&e=f%g")
         self.put(1, base="a b#c?d&e=f%g")
         self.assertEqual(self.run_gate(dry_run=True), 0, self.err)
-        (call,) = self.gh_calls("api")
+        call, checks = self.gh_calls("api")
         self.assertTrue(call.argv[1].endswith("?ref=a%20b%23c%3Fd%26e%3Df%25g"), call.argv)
+        self.assertIn("/check-runs", checks.argv[1])
 
     def test_only_the_base_branch_is_asked_for_and_the_heads_own_file_changes_nothing(self):
         # the PR's head holds a deploy.json that lists its base; the stub serves only what the base holds (nothing)
@@ -672,7 +679,9 @@ class Command(Base):
         self.assertEqual(self.alerts(), [])
         self.assertEqual([c.argv[:2] for c in self.sb.calls_of("gh")],
                          [["pr", "view"], ["api", "repos/%s/git/ref/heads/main" % REPO],
-                          ["api", self.gh_calls("api")[0].argv[1]], ["api", "repos/%s/rules/branches/main" % REPO],
+                          ["api", self.gh_calls("api")[0].argv[1]],
+                          ["api", "repos/%s/commits/%s/check-runs?per_page=100" % (REPO, HEAD)],
+                          ["api", "repos/%s/rules/branches/main" % REPO],
                           ["api", "graphql"], ["api", "repos/%s/git/ref/heads/main" % REPO], ["pr", "merge"], ["pr", "view"], ["api", "repos/%s/commits/%s" % (REPO, MERGE_SHA)]])
 
     def test_the_gh_pr_view_reads_the_five_fields_once_and_the_three_after_the_merge(self):
@@ -1275,8 +1284,8 @@ class DocsTestsOnly(Base):
 
     def go(self, own, checks=None, deploy=None, **over):
         self.put(1, **dict({"kind": "provisional", "reviewer": "opus"}, **over))
-        self.gh.configure(api=[deploy or self.deploy, {"raw": compare_answer(*own, status="diverged")},
-                               {"raw": checks if checks is not None else checks_answer("success", "skipped")}])
+        self.gh.configure(api=[deploy or self.deploy, {"raw": compare_answer(*own, status="diverged")}],
+                          checks=[{"raw": checks if checks is not None else checks_answer("success", "skipped")}])
         return self.run_gate()
 
     def refused(self, own, reason_in_err, code=4, **kw):
@@ -1305,29 +1314,29 @@ class DocsTestsOnly(Base):
 
     def test_a_rename_out_of_docs_and_tests_refuses_by_either_name(self):
         self.put(1, kind="provisional")
-        self.gh.configure(api=[self.deploy, {"raw": compare_answer(("docs/new.md", "src/old.py"), status="ahead")},
-                               {"raw": checks_answer("success")}])
+        self.gh.configure(api=[self.deploy, {"raw": compare_answer(("docs/new.md", "src/old.py"), status="ahead")}])
         self.assertEqual(self.run_gate(), 4, self.err)
 
-    def test_red_pending_or_no_checks_keep_the_refusal(self):
+    def test_red_pending_or_no_checks_refuse_as_ci_not_green(self):
         for label, answer in (("failure", checks_answer("success", "failure")),
                               ("pending", checks_answer("success", status="in_progress")),
                               ("cancelled", checks_answer("cancelled")), ("none", checks_answer()),
                               ("more than listed", checks_answer("success", total=2)),
                               ("not json", "nope"), ("no list", "{}")):
             with self.subTest(label):
-                self.refused(["tests/a.py"], "docs/tests-only rule", checks=answer)
+                self.refused(["tests/a.py"], "ci-not-green", checks=answer, code=3)
 
     def test_checks_that_were_all_skipped_or_neutral_are_not_green(self):
-        self.refused(["tests/a.py"], "no check run succeeded", checks=checks_answer("skipped", "neutral"))
+        self.refused(["tests/a.py"], "no check run succeeded", checks=checks_answer("skipped", "neutral"), code=3)
 
     def test_the_checks_the_deploy_list_requires_must_all_have_run_and_succeeded(self):
         two = {"raw": deploy_answer(dict(DEPLOYING, required_checks=["ci0", "build"]))}
-        self.refused(["tests/a.py"], "required check 'build'", deploy=two, checks=checks_answer("success", "success"))
+        self.refused(["tests/a.py"], "required check 'build'", deploy=two, checks=checks_answer("success", "success"),
+                     code=3)
         named = json.dumps({"total_count": 2, "check_runs": [
             {"name": "ci0", "status": "completed", "conclusion": "success"},
             {"name": "build", "status": "completed", "conclusion": "skipped"}]})
-        self.refused(["tests/a.py"], "required check 'build'", deploy=two, checks=named)
+        self.refused(["tests/a.py"], "required check 'build'", deploy=two, checks=named, code=3)
         named = named.replace("skipped", "success")
         self.assertEqual(self.go(["tests/a.py"], deploy=two, checks=named), 0, self.err)
 
@@ -1342,14 +1351,14 @@ class DocsTestsOnly(Base):
         self.assertEqual(len(self.gh_calls("api")), 1, "the compare is not even read")
 
     def test_without_a_go_nothing_merges_whatever_the_files_are(self):
-        self.gh.configure(api=[self.deploy, {"raw": compare_answer("tests/a.py")}, {"raw": checks_answer("success")}])
+        self.gh.configure(api=[self.deploy, {"raw": compare_answer("tests/a.py")}])
         self.assertEqual(self.run_gate(), 3, self.err)
         self.assertEqual(self.last()["reason"], "no-round")
 
     def test_a_provisional_go_a_later_round_supersedes_still_refuses(self):
         self.put(1, kind="provisional")
         self.put(2, status="head-moved", verdict=None)
-        self.gh.configure(api=[self.deploy, {"raw": compare_answer("tests/a.py")}, {"raw": checks_answer("success")}])
+        self.gh.configure(api=[self.deploy, {"raw": compare_answer("tests/a.py")}])
         self.assertEqual(self.run_gate(), 3, self.err)
         self.assertEqual(self.last()["reason"], "superseded-go")
 
@@ -1365,7 +1374,7 @@ class DocsTestsOnly(Base):
         self.refused([], "compare-no-files")
         self.put(1, kind="provisional")
         many = ["tests/f%d.py" % i for i in range(bm.COMPARE_FILES)]
-        self.gh.configure(api=[self.deploy, {"raw": compare_answer(*many)}, {"raw": checks_answer("success")}])
+        self.gh.configure(api=[self.deploy, {"raw": compare_answer(*many)}])
         self.assertEqual(self.run_gate(), 4, self.err)
         self.assertIn("compare-truncated", self.err)
 
@@ -1373,7 +1382,7 @@ class DocsTestsOnly(Base):
         self.put(1)
         self.gh.configure(api=[self.deploy])
         self.assertEqual(self.run_gate(), 0, self.err)
-        self.assertEqual(len(self.gh_calls("api")), 1)
+        self.assertEqual([c for c in self.gh_calls("api") if "/compare/" in c.argv[1]], [])
 
     def test_a_non_deploying_base_does_not_need_the_rule(self):
         self.put(1, kind="provisional")
@@ -1532,8 +1541,7 @@ class MergedBase(Base):
         both = compare_answer("tests/a.py", status="diverged")
         self.put(1, head_sha=SINCE, kind="provisional")
         self.gh.configure(api=[self.deploy, {"raw": merge_compare("x.py")}, {"raw": both}, {"raw": both},
-                               {"raw": compare_answer("tests/a.py", status="diverged")},
-                               {"raw": checks_answer("success")}])
+                               {"raw": compare_answer("tests/a.py", status="diverged")}])
         self.assertEqual(self.run_gate(merged_since=SINCE), 3, self.err)
         self.assertEqual(self.last()["reason"], "pr-file-changed-on-base")
         self.assertNotIn("check-runs", " ".join(c.argv[1] for c in self.gh_calls("api")))
@@ -1542,8 +1550,8 @@ class MergedBase(Base):
     def combined(self, own_live, own_since, checks=None, deploy=None, **over):
         self.put(1, **dict({"head_sha": SINCE, "kind": "provisional"}, **over))
         self.gh.configure(api=[deploy or self.deploy, {"raw": merge_compare("x.py")}, {"raw": own_live},
-                               {"raw": own_since}, {"raw": compare_answer("src/other.py", status="diverged")},
-                               {"raw": checks if checks is not None else checks_answer("success", "skipped")}])
+                               {"raw": own_since}, {"raw": compare_answer("src/other.py", status="diverged")}],
+                          checks=[{"raw": checks if checks is not None else checks_answer("success", "skipped")}])
         return self.run_gate(merged_since=SINCE)
 
     def test_a_docs_tests_only_pr_with_a_provisional_go_that_merged_main_merges_on_a_deploying_base(self):
@@ -1559,9 +1567,9 @@ class MergedBase(Base):
         code_pr = compare_answer("tests/a.py", PRODUCTION, status="diverged")
         for label, args, code, why in (
                 ("a code file", (code_pr, code_pr), 4, PRODUCTION),
-                ("red checks", (both, both, checks_answer("failure")), 4, "check "),
+                ("red checks", (both, both, checks_answer("failure")), 3, "ci-not-green"),
                 ("no required check", (both, both, checks_answer("success"), {"raw": deploy_answer(
-                    dict(DEPLOYING, required_checks=["build"]))}), 4, "required check 'build'"),
+                    dict(DEPLOYING, required_checks=["build"]))}), 3, "required check 'build'"),
                 ("a pr file touched since", (compare_answer("tests/a.py", "x.py", status="diverged"),) * 2, 3,
                  "x.py")):
             with self.subTest(label):
@@ -1613,8 +1621,7 @@ class BaseTip(Base):
 
     def test_the_compares_use_the_tip_read_at_the_start_not_the_branch_name(self):
         self.put(1, kind="provisional")
-        self.gh.configure(api=[{"raw": deploy_answer(DEPLOYING)}, {"raw": compare_answer("tests/a.py")},
-                               {"raw": checks_answer("success")}], ref=[{"patch": {"baseSha": OTHER}}])
+        self.gh.configure(api=[{"raw": deploy_answer(DEPLOYING)}, {"raw": compare_answer("tests/a.py")}], ref=[{"patch": {"baseSha": OTHER}}])
         self.run_gate()
         self.assertIn("repos/%s/compare/%s...%s" % (REPO, OTHER, HEAD), [c.argv[1] for c in self.gh_calls("api")])
         self.assertEqual(self.last()["base_sha"], OTHER)
@@ -1875,6 +1882,122 @@ class WaivedRoundFromWaive(FromTheWriters, Gate, test_waiver.Base):
         (path,) = sorted(self.pr_dir.glob("round*.json"))
         self.assertEqual(json.loads(path.read_text())["kind"], "waived")
         self.assertGateOn("waived")
+
+class CiGate(Base):
+    """Every path to a merge needs every check run of the live head completed and green (ci-not-green, exit 3)."""
+
+    def checks_calls(self):
+        return [c.argv[1] for c in self.gh_calls("api") if "/check-runs" in c.argv[1]]
+
+    def not_green(self, *, dry_run=False, **kw):
+        code = self.run_gate(dry_run=dry_run, **kw)
+        self.assertEqual(code, bm.EXIT_REFUSED, self.err)
+        self.assertEqual(self.merges(), [])
+        self.assertEqual((self.last()["decision"], self.last()["exit"], self.last()["reason"]),
+                         ("refused", 3, "ci-not-green"))
+        self.assertIn("ci-not-green", self.err)
+
+    def test_a_codex_go_with_a_queued_or_running_check_never_merges(self):
+        self.put(1)
+        for label, answer in (("queued", checks_answer("success", status="queued")),
+                              ("in progress", checks_answer(None, status="in_progress")),
+                              ("one of two still running", json.dumps({"total_count": 2, "check_runs": [
+                                  {"name": "a", "status": "completed", "conclusion": "success"},
+                                  {"name": "b", "status": "in_progress", "conclusion": None}]}))):
+            with self.subTest(label):
+                self.gh.configure(checks=[{"raw": answer}])
+                self.not_green()
+
+    def test_red_none_unlisted_or_unreadable_checks_never_merge(self):
+        self.put(1)
+        for label, entry in (("failure", {"raw": checks_answer("success", "failure")}),
+                             ("cancelled", {"raw": checks_answer("cancelled")}),
+                             ("none ran", {"raw": checks_answer()}),
+                             ("all skipped", {"raw": checks_answer("skipped", "neutral")}),
+                             ("more than listed", {"raw": checks_answer("success", total=2)}),
+                             ("not json", {"raw": "nope"}), ("gh failed", {"rc": 1, "err": "boom"})):
+            with self.subTest(label):
+                self.gh.configure(checks=[entry])
+                self.not_green()
+
+    def test_the_dry_run_says_ci_not_green_too(self):
+        self.put(1)
+        self.gh.configure(checks=[{"raw": checks_answer(None, status="queued")}])
+        self.not_green(dry_run=True)
+
+    def test_the_checks_read_are_those_of_the_live_head(self):
+        self.put(1)
+        self.assertEqual(self.run_gate(), 0, self.err)
+        self.assertEqual(self.checks_calls(), ["repos/%s/commits/%s/check-runs?per_page=100" % (REPO, HEAD)])
+
+    def test_a_provisional_go_on_a_listed_base_needs_green_checks(self):
+        self.put(1, kind="provisional", reviewer="opus")
+        self.gh.configure(checks=[{"raw": checks_answer(None, status="in_progress")}])
+        self.not_green()
+
+    def test_the_required_checks_of_the_deploy_list_hold_on_every_path(self):
+        self.put(1)
+        conf = dict(GOOD_DEPLOY, required_checks=["build"])
+        self.gh.configure(api=[{"raw": deploy_answer(conf)}], checks=[{"raw": checks_answer("success")}])
+        self.not_green()
+        self.assertIn("required check 'build'", self.err)
+
+    def test_a_waived_go_on_a_listed_base_needs_green_checks(self):
+        self.put(1, kind="waived")
+        self.gh.configure(checks=[{"raw": checks_answer("failure")}])
+        self.not_green()
+
+    def test_the_docs_tests_only_rule_with_a_merged_base_reads_the_checks_once(self):
+        self.put(1, head_sha=SINCE, kind="provisional", reviewer="opus")
+        both = compare_answer("tests/a.py", status="diverged")
+        self.gh.configure(api=[{"raw": deploy_answer(DEPLOYING)}, {"raw": merge_compare("x.py")}, {"raw": both},
+                               {"raw": both}, {"raw": compare_answer("src/other.py", status="diverged")}])
+        self.assertEqual(self.run_gate(merged_since=SINCE), 0, self.err)
+        self.assertEqual(self.last()["reason"], "provisional-go-docs-tests-only-merged-base")
+        self.assertEqual(len(self.checks_calls()), 1)
+
+    def test_a_deploy_list_that_cannot_be_read_or_is_invalid_refuses_without_reading_checks(self):
+        self.put(1)
+        for label, entry in (("unreadable", {"rc": 1, "err": "HTTP 502"}),
+                             ("bad required_checks", {"raw": deploy_answer(dict(GOOD_DEPLOY, required_checks="ci"))}),
+                             ("not json", {"raw": deploy_answer("nope")})):
+            with self.subTest(label):
+                self.gh.configure(api=[entry])
+                self.not_green()
+                self.assertIn("required_checks cannot be known", self.err)
+                self.assertEqual(self.checks_calls(), [])
+
+    def test_a_missing_deploy_list_declares_no_required_checks(self):
+        self.put(1)
+        self.gh.configure(api=[{"rc": 1, "err": "HTTP 404"}])
+        self.assertEqual(self.run_gate(), 0, self.err)
+        self.assertEqual(len(self.checks_calls()), 1)
+
+    def test_the_test_only_exception_needs_green_checks(self):
+        self.put(1, head_sha=SINCE)
+        self.gh.configure(api=[{"raw": deploy_answer(GOOD_DEPLOY)}, {"raw": compare_answer("tests/a.py")}],
+                          checks=[{"raw": checks_answer(None, status="queued")}])
+        self.not_green(since=SINCE)
+
+    def test_the_merged_base_exception_needs_green_checks(self):
+        self.put(1, head_sha=SINCE)
+        own = compare_answer("src/own.py", status="diverged")
+        self.gh.configure(api=[{"raw": deploy_answer(GOOD_DEPLOY)}, {"raw": merge_compare("x.py")}, {"raw": own},
+                               {"raw": own}, {"raw": compare_answer("src/other.py", status="diverged")}],
+                          checks=[{"raw": checks_answer(None, status="in_progress")}])
+        self.not_green(merged_since=SINCE)
+
+    def test_the_docs_tests_only_rule_reads_the_checks_once(self):
+        self.put(1, kind="provisional", reviewer="opus")
+        self.gh.configure(api=[{"raw": deploy_answer(DEPLOYING)}, {"raw": compare_answer("tests/a.py")}])
+        self.assertEqual(self.run_gate(), 0, self.err)
+        self.assertEqual(len(self.checks_calls()), 1)
+
+    def test_a_refusal_for_another_reason_reads_no_check(self):
+        self.put(1, verdict="NO-GO")
+        self.assertEqual(self.run_gate(), 3, self.err)
+        self.assertEqual(self.last()["reason"], "no-go")
+        self.assertEqual(self.checks_calls(), [])
 
 
 if __name__ == "__main__":

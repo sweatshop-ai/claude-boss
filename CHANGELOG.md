@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **The merge gate refuses a head whose CI is not complete and green, on every path (merge-flow ticket 03, 2026-11-22).** Only the docs/tests-only rule read the check runs; a Codex GO, a provisional GO on a non-deploying base, `--test-only-since` and `--merged-base-since` merged without them, and two PRs merged while their only check was still queued. Now any queued, running or red run, no run, more runs than listed, a missing `required_checks` name or a failed read refuses with `ci-not-green` (exit 3), under `--dry-run` too. `SKILL.md`: on every pulse the boss runs the gate's `--dry-run` on every open PR of its track and merges those that pass, without waiting for the worker's message; the worker still reports, ticks and cleans up after the merge.
+
 ## 0.31.0
 
 - **`spawn --autocompact <size>` gives one worker its own compaction window (the owner, 2026-11-20).** The owner's global `autoCompactWindow` went to 120k; a compaction leaves about 26k, so 90k of room. For a ticket that must hold many files at once the boss spawns its worker with `--autocompact 200k`. The size is stamped on the pane as `@worker_autocompact`, so `restart` and `move` keep it and a plain `retire` clears it. It is checked against `claude`'s own rule (`auto`, or 100k to 1M; a bare number under 1000 means thousands) before any pane is made: a value `claude` refuses would otherwise exit in the new pane and leave it behind after a 30 s wait. The option applies to `spawn` only.
