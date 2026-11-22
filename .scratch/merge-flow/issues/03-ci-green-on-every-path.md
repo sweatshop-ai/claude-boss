@@ -19,7 +19,7 @@ rules) covers this.
 
 **Blocked by:** None (can start immediately)
 
-**Status:** in-review
+**Status:** done
 
 - [x] Tests first in `skills/boss/test_boss_merge.py` (`CiGate`): queued, in progress, red, none,
       unlisted, unreadable and missing-required checks refuse as `ci-not-green` on a Codex GO, a
@@ -28,3 +28,5 @@ rules) covers this.
 - [x] The gate in `merge()`, before the merge-queue check and the dry run
 - [x] `skills/boss/SKILL.md`: the gate paragraph, "Merge on the pulse", the pulse step, the
       reporting contract
+
+**Evidence:** PR #182 merged with head 9e52852, merge commit 08a66bd on main; CI on 08a66bd: 1 check run, `pytest: success`.
