@@ -1317,25 +1317,26 @@ class DocsTestsOnly(Base):
         self.gh.configure(api=[self.deploy, {"raw": compare_answer(("docs/new.md", "src/old.py"), status="ahead")}])
         self.assertEqual(self.run_gate(), 4, self.err)
 
-    def test_red_pending_or_no_checks_keep_the_refusal(self):
+    def test_red_pending_or_no_checks_refuse_as_ci_not_green(self):
         for label, answer in (("failure", checks_answer("success", "failure")),
                               ("pending", checks_answer("success", status="in_progress")),
                               ("cancelled", checks_answer("cancelled")), ("none", checks_answer()),
                               ("more than listed", checks_answer("success", total=2)),
                               ("not json", "nope"), ("no list", "{}")):
             with self.subTest(label):
-                self.refused(["tests/a.py"], "docs/tests-only rule", checks=answer)
+                self.refused(["tests/a.py"], "ci-not-green", checks=answer, code=3)
 
     def test_checks_that_were_all_skipped_or_neutral_are_not_green(self):
-        self.refused(["tests/a.py"], "no check run succeeded", checks=checks_answer("skipped", "neutral"))
+        self.refused(["tests/a.py"], "no check run succeeded", checks=checks_answer("skipped", "neutral"), code=3)
 
     def test_the_checks_the_deploy_list_requires_must_all_have_run_and_succeeded(self):
         two = {"raw": deploy_answer(dict(DEPLOYING, required_checks=["ci0", "build"]))}
-        self.refused(["tests/a.py"], "required check 'build'", deploy=two, checks=checks_answer("success", "success"))
+        self.refused(["tests/a.py"], "required check 'build'", deploy=two, checks=checks_answer("success", "success"),
+                     code=3)
         named = json.dumps({"total_count": 2, "check_runs": [
             {"name": "ci0", "status": "completed", "conclusion": "success"},
             {"name": "build", "status": "completed", "conclusion": "skipped"}]})
-        self.refused(["tests/a.py"], "required check 'build'", deploy=two, checks=named)
+        self.refused(["tests/a.py"], "required check 'build'", deploy=two, checks=named, code=3)
         named = named.replace("skipped", "success")
         self.assertEqual(self.go(["tests/a.py"], deploy=two, checks=named), 0, self.err)
 
@@ -1566,9 +1567,9 @@ class MergedBase(Base):
         code_pr = compare_answer("tests/a.py", PRODUCTION, status="diverged")
         for label, args, code, why in (
                 ("a code file", (code_pr, code_pr), 4, PRODUCTION),
-                ("red checks", (both, both, checks_answer("failure")), 4, "check "),
+                ("red checks", (both, both, checks_answer("failure")), 3, "ci-not-green"),
                 ("no required check", (both, both, checks_answer("success"), {"raw": deploy_answer(
-                    dict(DEPLOYING, required_checks=["build"]))}), 4, "required check 'build'"),
+                    dict(DEPLOYING, required_checks=["build"]))}), 3, "required check 'build'"),
                 ("a pr file touched since", (compare_answer("tests/a.py", "x.py", status="diverged"),) * 2, 3,
                  "x.py")):
             with self.subTest(label):
@@ -1953,6 +1954,23 @@ class CiGate(Base):
                                {"raw": both}, {"raw": compare_answer("src/other.py", status="diverged")}])
         self.assertEqual(self.run_gate(merged_since=SINCE), 0, self.err)
         self.assertEqual(self.last()["reason"], "provisional-go-docs-tests-only-merged-base")
+        self.assertEqual(len(self.checks_calls()), 1)
+
+    def test_a_deploy_list_that_cannot_be_read_or_is_invalid_refuses_without_reading_checks(self):
+        self.put(1)
+        for label, entry in (("unreadable", {"rc": 1, "err": "HTTP 502"}),
+                             ("bad required_checks", {"raw": deploy_answer(dict(GOOD_DEPLOY, required_checks="ci"))}),
+                             ("not json", {"raw": deploy_answer("nope")})):
+            with self.subTest(label):
+                self.gh.configure(api=[entry])
+                self.not_green()
+                self.assertIn("required_checks cannot be known", self.err)
+                self.assertEqual(self.checks_calls(), [])
+
+    def test_a_missing_deploy_list_declares_no_required_checks(self):
+        self.put(1)
+        self.gh.configure(api=[{"rc": 1, "err": "HTTP 404"}])
+        self.assertEqual(self.run_gate(), 0, self.err)
         self.assertEqual(len(self.checks_calls()), 1)
 
     def test_the_test_only_exception_needs_green_checks(self):

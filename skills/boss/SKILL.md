@@ -997,8 +997,9 @@ merging, `--merged-base-since SHA` (the head of the last GO) allows a head that 
 codes: 0 merged, 3 and 4 refused, 5 failed or unverified (the merge or the check after it), 7 a read failed. A
 refusal (3 or 4) is an instruction to get the right review, not to work around it. **On every path the gate also
 reads the head's check runs** (merge-flow ticket 03): any run queued, in progress or red, none at all, more than
-listed, a `required_checks` name of `.boss/deploy.json` missing, or a read that fails, and it refuses with
-`ci-not-green` (3), under `--dry-run` too. A GO is no longer enough by itself: on 2026-11-22 two PRs merged on
+listed, a `required_checks` name of `.boss/deploy.json` missing, a read that fails, or a deploy list that cannot be
+read or is invalid (its `required_checks` cannot be known), and it refuses with `ci-not-green` (3), under `--dry-run`
+too, also for a docs/tests-only PR under rule 2. A GO is no longer enough by itself: on 2026-11-22 two PRs merged on
 their GO while their only check was still queued. `ci-not-green` is not a refusal to argue with; wait for the run.
 
 **Merge on the pulse, not on the worker's word.** On every pulse, and whenever you look at the team, run the gate's
