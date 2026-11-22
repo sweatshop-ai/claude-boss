@@ -8,6 +8,9 @@ failure apart from an invalid file, and have SKILL.md say that an invalid file g
 
 Found by the fallback review of PR 182 (round 2, head 9e52852), minor.
 
+Codex must re-review PR 182's head 9e52852 after 2026-11-23T02:10Z: round 2 ran on the Opus fallback because Codex was at
+its usage limit. Its findings become tickets here, not a revert.
+
 **Blocked by:**
 - 03: The merge gate refuses unless the head's CI is complete and green
 
