@@ -12,11 +12,17 @@ Exit codes:
     0 merged (under --dry-run: would be allowed)
     2 usage, the PR is not the one asked for, or it is not open
     3 refused: no usable GO on the live head (none, a NO-GO, a record that cannot be read, or a provisional
-      or waived GO that a later round supersedes)
+      or waived GO that a later round supersedes), or `ci-not-green`: the head's check runs are not all completed
+      and green (none, one queued, running or red, more than listed, a `required_checks` name missing, or no read)
     4 refused: a provisional or waived GO on a branch not listed as non-deploying
     5 `gh pr merge` failed, or the check after it did (not merged, base changed, unverified), or the line that
       announces the merge could not be written (nothing merged then)
     7 a `gh` read failed, or the PR's lock could not be taken
+
+The CI condition holds on every path, whatever the round (ticket merge-flow 03): once the record allows the merge,
+`read_checks` on the live head must answer green, with the base's `required_checks` when the deploy list has them, or
+the merge is refused as `ci-not-green` (3), under --dry-run too. Rule 2 below reads the same checks itself and is not
+read twice.
 
 The rounds are the files `boss_review.py` keeps under $CLAUDE_CONFIG_DIR/pm/reviews/<owner>/<repo>/pr<N>/. They
 are walked from the highest number down and the first one that decides, decides: anything the walk meets and cannot
@@ -751,6 +757,12 @@ def merge(repo: str, pr: int, *, dry_run: bool = False, since: str | None = None
             note += "; " + MISSING_DEPLOY_HINT % (seen.base, json.dumps({"version": 1, "non_deploying": [seen.base]}))
         if got.exit != EXIT_MERGED:
             return finish(got.exit, got.reason, "refused", note)
+        # every path needs the head's CI done and green (2026-11-22: two PRs merged on a GO while their only check
+        # was still queued); rule 2 has just read the same head's checks with its own required list, so not twice
+        if not got.reason.startswith("provisional-go-docs-tests-only"):
+            green, why = read_checks(repo, seen.head, io_timeout, deploy.required_checks or ())
+            if not green:
+                return finish(EXIT_REFUSED, "ci-not-green", "refused", why)
         queued = queue_problem(repo, pr, seen.base, io_timeout, line)       # before the dry run too: it must say what the merge would
         if queued:
             return finish(EXIT_GH_READ if queued[0] == "gh-read-failed" else EXIT_REFUSED, queued[0], "refused", queued[1])
