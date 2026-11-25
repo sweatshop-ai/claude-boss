@@ -213,7 +213,7 @@ boss-lifecycle.sh spawn <project-dir> [name] [--model M]  # prints pane id + nam
 boss-lifecycle.sh spawn <dir> --autocompact 200k           # a later compaction for a large ticket; kept on restart
 boss-lifecycle.sh spawn <dir> --concierge                 # holds your questions to the owner; sonnet
 boss-lifecycle.sh claim <pane-id> [name] [--concierge]    # adopt a worker; --concierge re-marks a restarted concierge
-boss-lifecycle.sh retire <pane-id> [--kill]               # refuses if BUSY
+boss-lifecycle.sh retire <pane-id> [--keep]               # refuses if BUSY; closes the pane
 boss-lifecycle.sh restart <pane-id>                       # keeps name + model
 boss-lifecycle.sh move <pane-id> <new-project-dir>
 boss-lifecycle.sh list [--mine]                           # + CTX and COST/TURN
@@ -224,6 +224,12 @@ It refuses to touch your own pane, and **refuses to stop a BUSY worker** — ret
 sends Escape/Escape//exit, which against a live turn destroys the work in flight.
 Wait for idle, or ask the worker to reach a stopping point. `--force` overrides and
 says so.
+
+**A retired worker's pane is closed with it**, so the tmux window holds no bare shell
+after you end a session. `retire` on a pane already at a shell (a worker that left on
+its own, or a leftover from an older boss) only closes it. `--keep` leaves the pane at
+its shell; you never need it, `restart` and `move` use it themselves. (`--kill`, the old
+spelling, still works.)
 
 ⚠️ **`restart` types at the pane, so on a pane still running Claude it types into
 the worker's prompt.** Measured 2026-09-20: the two lines (`cd '<dir>'` then
@@ -405,7 +411,7 @@ to the idle workers you have and spawn again when memory frees up.
 the READY tickets (or the unassigned NEXT items) ask for a spawn and the pulse reads
 memory short, it does not tell you to spawn. With workers parked (`boss-park`), it names
 the one that has waited longest, its park event and the refusal's numbers: retire the
-worker parked longest (`retire <pane> --require-idle --kill`), then mark its park
+worker parked longest (`retire <pane> --require-idle`), then mark its park
 `boss-park <track> <worker> --retire`, keeping its park recorded without letting a new
 session of the same name inherit it, and write on its Tracker line that it was retired for
 memory and waits on that event. When the event has happened (or 2 hours passed) the pulse
@@ -1380,15 +1386,15 @@ before closing**, and the closing after both the state line and the objective.
    when every criterion is met, otherwise `boss-goal status <track> paused "<reason pointing to the state line>"`.
    Either switches the pulse off; an objective left OPEN over a track nobody is working is what makes it noise.
 5. **Close the panes, after step 4 and never before.** Every pane you own, your concierge
-   included even with a question open (`retire <pane> --kill --force`, since `--require-idle`
+   included even with a question open (`retire <pane> --force`, since `--require-idle`
    refuses its `waiting` status): the question lives in the state line now, and the recap
    says it no longer rings. When the owner says to ("close all the panes of this window"),
    also the unowned leftover panes of your tmux window. Never your own pane: it stays for
    the owner to close.
-   - Per worker: `boss-lifecycle.sh retire <pane> --require-idle --kill`.
+   - Per worker: `boss-lifecycle.sh retire <pane> --require-idle`.
    - A worker waiting on CI or holding a merge shows busy or shell, and `--require-idle`
-     refuses it. First try `retire <pane> --require-idle --stop-shells --kill`. Close it by force
-     only when step 2 shows nothing at risk for it: `retire <pane> --kill --force`, which keeps
+     refuses it. First try `retire <pane> --require-idle --stop-shells`. Close it by force
+     only when step 2 shows nothing at risk for it: `retire <pane> --force`, which keeps
      the guard against another boss's panes (a bare `tmux kill-pane` does not).
    - **A worker with uncommitted code, or commits on no remote, is not closed.** Name it,
      name what is at risk, and stop for it: the owner or the worker saves the work first.
