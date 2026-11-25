@@ -559,6 +559,49 @@ class RequireIdle(unittest.TestCase):
         self.assertEqual(keys[-1], "send-keys -t %5 Enter")
         self.assertEqual(keys.count("send-keys -t %5 /exit Enter"), 1)
 
+    def calls(self):
+        return (self.tmp / "calls").read_text() if (self.tmp / "calls").exists() else ""
+
+    def test_a_retired_worker_s_pane_is_closed(self):
+        r, keys = self.run_retire("w-sid\tidle\tpin1")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("kill-pane -t %5", self.calls())
+        self.assertIn("retired and closed %5", r.stdout)
+
+    def test_keep_leaves_the_pane_at_its_shell(self):
+        r, keys = self.run_retire("w-sid\tidle\tpin1", "--keep")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("kill-pane", self.calls())
+        self.assertIn("pane kept", r.stdout)
+
+    def test_the_old_kill_flag_still_closes(self):
+        r, keys = self.run_retire("w-sid\tidle\tpin1", "--kill")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("kill-pane -t %5", self.calls())
+
+    def test_a_pane_already_at_a_shell_is_closed_without_typing(self):
+        (self.tmp / "cmd").write_text("bash\n")
+        r, keys = self.run_retire("-\t-\t-", require_idle=False)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(keys, [])
+        self.assertIn("kill-pane -t %5", self.calls())
+
+    def test_an_unknown_retire_option_is_refused_before_anything(self):
+        r, keys = self.run_retire("w-sid\tidle\tpin1", "--kil")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("unknown option", r.stderr)
+        self.assertNotIn("kill-pane", self.calls())
+        self.assertEqual(keys, [])
+
+    def test_a_refused_retire_closes_nothing(self):
+        r, keys = self.run_retire("w-sid\tbusy\tpin1")
+        self.assertEqual(r.returncode, 1)
+        self.assertNotIn("kill-pane", self.calls())
+
+    def test_restart_keeps_its_pane(self):
+        r, keys = self.run_retire("w-sid\tidle\tpin1", cmd="restart")
+        self.assertNotIn("kill-pane", self.calls())
+
     def test_a_turn_in_the_gap_gets_one_escape_for_the_dialog(self):
         (self.tmp / "row2").write_text("w-sid\tbusy\tpin2\tpin2\n")
         r, keys = self.run_retire("w-sid\tidle\tpin1\tpin1", exits=False, dialog=True)
@@ -817,8 +860,8 @@ class RestartKeepsName(unittest.TestCase):
             self.assertNotEqual(r.returncode, 0, args)
             self.assertIn("--autocompact only applies to spawn", r.stderr)
 
-    def test_a_retired_pane_loses_its_autocompact(self):
-        r = self.run_lifecycle("retire", "%5", row="w-sid\tidle\tpin1")
+    def test_a_kept_retired_pane_loses_its_autocompact(self):
+        r = self.run_lifecycle("retire", "%5", "--keep", row="w-sid\tidle\tpin1")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("set-option -pu -t %5 @worker_autocompact", (self.tmp / "calls").read_text())
 
@@ -872,9 +915,9 @@ class RestartKeepsName(unittest.TestCase):
         self.assertIn("--append-system-prompt-file", self.launches()[0])
         self.assertIn("concierge-brief.md", self.launches()[0])
 
-    def test_a_retired_pane_is_no_concierge_any_more(self):
+    def test_a_kept_retired_pane_is_no_concierge_any_more(self):
         (self.tmp / "role").write_text("concierge\n")
-        r = self.run_lifecycle("retire", "%5", row="w-sid\tidle\tpin1")
+        r = self.run_lifecycle("retire", "%5", "--keep", row="w-sid\tidle\tpin1")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("set-option -pu -t %5 @worker_role", (self.tmp / "calls").read_text())
         self.assertIn("set-option -pu -t %5 @custom_title", (self.tmp / "calls").read_text())

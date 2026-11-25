@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **`retire` closes the worker's pane (the owner, 2026-11-26).** A boss that ends a session now also tidies tmux: the pane goes with it, where a plain `retire` used to leave a bare shell. Seen that day: two workers retired mid-track by one boss sat at a shell for hours, each a false `at-shell` alert for `boss-workers-watch`. `retire` on a pane already at a shell only closes it, which clears such leftovers. `--keep` keeps the pane (what `restart` and `move` use), `--kill` is still accepted, and any other option is refused before anything is typed. SKILL.md, the concierge reference and the pulse's retire hints drop `--kill`.
 - **The merge gate refuses a head whose CI is not complete and green, on every path (merge-flow ticket 03, 2026-11-22).** Only the docs/tests-only rule read the check runs; a Codex GO, a provisional GO on a non-deploying base, `--test-only-since` and `--merged-base-since` merged without them, and two PRs merged while their only check was still queued. Now any queued, running or red run, no run, more runs than listed, a missing `required_checks` name or a failed read refuses with `ci-not-green` (exit 3), under `--dry-run` too. `SKILL.md`: on every pulse the boss runs the gate's `--dry-run` on every open PR of its track and merges those that pass, without waiting for the worker's message; the worker still reports, ticks and cleans up after the merge.
 
 ## 0.31.0

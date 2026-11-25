@@ -9,7 +9,7 @@
 # Usage:
 #   boss-lifecycle.sh spawn <project-dir> [name-hint] [--model <name>] [--autocompact <size>] [--concierge]
 #   boss-lifecycle.sh claim <pane-id> [name] [--concierge]
-#   boss-lifecycle.sh retire <pane-id> [--kill] [--require-idle [--expect-session S] [--expect-last U] [--wait-idle SECONDS [--stop-shells]]
+#   boss-lifecycle.sh retire <pane-id> [--keep] [--require-idle [--expect-session S] [--expect-last U] [--wait-idle SECONDS [--stop-shells]]
 #   boss-lifecycle.sh restart <pane-id> [--require-idle [--expect-session S] [--expect-last U] [--wait-idle SECONDS] [--stop-shells]]
 #   boss-lifecycle.sh move <pane-id> <new-project-dir>
 #   boss-lifecycle.sh list [--mine]
@@ -580,9 +580,18 @@ retire_default() {
   done
 }
 
+# A retired worker's pane is closed: a boss that ends a session also tidies the
+# tmux window, so no bare shell is left behind (the owner, 2026-11-26: two
+# retired workers of one boss sat at a shell for hours, each one also a false
+# "at-shell" alert for boss-workers-watch). A pane already at a shell is closed
+# the same way, which is how a leftover from before this rule is cleared.
+# --keep leaves the pane at its shell: restart and move need it to relaunch in.
+# --kill is the old spelling of the default and is still accepted.
 cmd_retire() {
-  local target=${1:-} kill_flag=${2:-}
-  [[ -n "$target" ]] || die "usage: retire <pane-id> [--kill]"
+  local target=${1:-} mode=${2:-}
+  [[ -n "$target" ]] || die "usage: retire <pane-id> [--keep]"
+  [[ -z "$mode" || "$mode" == "--kill" || "$mode" == "--keep" ]] ||
+    die "retire: unknown option '$mode' (usage: retire <pane-id> [--keep])"
   local pane; pane=$(resolve_pane "$target")
 
   if [[ $(pane_prop "$pane" '#{pane_current_command}') =~ ^(claude|node)$ ]]; then
@@ -596,9 +605,9 @@ cmd_retire() {
     die "$pane is not running Claude, so it cannot be session $EXPECT_SESSION: not retiring"
   fi
 
-  if [[ "$kill_flag" == "--kill" ]]; then
+  if [[ "$mode" != "--keep" ]]; then
     tmux kill-pane -t "$pane"
-    printf 'killed %s\n' "$pane"
+    printf 'retired and closed %s\n' "$pane"
   else
     tmux set-option -pu -t "$pane" @worker_role 2>/dev/null || true
     tmux set-option -pu -t "$pane" @worker_autocompact 2>/dev/null || true   # a ticket's window, not the pane's
@@ -616,7 +625,7 @@ cmd_restart() {
   local keep; keep=$(agent_name "$pane")
   ROLE=$(pane_prop "$pane" '#{@worker_role}' 2>/dev/null || true)
   AUTOCOMPACT=$(pane_prop "$pane" '#{@worker_autocompact}' 2>/dev/null || true)
-  cmd_retire "$pane" >/dev/null
+  cmd_retire "$pane" --keep >/dev/null
   if [[ -n "$ROLE" ]]; then tmux set-option -p -t "$pane" @worker_role "$ROLE"; fi
   if [[ -n "$AUTOCOMPACT" ]]; then tmux set-option -p -t "$pane" @worker_autocompact "$AUTOCOMPACT"; fi
   local sid; sid=$(preassign_name "$keep")
@@ -642,7 +651,7 @@ cmd_move() {
   local keep; keep=$(agent_name "$pane")
   ROLE=$(pane_prop "$pane" '#{@worker_role}' 2>/dev/null || true)
   AUTOCOMPACT=$(pane_prop "$pane" '#{@worker_autocompact}' 2>/dev/null || true)
-  cmd_retire "$pane" >/dev/null
+  cmd_retire "$pane" --keep >/dev/null
   if [[ -n "$ROLE" ]]; then tmux set-option -p -t "$pane" @worker_role "$ROLE"; fi
   if [[ -n "$AUTOCOMPACT" ]]; then tmux set-option -p -t "$pane" @worker_autocompact "$AUTOCOMPACT"; fi
   local sid; sid=$(preassign_name "$keep")
@@ -677,5 +686,5 @@ case "${1:-}" in
   move)    shift; cmd_move "$@" ;;
   list)    shift; cmd_list "$@" ;;
   ctx)     shift; python3 "$PANES_PY" "$@" ;;
-  *) die "usage: $(basename "$0") {spawn <dir> [name] [--model M] [--autocompact S] [--concierge] | claim <pane> [name] [--concierge] | retire <pane> [--kill] | restart <pane> | move <pane> <dir> | list [--mine] | ctx [pane]} [--force] [--require-idle [--expect-session S] [--expect-last U] [--wait-idle SECONDS] [--stop-shells]]" ;;
+  *) die "usage: $(basename "$0") {spawn <dir> [name] [--model M] [--autocompact S] [--concierge] | claim <pane> [name] [--concierge] | retire <pane> [--keep] | restart <pane> | move <pane> <dir> | list [--mine] | ctx [pane]} [--force] [--require-idle [--expect-session S] [--expect-last U] [--wait-idle SECONDS] [--stop-shells]]" ;;
 esac

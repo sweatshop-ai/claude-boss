@@ -270,7 +270,7 @@ def _retire_parked(facts, action):
     waited = "%d h %d min" % divmod(w.minutes, 60) if w.minutes >= 60 else "%d min" % w.minutes
     return ("Memory is short for the %d more worker%s your open work asks for (%s). Retire "
             "%s (parked %s on %s), the longest-parked: `boss-lifecycle.sh retire <pane> "
-            "--require-idle --kill`, its pane from `boss-lifecycle.sh list --mine`. Then mark its "
+            "--require-idle`, its pane from `boss-lifecycle.sh list --mine`. Then mark its "
             "park `boss-park %s %s --retire` (the event stays recorded, and the pulse tells you "
             "when it has happened) and write on its Tracker line that it was retired for memory "
             "and waits on %s, so its work is picked up then. Retry the spawn once; if it is "
@@ -295,7 +295,7 @@ def _retire(facts, action):
     woken = {w.worker for w in facts.parks}
     names = [n for n in _idle_names(facts) if n not in woken]
     return ("Nothing is left to hand out%s and no park holds %s: retire %s "
-            "(`boss-lifecycle.sh retire <pane> --require-idle --kill`)." % (
+            "(`boss-lifecycle.sh retire <pane> --require-idle`)." % (
                 " (after the refill, if it finds nothing)"
                 if not _entries(facts.next_items) else "",
                 ", ".join(names[:policy.LIST_MAX]), "it" if len(names) == 1 else "them"))
