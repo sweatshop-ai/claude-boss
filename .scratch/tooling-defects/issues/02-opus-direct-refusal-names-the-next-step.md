@@ -12,7 +12,7 @@ that while Codex is at its usage limit (`pm/reviews/codex-limit.json`) that revi
 confined Opus reviewer at once.
 
 **What to build:** every `--opus-direct` refusal ends with the next step: the ordinary
-`boss_review.py --repo R --pr N --checkout DIR --author NAME --track <your track>` of this PR, whether Codex is skipped for
+`python3 <path>/boss_review.py --repo R --pr N --checkout DIR --author NAME --track T` of this PR, runnable as printed, whether Codex is skipped for
 its limit (and until when) or asked first, and that a plain Opus agent leaves no record. A missing or `test_paths`-less
 deploy list says that only a base listing `test_paths` lets a tests-or-docs PR take the direct pass.
 

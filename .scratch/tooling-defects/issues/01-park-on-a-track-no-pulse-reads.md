@@ -9,9 +9,12 @@ The pulse takes the track from the marker, so every Stop of that boss ended at `
 (`boss-pulse.py why` showed no Stop for the new one) and the new track's parks were never read. `boss-park` wrote the
 park on whatever track it was given and said `parked`.
 
-**What to build:** `boss-park --until` refuses (exit 2, nothing written) a park no pulse will read, and says what to run:
+**What to build:** `boss-park --until` refuses (exit 2, nothing written) a park on a track no boss marker names, and
+says what to run:
 - the caller is a boss whose marker names another track: `boss-marker register <track>`, then park again;
-- the caller is not a boss and no marker names the track: the track's boss registers it (a worker asks its boss).
+- the caller is not a boss: the track's boss registers it (a worker asks its boss).
+A track another live boss is marked with is accepted: that boss's pulse reads it (review of PR 184: refusing it would
+tell a boss to move its own marker and orphan its own parks).
 `--list` and `--clear` still work, and `--list` warns on stderr when no marker names the track.
 
 **Status:** done (this PR)

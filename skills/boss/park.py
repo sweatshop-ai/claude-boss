@@ -249,22 +249,22 @@ def open_blocker_lines(track, cfg=None):
     return None if body is None else tuple(tracker.blocker_lines(body))
 
 
-def unread_problem(track, sid, cfg=None):
+def unread_problem(track, sid, cfg=None, listing=False):
     """Why no pulse would ever read this track's parks, with what to run; None when a pulse reads them.
 
-    The pulse of a boss reads only the parks of the track in its marker. A boss parking on another
-    track (its marker still names the one before), or anyone parking on a track no boss is marked
-    with, makes a park nothing ever checks: the worker sits idle past its event (2026-11-26)."""
+    The pulse of a boss reads only the parks of the track in its marker. A park on a track no boss
+    marker names is never checked: the worker sits idle past its event (2026-11-26, a boss whose
+    marker still named its previous track). A track another live boss is marked with is read by
+    that boss's pulse, so it is no problem here."""
+    if track in boss_store.marked_tracks(cfg):
+        return None
+    what = "no pulse reads these parks" if listing else "no pulse reads its parks and this park would never wake"
     mine = boss_store.track_of(sid, cfg) if sid else ""
-    if mine and mine != track:
-        return ("this session's boss marker names track %s, not %s, and the pulse reads only %s's parks, "
-                "so this park would never wake. If you now run %s, run `boss-marker register %s`, then park "
-                "again" % (mine, track, mine, track, track))
-    if not mine and track not in boss_store.marked_tracks(cfg):
-        return ("no boss marker names track %s, so no pulse reads its parks and this park would never wake. "
-                "The boss of %s runs `boss-marker register %s` (a worker asks its boss to), then park again"
-                % (track, track, track))
-    return None
+    if mine:
+        return ("no boss marker names track %s, so %s. This session's marker names %s: if you now run %s, "
+                "run `boss-marker register %s`, then park again" % (track, what, mine, track, track))
+    return ("no boss marker names track %s, so %s. The boss of %s runs `boss-marker register %s` "
+            "(a worker asks its boss to), then park again" % (track, what, track, track))
 
 
 def _usage():
@@ -292,8 +292,8 @@ def main(argv):
                                                (now - p.since) // 60))
             if not parks:
                 print("no parks")
-            elif track not in boss_store.marked_tracks():
-                print("boss-park: %s" % unread_problem(track, ""), file=sys.stderr)
+            elif unread_problem(track, "", listing=True):
+                print("boss-park: %s" % unread_problem(track, "", listing=True), file=sys.stderr)
             return 0
         if len(rest) == 2 and rest[1] == "--retire":
             print("retired park kept" if retire(track, rest[0]) else "no park for %s" % rest[0])

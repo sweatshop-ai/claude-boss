@@ -1525,17 +1525,18 @@ def _direct_next_step(job: _Job) -> str:
     """What to run after a refused `--opus-direct`, so the PR still gets a recorded round (2026-11-26: a refused worker
     ran a plain Opus agent and the review went unrecorded). The ordinary review with `--track` records one either way;
     while Codex is at its usage limit it skips Codex and runs the same confined Opus reviewer at once."""
-    command = "boss_review.py --repo %s --pr %d --checkout %s --author %s --track <your track>" % (
-        shlex.quote(job.repo), job.pr, shlex.quote(job.checkout), shlex.quote(job.author))
+    command = "python3 %s --repo %s --pr %d --checkout %s --author %s --track T" % (
+        shlex.quote(os.path.abspath(__file__)), shlex.quote(job.repo), job.pr, shlex.quote(job.checkout),
+        shlex.quote(job.author))
     try:
         limit = read_limit(_reviews_dir(), _aware_now())
     except OSError:
         limit = None
     how = ("Codex is at its usage limit until %s, so it runs the Opus fallback at once" % _utc_text(limit.until)
            if limit else "it asks Codex first and runs the Opus fallback if Codex does not answer")
-    return ("Next: run the ordinary review, which keeps a recorded round the merge gate reads: `%s` (%s, recorded "
-            "as provisional when Opus gives it). Never a plain Opus agent in its place: its review is not recorded"
-            % (command, how))
+    return ("Next: run the ordinary review, which keeps a recorded round the merge gate reads; %s, recorded as "
+            "provisional when Opus gives it. Never a plain Opus agent in its place: its review is not recorded. "
+            "T is your track, and pm/T.md must be a file of yours: `%s`" % (how, command))
 
 
 # ------------------------------------------------------------------ the fix pass ----

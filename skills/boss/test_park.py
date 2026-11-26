@@ -397,6 +397,19 @@ class ParkOnATrackNoPulseReads(unittest.TestCase):
         self.assertIn("boss-marker register new-track", r.stderr)
         self.assertEqual(park.read_parks("new-track", self.cfg), {})
 
+    def test_a_boss_may_park_on_a_track_another_live_boss_is_marked_with(self):
+        park.boss_store.register("boss-1", "alpha", self.cfg)
+        park.boss_store.register("boss-2", "beta", self.cfg)
+        r = self.run_cli("beta", "Ada", "--until", "ticket:3", sid="boss-1")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("Ada", park.read_parks("beta", self.cfg))
+
+    def test_the_list_warning_speaks_of_the_listed_parks(self):
+        park.set_park("new-track", "Ada", "ticket:1", cfg=self.cfg)
+        err = self.run_cli("new-track", "--list").stderr
+        self.assertIn("these parks", err)
+        self.assertNotIn("this park would", err)
+
     def test_a_boss_parking_on_its_own_track_parks(self):
         park.boss_store.register("boss-1", "new-track", self.cfg)
         r = self.run_cli("new-track", "Ada", "--until", "pr:acme/app#5-merged", sid="boss-1")

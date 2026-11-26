@@ -301,7 +301,11 @@ class TheRefusalSaysWhatToRunInstead(Direct):
         for needle in ("boss_review.py", "--repo %s" % REPO, "--pr %d" % PR, "--author %s" % AUTHOR,
                        "--track", "recorded"):
             self.assertIn(needle, err)
-        self.assertNotIn("--opus-direct --", err.split("refused:", 1)[1])
+        command = err.split("`")[-2]          # the last quoted command is the one to run
+        self.assertTrue(command.startswith("python3 %s " % br.__file__), command)
+        self.assertNotIn("--opus-direct", command)
+        self.assertNotIn("<", command)          # no placeholder a shell reads as a redirect
+        self.assertIn("pm/T.md", err)
 
     def test_it_says_a_plain_opus_agent_leaves_no_record(self):
         self.assertIn("plain Opus agent", self.refusal())
