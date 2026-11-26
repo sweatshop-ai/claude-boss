@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.32.0
 
 - **A park no pulse reads is refused (tooling-defects 01, 2026-11-26).** A boss whose marker still named its previous, closed track parked three workers on PR merges of its new track; the pulse reads only the marker's track, so the parks were never checked and a worker sat idle for hours after its PR merged. `boss-park --until` now refuses (exit 2, nothing written) a park on a track no boss marker names, and says what to run: `boss-marker register <track>` (by this boss when its marker still names its previous track, else by the track's boss), then park again. A track another live boss is marked with is still accepted. `--list` warns on stderr.
 - **A refused `--opus-direct` names the review to run instead (tooling-defects 02, 2026-11-26).** A content-only PR into a base with no deploy list was refused, and the worker ran a plain Opus agent whose review went unrecorded. The refusal still stands (the direct pass is for tests and narrow docs), but it now ends with the ordinary review of that PR, as a command that runs as printed (`python3 <path>/boss_review.py ... --track T`), which records a round, says whether Codex is skipped for its usage limit (the Opus fallback then runs at once) or asked first, and that a plain Opus agent leaves no record.
