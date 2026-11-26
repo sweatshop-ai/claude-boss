@@ -1513,11 +1513,30 @@ def _direct_problem(job: _Job, seen: _Pr) -> str | None:
     import boss_merge      # here and not at the top: boss_merge imports this module
     deploy = boss_merge.read_deploy(job.repo, seen.base, job.io_timeout)
     if deploy.test_paths is None:
-        return "no test_paths in the deploy list of %s (deploy list %s)" % (seen.base, deploy.state)
+        return ("no test_paths in the deploy list of %s (deploy list %s; only a base whose `.boss/deploy.json` lists "
+                "`test_paths` lets a tests-or-docs PR take the direct pass)" % (seen.base, deploy.state))
     own = boss_merge.read_compare(job.repo, seen.base, seen.head, job.io_timeout, boss_merge.OWN_STATUSES)
     if own.problem:
         return "%s: %s" % (own.problem, own.note)
     return boss_merge.files_problem(own.files, deploy)
+
+
+def _direct_next_step(job: _Job) -> str:
+    """What to run after a refused `--opus-direct`, so the PR still gets a recorded round (2026-11-26: a refused worker
+    ran a plain Opus agent and the review went unrecorded). The ordinary review with `--track` records one either way;
+    while Codex is at its usage limit it skips Codex and runs the same confined Opus reviewer at once."""
+    command = "python3 %s --repo %s --pr %d --checkout %s --author %s --track T" % (
+        shlex.quote(os.path.abspath(__file__)), shlex.quote(job.repo), job.pr, shlex.quote(job.checkout),
+        shlex.quote(job.author))
+    try:
+        limit = read_limit(_reviews_dir(), _aware_now())
+    except OSError:
+        limit = None
+    how = ("Codex is at its usage limit until %s, so it runs the Opus fallback at once" % _utc_text(limit.until)
+           if limit else "it asks Codex first and runs the Opus fallback if Codex does not answer")
+    return ("Next: run the ordinary review, which keeps a recorded round the merge gate reads; %s, recorded as "
+            "provisional when Opus gives it. Never a plain Opus agent in its place: its review is not recorded. "
+            "T is your track, and pm/T.md must be a file of yours: `%s`" % (how, command))
 
 
 # ------------------------------------------------------------------ the fix pass ----
@@ -1654,7 +1673,7 @@ def review(repo: str, pr: int, checkout: str, author: str, *,
     if opus_direct:
         why = _direct_problem(job, seen)
         if why:
-            _say("--opus-direct refused: %s" % why)
+            _say("--opus-direct refused: %s. %s" % (why, _direct_next_step(job)))
             return _nothing(EXIT_REFUSED)
     try:
         _site_rules()     # a review that could not be published is not asked for

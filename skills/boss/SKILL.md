@@ -774,6 +774,9 @@ runs at about 75k tokens each used up the weekly Codex quota.
    (exit 5, the file named) unless every file the PR changes is a test or narrow docs by the gate's own
    classification, runs Opus without asking Codex, and records the provisional round the gate accepts, with no Codex
    failure counted and no Codex recheck owed. Without the flag `boss_review.py` always asks Codex first.
+   A refusal prints the next step: the ordinary review of the PR with `--track`, which records a round (with Codex
+   at its usage limit it runs the Opus fallback at once). Run that; never a plain Opus agent, whose review is not
+   recorded and which the gate cannot read.
    The gate knows the rule (ticket 50): a provisional GO on
    the live head merges on any base when every file the PR changes is a test (`test_paths`) or
    docs (`README.md`, `CHANGELOG.md`, `docs/*.md`; never `SKILL.md`, `AGENTS.md`, `CLAUDE.md` or
@@ -1308,7 +1311,10 @@ Three sources. Turn all three on.
    "X's wait is over (ticket 12 done): dispatch it", and when the 2 hours ran out first, "X has
    waited 2 h on <event>: dispatch, re-park or retire". `boss-park <track> --list` shows the parks,
    `boss-park <track> <worker> --clear` drops one, and any message of yours to the worker
-   (a dispatch) drops it too, except an `ASK`.
+   (a dispatch) drops it too, except an `ASK`. The pulse reads only the parks of the track in
+   your marker: a park on a track no boss marker names is refused with what to run
+   (`boss-marker register <track>` when you have moved on to a new track), because nothing
+   would ever wake it.
 
 3. **The escalation timer.** P12's ladder, `references/escalation.md`. A blocker
    waiting on the owner emits nothing at all; the detached `sleep` is what brings

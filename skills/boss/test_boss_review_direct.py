@@ -285,6 +285,45 @@ class Refusals(Direct):
         self.assertEqual([c.argv[1] for c in self.sb.calls_of("gh") if c.argv[0] == "pr"], ["view"])
 
 
+class TheRefusalSaysWhatToRunInstead(Direct):
+    """A refusal is no dead end (2026-11-26: a content PR on a base with no deploy list was refused, the worker ran a
+    plain Opus agent instead and the review went unrecorded). It names the ordinary review with `--track`, which
+    records a round, and says whether Codex is skipped for its usage limit."""
+
+    def refusal(self):
+        self.serve(files=("src/content/landings/fr/geo.yaml",), deploy={"raw": "", "rc": 1, "err": "HTTP 404"})
+        result, err = self.stderr_of(self.direct)
+        self.assertNothingHappened(result)
+        return err
+
+    def test_it_names_the_ordinary_review_of_this_pr_with_a_track(self):
+        err = self.refusal()
+        for needle in ("boss_review.py", "--repo %s" % REPO, "--pr %d" % PR, "--author %s" % AUTHOR,
+                       "--track", "recorded"):
+            self.assertIn(needle, err)
+        command = err.split("`")[-2]          # the last quoted command is the one to run
+        self.assertTrue(command.startswith("python3 %s " % br.__file__), command)
+        self.assertNotIn("--opus-direct", command)
+        self.assertNotIn("<", command)          # no placeholder a shell reads as a redirect
+        self.assertIn("pm/T.md", err)
+
+    def test_it_says_a_plain_opus_agent_leaves_no_record(self):
+        self.assertIn("plain Opus agent", self.refusal())
+
+    def test_while_codex_is_at_its_limit_it_says_the_fallback_runs_at_once(self):
+        now = br._aware_now()
+        br.write_limit(self.sb.cfg / "pm" / "reviews", br.Limit(now + br.timedelta(hours=3), True), now)
+        err = self.refusal()
+        self.assertIn("usage limit", err)
+        self.assertIn("at once", err)
+
+    def test_without_a_limit_it_says_codex_is_asked_first(self):
+        self.assertIn("Codex first", self.refusal())
+
+    def test_a_missing_deploy_list_names_the_file_that_would_let_tests_and_docs_through(self):
+        self.assertIn(".boss/deploy.json", self.refusal())
+
+
 class SoundnessOfTheChainsAnswer(unittest.TestCase):
     """`_sound` with `direct`: exactly one attempt, the fallback's; a Codex attempt in the answer is a contradiction."""
 
