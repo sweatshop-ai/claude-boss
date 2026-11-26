@@ -1312,8 +1312,9 @@ Three sources. Turn all three on.
    waited 2 h on <event>: dispatch, re-park or retire". `boss-park <track> --list` shows the parks,
    `boss-park <track> <worker> --clear` drops one, and any message of yours to the worker
    (a dispatch) drops it too, except an `ASK`. The pulse reads only the parks of the track in
-   your marker: a park on another track is refused with what to run (`boss-marker register
-   <track>` when you have moved on to a new track), because nothing would ever wake it.
+   your marker: a park on a track no boss marker names is refused with what to run
+   (`boss-marker register <track>` when you have moved on to a new track), because nothing
+   would ever wake it.
 
 3. **The escalation timer.** P12's ladder, `references/escalation.md`. A blocker
    waiting on the owner emits nothing at all; the detached `sleep` is what brings
