@@ -287,9 +287,12 @@ class Cli(unittest.TestCase):
         (self.cfg / "pm").mkdir()
         (self.cfg / "pm" / "demo.md").write_text(
             "# T\n\n## Open blockers\n- the org name q7\n\n## Decisions\n")
+        park.boss_store.register("boss-demo", "demo", self.cfg)     # the boss whose pulse reads demo's parks
 
-    def run_cli(self, *args):
+    def run_cli(self, *args, sid=None):
         env = {"CLAUDE_CONFIG_DIR": str(self.cfg), "PATH": "/usr/bin:/bin"}
+        if sid:
+            env["CLAUDE_CODE_SESSION_ID"] = sid
         return subprocess.run([str(BIN), *args], env=env, capture_output=True, text=True, timeout=20)
 
     def test_park_list_and_clear(self):
@@ -368,6 +371,60 @@ class Cli(unittest.TestCase):
 
     def test_a_worker_name_with_odd_characters_is_refused(self):
         self.assertEqual(self.run_cli("demo", "a b;c", "--until", "ticket:1").returncode, 2)
+
+
+class ParkOnATrackNoPulseReads(unittest.TestCase):
+    """The pulse reads only the parks of the track in the boss's marker. A park on any other track never wakes:
+    on 2026-11-26 a boss still marked with a closed track parked three workers on PR merges of its new track, and
+    one sat idle for hours after the merges. The park is refused, and the refusal says what to run."""
+
+    def setUp(self):
+        self.cfg = Path(tempfile.mkdtemp(prefix="park-track-"))
+        self.addCleanup(shutil.rmtree, self.cfg, True)
+        (self.cfg / "pm").mkdir()
+
+    def run_cli(self, *args, sid=None):
+        env = {"CLAUDE_CONFIG_DIR": str(self.cfg), "PATH": "/usr/bin:/bin"}
+        if sid:
+            env["CLAUDE_CODE_SESSION_ID"] = sid
+        return subprocess.run([str(BIN), *args], env=env, capture_output=True, text=True, timeout=20)
+
+    def test_a_boss_whose_marker_names_another_track_is_refused_and_told_to_register(self):
+        park.boss_store.register("boss-1", "old-track", self.cfg)
+        r = self.run_cli("new-track", "Ada", "--until", "pr:acme/app#5-merged", sid="boss-1")
+        self.assertEqual(r.returncode, 2, r.stdout)
+        self.assertIn("old-track", r.stderr)
+        self.assertIn("boss-marker register new-track", r.stderr)
+        self.assertEqual(park.read_parks("new-track", self.cfg), {})
+
+    def test_a_boss_parking_on_its_own_track_parks(self):
+        park.boss_store.register("boss-1", "new-track", self.cfg)
+        r = self.run_cli("new-track", "Ada", "--until", "pr:acme/app#5-merged", sid="boss-1")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("Ada", park.read_parks("new-track", self.cfg))
+
+    def test_a_worker_parks_on_a_track_some_boss_is_marked_with(self):
+        park.boss_store.register("boss-1", "new-track", self.cfg)
+        r = self.run_cli("new-track", "Ada", "--until", "ci:acme/app#5", sid="worker-1")
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_a_park_on_a_track_no_boss_is_marked_with_is_refused_and_says_who_registers(self):
+        park.boss_store.register("boss-1", "old-track", self.cfg)
+        r = self.run_cli("new-track", "Ada", "--until", "ci:acme/app#5", sid="worker-1")
+        self.assertEqual(r.returncode, 2, r.stdout)
+        self.assertIn("boss-marker register new-track", r.stderr)
+        self.assertIn("then park again", r.stderr)
+        self.assertEqual(park.read_parks("new-track", self.cfg), {})
+
+    def test_clear_and_list_still_work_on_a_track_no_boss_is_marked_with(self):
+        park.set_park("new-track", "Ada", "ticket:1", cfg=self.cfg)
+        self.assertIn("Ada", self.run_cli("new-track", "--list").stdout)
+        self.assertEqual(self.run_cli("new-track", "Ada", "--clear").returncode, 0)
+
+    def test_the_list_warns_when_no_boss_is_marked_with_the_track(self):
+        park.set_park("new-track", "Ada", "ticket:1", cfg=self.cfg)
+        r = self.run_cli("new-track", "--list")
+        self.assertIn("boss-marker register new-track", r.stderr)
 
 
 if __name__ == "__main__":

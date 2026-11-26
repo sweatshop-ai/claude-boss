@@ -225,6 +225,15 @@ def track_of(sid, cfg=None):
     return track if valid_track(track) else ""
 
 
+def marked_tracks(cfg=None):
+    """The tracks named in the boss markers: the only tracks whose parks a pulse reads."""
+    try:
+        names = os.listdir(markers_dir(cfg))
+    except OSError:
+        return set()
+    return {t for t in (track_of(n, cfg) for n in names if SID_RE.fullmatch(n)) if t}
+
+
 def register(sid, track="", cfg=None):
     """Mark the session a boss, with its track when it has one. Atomic."""
     path = _marker(sid, cfg)
